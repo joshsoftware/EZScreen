@@ -1,4 +1,4 @@
-# AI-Powered Recruitment Screening Platform - System Design
+# AI-Powered Recruitment Screening Platform EZSCreen - System Design
 
 ## Table of Contents
 1. [Overview](#1-overview)
@@ -27,12 +27,12 @@ An AI-powered recruitment platform that automates the candidate screening proces
 - Parsing job descriptions and extracting key requirements
 - Processing candidate resumes and extracting qualifications
 - Automatically ranking candidates based on JD-resume matching
-- Facilitating interview scheduling for top candidates
+- Facilitating interview scheduling for candidates
 
 ### Key Stakeholders
-- **HR/Recruiters**: Publish jobs, review candidates, schedule interviews
-- **Admins**: System-wide access and management
-- **Candidates**: Browse jobs, apply, schedule interviews (optional account)
+- **HR Managers**: Publish jobs, review candidates, schedule interviews, view screening reports
+- **Admins**: Organization-wide access and management
+- **Candidates**: Browse jobs, apply as guests, participate in gMeet interviews (no account required)
 
 ### Core Value Proposition
 Eliminate manual screening overhead with AI-driven candidate ranking and matching.
@@ -52,7 +52,9 @@ flowchart TB
         Auth["Auth API"]
         Jobs["Jobs API"]
         Apps["Applications API"]
-        Int["Interviews API"]
+        Int["Interviews API (Google Calendar & gMeet)"]
+        Quest["Question Gen API"]
+        Screen["Attendee Webhook & Screening API"]
         Usr["Users / Companies API"]
   end
  subgraph BL["Backend Layer"]
@@ -60,24 +62,29 @@ flowchart TB
         API
         DB[("Relational<br>Database<br>(primary data)")]
         Queue["Message Broker<br>/ Task Queue<br>(async jobs)"]
-        Workers["Background Workers<br>· JD parsing &amp; extraction<br>· Resume parsing &amp; matching<br>· Email notifications"]
+        Workers["Background Workers<br>· JD parsing &amp; extraction<br>· Resume parsing &amp; Param.ai matching<br>· Question generation (gap-based)<br>· Attendee transcript screening analysis<br>· Email notifications"]
   end
  subgraph External["External Services"]
         AI["AI / LLM<br>Service<br>Provider"]
         S3[("Object<br>Storage<br>(files)")]
         Email["Email /<br>Notify<br>Service"]
+        GCal["Google Calendar /<br>gMeet API"]
+        Attendee["Attendee.dev<br>Bot Service"]
   end
     SPA -- HTTPS / REST API --> AG
     AG --> API
-    API --> DB & Queue
+    API --> DB & Queue & GCal
     Queue --> Workers
     Workers --> AI & S3 & Email & DB
+    Attendee -- Transcript & Audio Webhooks --> Screen
 
      SPA:::frontend
      Auth:::apiNode
      Jobs:::apiNode
      Apps:::apiNode
      Int:::apiNode
+     Quest:::apiNode
+     Screen:::apiNode
      Usr:::apiNode
      AG:::apiNode
      DB:::storage
@@ -86,6 +93,8 @@ flowchart TB
      AI:::ai
      S3:::storage
      Email:::email
+     GCal:::apiNode
+     Attendee:::apiNode
     classDef frontend fill:#bbdefb,stroke:#1976d2,stroke-width:2px,color:#000
     classDef apiNode fill:#ffe0b2,stroke:#f57c00,stroke-width:2px,color:#000
     classDef storage fill:#c8e6c9,stroke:#388e3c,stroke-width:2px,color:#000
@@ -149,11 +158,11 @@ AI processing runs as a module within the backend codebase. All AI tasks are exe
 
 | Component | Selection | Alternative Options Considered | Rationale |
 |-----------|-----------|--------------------------------|-----------|
-| LLM Provider | OpenAI (GPT-4o) | Anthropic Claude, Google Gemini, Mistral | Primary provider for the strongest structured JSON output |
+| LLM Provider | gemma4:31b | Anthropic Claude, Google Gemini, Mistral | Primary provider for the strongest structured JSON output |
 | Local LLM | Ollama | - | Option for local development to avoid API costs |
-| Document Parsing | pdfplumber / python-docx | PyMuPDF, PyPDF2 | Python-native text extraction |
+| Document Parsing | docling | PyMuPDF, PyPDF2 | Python-native text extraction |
 | Orchestration | Custom prompt pipeline / LangChain | LlamaIndex | Simple is better for MVP |
-| Audio (Phase 2) | OpenAI Whisper, NeMo MSDD | Google STT, AWS Transcribe, pyannote | Documented for future phase |
+| Audio (Phase 2) | Whisper, Kokoro | Google STT, AWS Transcribe, pyannote | Documented for future phase |
 
 ---
 
@@ -330,9 +339,8 @@ Tokens are stateless JWTs signed with a secret key. Two token types are used:
 |------|-------|----------------|
 | `super_admin` | All companies | Full system access - manage companies, users, roles, system config |
 | `company_admin` | Own company | Manage users within company, view all company data |
-| `hr_manager` | Own company | Create/publish/close jobs, view all applicants, schedule interviews |
-| `recruiter` | Own company | Create/publish jobs, view applicants for own jobs, schedule interviews |
-| `candidate` | Own data | Browse published jobs, submit applications, view own application status |
+| `hr_manager` | Own company | Create/publish/close jobs, view all applicants, schedule interviews, view screening reports |
+| `candidate` | N/A (Guest) | Browse published jobs, submit applications via public links |
 
 Guest (unauthenticated) access is permitted only on:
 - `GET /api/v1/public/jobs` - browse published jobs

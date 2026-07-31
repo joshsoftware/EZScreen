@@ -87,7 +87,7 @@ Attendee.dev requires **publicly accessible HTTPS and WSS URLs** to send webhook
 ```json
 {
   "meeting_url": "https://meet.google.com/abc-defg-hij",
-  "bot_name": "AI Recruiter Bot",
+  "bot_name": "EZScreen Screening Assistant",
   "join_at": "2026-07-29T14:30:00Z",
   "transcription_settings": {
     "meeting_closed_captions": {}

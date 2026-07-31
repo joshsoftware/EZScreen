@@ -29,9 +29,9 @@
 
 ## 1. MVP Objective
 
-Deliver an AI-powered candidate screening system where HR can publish job descriptions, candidates can apply with resumes, and the AI automatically extracts, scores, and ranks candidates - enabling HR to review a ranked list and schedule interviews for top candidates.
+Deliver an AI-powered candidate screening and interview automation system (EZScreen) where HR can publish job descriptions, candidates apply with resumes, and the AI extracts, scores, and ranks candidates using a **Core Matching Engine**. The system provides a comprehensive **Visibility Layer** (Dashboards & per-skill match breakdown), automates **Interview Scheduling** via Google Calendar & gMeet APIs, auto-generates candidate-specific **Interview Questions** based on resume-JD gaps, and automates screening via an **Attendee Bot** on gMeet calls to capture transcripts and output screening analysis reports (`proceed` / `reject` / `next_round`).
 
-**Core value**: Replace manual resume screening with AI-driven candidate ranking.
+**Core value**: Replace manual screening overhead with AI-driven candidate ranking, automated gMeet scheduling, and AI transcript screening.
 
 ---
 
@@ -41,11 +41,11 @@ The MVP is complete when:
 
 1. HR can create a JD (with document upload), review AI-extracted data, edit if needed, and publish
 2. Candidates can browse published jobs and apply (guest, no account required) with a resume
-3. AI extracts structured data from JDs and resumes, scores candidates 0-10, and ranks them
-4. HR can view ranked applicants sorted by AI matching score with score breakdown
-5. HR can shortlist or reject candidates and schedule interviews (direct invite)
-6. Candidates can create an account to track application status
-7. Confirmation email is sent on application submission
+3. AI extracts structured data from JDs and resumes, scores candidates 0-10, and generates explicit **Fit / No-Fit / Moderate Fit** recommendations with strengths & gaps
+4. HR can view Visibility Dashboards (JD Management, Resume Management, Resume Scoring) with per-skill/criteria match breakdowns and sortable candidate lists
+5. HR can shortlist candidates and schedule interviews via Google Calendar / gMeet API integration (generating meet links, sending invites, tracking candidate confirmation)
+6. System auto-generates interview questions tailored to JD + resume gaps (technical, role & experience specific)
+7. Attendee bot automatically joins the scheduled gMeet call, captures audio/transcript, and generates a screening report with competency signals, communication quality, technical depth, and a `proceed` / `reject` / `next_round` recommendation
 8. All file downloads use signed URLs (no public file access)
 
 ---
@@ -66,50 +66,50 @@ The MVP is complete when:
 | 8 | JD creation - title only (manual mode) | JD Pipeline |
 | 9 | Public job browsing (no auth) | Application |
 | 10 | Guest application with pre-signed resume upload | Application |
-| 11 | Ghost user creation | Application |
-| 12 | Candidate account creation & status tracking | Application |
-| 13 | Application confirmation email | Application |
-| 14 | AI resume extraction (background) | AI Scoring |
-| 15 | AI matching & scoring (background) | AI Scoring |
+| 11 | Unauthenticated application submission (no candidate account required) | Application |
+| 12 | Candidate confirmation email | Application |
+| 13 | AI resume extraction (background) | AI Scoring |
+| 14 | AI matching & scoring benchmarked against Param.ai logic (background) | Core Matching |
+| 15 | Recommendation output (fit/no-fit/moderate, gaps, strengths) | Core Matching |
 | 16 | Status update to screened | AI Scoring |
-| 17 | HR ranked applicant list (sort/filter/paginate) | HR Review |
-| 18 | HR applicant detail view with score breakdown | HR Review |
-| 19 | Status actions (shortlist, reject) | HR Review |
-| 20 | Interview scheduling - direct invite (Option A) | Scheduling |
-| 21 | File validation (MIME, magic bytes, size) | Security |
-| 22 | Malware scanning | Security |
-| 23 | Duplicate application prevention | Security |
-| 24 | Idempotency-Key support | Reliability |
-| 25 | RBAC (company-scoped data isolation) | Security |
-| 26 | Frontend polling for processing status | UX |
-| 27 | Token refresh | Auth |
-| 28 | Password reset (forgot/reset) | Auth |
-| 29 | Signed URLs for file downloads (15-min TTL) | Security |
-| 30 | Minimal status change logging (audit) | Compliance |
+| 17 | Visibility Dashboards (JD Mgmt, Resume Mgmt, Resume Scoring, summary) | Visibility Layer |
+| 18 | HR ranked applicant list (sort/filter/paginate by score) | Visibility Layer |
+| 19 | HR applicant detail view with per-skill & per-criteria score breakdown | Visibility Layer |
+| 20 | Status actions (shortlist, reject) | HR Review |
+| 21 | Google Calendar & gMeet API integration (event creation, meet link gen, invites) | Scheduling |
+| 22 | Scheduling logic (candidate availability, confirmation tracking via email link) | Scheduling |
+| 23 | Gap-based question auto-generation (technical, role & experience specific) | Question Gen |
+| 24 | Attendee bot gMeet integration (join call, capture transcript/audio) | Screening Auto |
+| 25 | Screening transcript analysis (competency signals, communication, technical depth) | Screening Auto |
+| 26 | Auto-generated screening report & recommendation (proceed/reject/next_round) | Screening Auto |
+| 27 | File validation (MIME, magic bytes, size) | Security |
+| 28 | Malware scanning | Security |
+| 29 | Duplicate application prevention | Security |
+| 30 | Idempotency-Key support | Reliability |
+| 31 | RBAC (company-scoped data isolation) | Security |
+| 32 | Frontend polling for processing status | UX |
+| 33 | Token refresh | Auth |
+| 34 | Password reset (forgot/reset) | Auth |
+| 35 | Signed URLs for file downloads (15-min TTL) | Security |
+| 36 | Minimal status change logging (audit) | Compliance |
 
 ---
 
-## 4. Non-Goals
+## 4. Non-Goals & Excluded Features
 
-The following are explicitly excluded from MVP:
+The following are explicitly excluded from MVP / designated for **Next in Line**:
 
-| Capability | Reason | When |
-|-----------|--------|------|
-| Interview self-scheduling (Option B) | Adds complexity (token pages, deadlines) | Post-MVP |
-| Bulk status actions | Convenience feature - single actions suffice | Future Scope |
-| URL-based JD import (`link` source_type) | Adds URL fetching complexity | Future Scope |
-| Email template customisation | MVP uses hardcoded/seeded templates | Post-MVP |
-| Reminder emails (24h, 1h before interview) | Requires scheduling infrastructure | Future Scope |
-| Calendar invite (.ics) attachments | Implementation detail for interview emails | Future Scope |
-| Scheduling deadline notifications | Requires background scheduling | Future Scope |
-| JD/application reprocessing | Recovery mechanism - HR can edit manually | Post-MVP |
-| Job analytics endpoint | No requirement | Future Scope |
-| User & company management UI | For MVP, seed initial data | Post-MVP |
-| OAuth SSO | Not in requirements | Future Scope |
-| WebSocket real-time updates | Polling is sufficient | Future Scope |
-| Auto-scaling, monitoring | Operational - not MVP | Future Scope |
-
-| Advanced notification types | Not in MVP scope | Future Scope |
+| Capability | Category | Reason / When |
+|-----------|----------|---------------|
+| Candidate account creation, registration, & login portal | Excluded | Candidates apply as guests via public links; all candidate communication happens via email |
+| Candidate self-service application status tracking dashboard | Excluded | Out of scope - platform is designed for internal HR workflow |
+| Param ATS Platform Integration (Push/Pull mechanism for JDs/Resumes) | Next in Line | Expansion scope after Core MVP validation |
+| Multi-platform meeting bot support (MS Teams, Zoom) | Next in Line | Google Meet is the core target for MVP; Teams/Zoom deferred |
+| Bulk status actions | Future Scope | Single actions suffice for MVP |
+| URL-based JD import (`link` source_type) | Future Scope | Document upload sufficient |
+| Email template customisation | Post-MVP | MVP uses hardcoded/seeded templates |
+| User & company management UI | Post-MVP | Seed script for MVP setup |
+| OAuth SSO | Future Scope | JWT auth sufficient for MVP |
 
 ---
 
@@ -119,9 +119,8 @@ The following are explicitly excluded from MVP:
 |------|------------|------------|
 | `super_admin` | Database seed | Full system access across all companies |
 | `company_admin` | Database seed | Manage users within company, all company data |
-| `hr_manager` | Registration + role assignment | Create/publish/close jobs, view all applicants, schedule interviews |
-| `recruiter` | Registration + role assignment | Create/publish jobs, view own job applicants, schedule interviews |
-| `candidate` | Registration or ghost user upgrade | Browse jobs, apply, view own application status |
+| `hr_manager` | Registration + role assignment | Create/publish/close jobs, view all applicants, schedule interviews, view screening reports |
+| `candidate` | N/A (Guest) | Applies to jobs via public link, receives gMeet invites & confirmation emails (no account required) |
 
 **MVP Seeding**: The first company, admin user, and default roles are created via a seed script. Full user/company management UI is post-MVP.
 
@@ -138,30 +137,31 @@ The following are explicitly excluded from MVP:
 5. Frontend polls for completion → shows extracted data when ready
 6. HR reviews extracted fields, edits if needed
 7. HR clicks "Publish" → system validates title + required_skills exist
-8. JD status changes to `published` → appears on public job board
+8. JD status changes to `published` → appears on public job list
 
-### Journey 2: Candidate Applies (Guest)
+### Journey 2: Candidate Applies (Guest Application)
 
-1. Candidate browses published jobs (no login required)
-2. Selects a job → views details
-3. Enters name, email, phone → requests upload URL → uploads resume PDF directly to S3
-4. Submits form with `resume_key` → System creates ghost user + application record (status: `applied`)
-5. Confirmation email sent to candidate (with opt-in link to create account)
-6. Background: AI worker extracts resume data → matches against JD → scores candidate
-7. Application status updated to `screened`
+1. Candidate views published job (no login required)
+2. Enters name, email, phone → requests upload URL → uploads resume PDF directly to S3
+3. Submits application form with `resume_key` → System creates application record (status: `applied`)
+4. Application confirmation email sent to candidate
+5. Background: AI worker parses resume data → matches against JD using Param.ai benchmarked rules → scores candidate
+6. Application status updated to `screened` (visible on HR Visibility Dashboard)
 
-### Journey 3: Candidate Creates Account
+### Journey 3: HR Reviews Candidates & Schedules Interview
 
-1. Candidate clicks opt-in link from confirmation email (or registers directly)
-2. Creates account with email and password
-3. Ghost user upgraded to registered user - existing application(s) linked
-4. Candidate can view application status from dashboard
+1. HR opens Resume Scoring Dashboard for a JD
+2. Sees ranked list sorted by AI matching score with per-skill breakdown & recommendation summary
+3. HR shortlists a candidate → clicks "Schedule Interview"
+4. System calls Google Calendar API → creates event, generates gMeet link, and sends email invite to candidate
+5. System auto-generates interview questions based on candidate-JD gaps
 
-### Journey 4: HR Reviews Candidates
+### Journey 4: Attendee Bot Screening Automation
 
-1. HR opens applicant list for a JD
-2. Sees ranked list sorted by AI matching score (default: descending)
-3. Can sort by score, date, name, experience
+1. Scheduled interview time arrives → System dispatches Attendee bot to gMeet call
+2. Bot joins call, records audio, and streams dual-channel transcript
+3. Post-call: AI evaluates transcript (competency signals, communication, technical depth)
+4. System outputs Screening Analysis Report with `proceed` / `reject` / `next_round` recommendation for HR review
 4. Can filter by status, score range, experience range
 5. Clicks a candidate → sees full detail with score breakdown
 6. Reviews matched skills (green), missing skills (red), experience timeline
@@ -285,7 +285,6 @@ The following are explicitly excluded from MVP:
 - Rate limiting on public endpoints
 - CORS configuration
 - Input validation refinement
-- Malware scanning integration
 - End-to-end testing
 - Deployment configuration
 
@@ -350,11 +349,9 @@ The following are explicitly excluded from MVP:
 | AI extraction fails (LLM timeout/error) | Retry 3× with exponential backoff. On final failure: status → `extraction_failed`, HR notified in-app, retry button shown |
 | File too large (>10MB) | Rejected directly by S3 via pre-signed URL constraints |
 | Invalid file type | Handled by worker: fails task, status → `extraction_failed` |
-| Malware detected | Handled by worker: fails task, status → `extraction_failed`, file deleted |
 | Duplicate application (same email + same JD) | Reject with 409, clear error message |
 | Network retry (duplicate submission) | `Idempotency-Key` header returns original response |
 | LLM returns invalid JSON | Retry (treated as task failure). After max retries, DLQ + status = failed |
-| Ghost user email matches existing user | Application linked to existing user automatically |
 | Publishing without required_skills | Reject with 422, explain what is missing |
 | Unauthorized access to another company's data | 403 (RBAC enforces company-scoped queries) |
 
