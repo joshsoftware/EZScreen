@@ -45,57 +45,58 @@ Eliminate manual screening overhead with AI-driven candidate resume matching and
 
 ```mermaid
 flowchart TB
- subgraph FL["Frontend Layer"]
-        SPA["Single Page Application (SPA)<br>Serves HR, Candidate, and Admin interfaces"]
-  end
- subgraph API["Backend API Server"]
-        Auth["Auth API"]
-        Jobs["Jobs API"]
-        Apps["Applications API"]
-        Int["Interviews API"]
-        Usr["Users / Companies API"]
-  end
- subgraph BL["Backend Layer"]
-        AG["API Gateway / Load Balancer<br>TLS termination · Rate limiting · Routing"]
-        API
-        DB[("Relational<br>Database<br>(primary data)")]
-        Queue["Message Broker<br>/ Task Queue<br>(async jobs)"]
-        Workers["Background Workers<br>· JD parsing &amp; extraction<br>· Resume parsing &amp; matching<br>· Email notifications"]
-  end
- subgraph External["External Services"]
-        AI["AI / LLM<br>Service<br>Provider"]
-        S3[("Object<br>Storage<br>(files)")]
-        Email["Email /<br>Notify<br>Service"]
-  end
-    SPA -- HTTPS / REST API --> AG
-    AG --> API
-    API --> DB & Queue
-    Queue --> Workers
-    Workers --> AI & S3 & Email & DB
+    subgraph FE["Frontend Presentation Layer"]
+        UI["React Single Page Application (SPA)<br>Super Admin, Org Admin, Org HR & Candidate Portals"]
+    end
 
-     SPA:::frontend
-     Auth:::apiNode
-     Jobs:::apiNode
-     Apps:::apiNode
-     Int:::apiNode
-     Usr:::apiNode
-     AG:::apiNode
-     DB:::storage
-     Queue:::async
-     Workers:::async
-     AI:::ai
-     S3:::storage
-     Email:::email
-    classDef frontend fill:#bbdefb,stroke:#1976d2,stroke-width:2px,color:#000
-    classDef apiNode fill:#ffe0b2,stroke:#f57c00,stroke-width:2px,color:#000
-    classDef storage fill:#c8e6c9,stroke:#388e3c,stroke-width:2px,color:#000
-    classDef async fill:#b2dfdb,stroke:#00796b,stroke-width:2px,color:#000
-    classDef ai fill:#d1c4e9,stroke:#512da8,stroke-width:2px,color:#000
-    classDef email fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,color:#000
-    style API fill:#fce4ec,stroke:#f48fb1,stroke-width:2px,color:#000
-    style FL fill:#e3f2fd,stroke:#90caf9,stroke-width:2px,color:#000
-    style BL fill:transparent,stroke:#ce93d8,stroke-width:2px,color:#000
-    style External fill:transparent,stroke:#aed581,stroke-width:2px,color:#000
+    subgraph GW["API Gateway"]
+        Gateway["Nginx API Gateway<br>Subdomain Resolution (org.ezscreen.io) & JWT Auth"]
+    end
+
+    subgraph BACKEND["Core Backend Application"]
+        FastAPI["FastAPI Core Backend<br>User Management, Orgs, JDs & Interview Sessions"]
+    end
+
+    subgraph AI["Modular AI Screening Service"]
+        AIService["AI Screening Microservice<br>STT - LLM (gemma4:31b) - TTS Pipeline"]
+    end
+
+    subgraph DATA["Shared Data & Storage (MVP)"]
+        DB[("PostgreSQL Database")]
+        S3[("S3 Object Storage")]
+    end
+
+    subgraph EXT["External Integrations"]
+        GCal["Google Calendar API (gMeet)"]
+        Attendee["Attendee.dev API (gMeet Bot)"]
+    end
+
+    UI --> Gateway
+    Gateway --> FastAPI
+    FastAPI <--> AIService
+
+    FastAPI <--> DB
+    FastAPI <--> S3
+
+    AIService <--> DB
+    AIService <--> S3
+
+    FastAPI --> GCal
+    AIService <--> Attendee
+
+    classDef fe fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#000
+    classDef gw fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#000
+    classDef backend fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+    classDef ai fill:#ede7f6,stroke:#311b92,stroke-width:2px,color:#000
+    classDef data fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,color:#000
+    classDef ext fill:#fffde7,stroke:#f57f17,stroke-width:2px,color:#000
+
+    class UI fe
+    class Gateway gw
+    class FastAPI backend
+    class AIService ai
+    class DB,S3 data
+    class GCal,Attendee ext
 ```
 
 ### Architecture Patterns
@@ -149,11 +150,11 @@ AI processing runs as a module within the backend codebase. All AI tasks are exe
 
 | Component | Selection | Alternative Options Considered | Rationale |
 |-----------|-----------|--------------------------------|-----------|
-| LLM Provider | OpenAI (GPT-4o) | Anthropic Claude, Google Gemini, Mistral | Primary provider for the strongest structured JSON output |
-| Local LLM | Ollama | - | Option for local development to avoid API costs |
+| LLM Provider / Model | **`gemma4:31b`** (via Ollama / Hosted API) | OpenAI GPT-4o, Anthropic Claude | Selected open-weight 31B parameter model providing high-quality structured JSON output |
+| Local LLM Runner | Ollama (with `gemma4:31b`) | vLLM, LocalAI | Local runner option for development & self-hosted deployments |
 | Document Parsing | docling | PyMuPDF, MarkItDown | Python-native text extraction |
-| Orchestration | Custom prompt pipeline / Piepcat | LIvekit | Simple is better for MVP |
-| Audio (Phase 2) | fast whisper, Kokoro82M| Google STT, AWS Transcribe, pyannote | Documented for future phase |
+| Orchestration | Custom prompt pipeline / Piepcat | Livekit | Simple is better for MVP |
+| Meeting Bot | Attendee.dev API | Recall.ai, Custom Bot | Headless gMeet meeting bot for recording dual-channel audio & transcript |
 
 ---
 
