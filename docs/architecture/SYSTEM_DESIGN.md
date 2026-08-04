@@ -26,7 +26,7 @@
 An AI-powered recruitment platform that automates the candidate screening process by:
 - Parsing job descriptions and extracting key requirements
 - Processing candidate resumes and extracting qualifications
-- Automatically ranking candidates based on JD-resume matching
+- Automatically filtering candidates based on JD-resume matching
 - Facilitating interview scheduling for shortlisted candidates
 
 ### Key Stakeholders
@@ -101,15 +101,62 @@ flowchart TB
 
 ### Architecture Patterns
 
-| Pattern | Applied to |
-|---------|-----------|
-| **Modular monolith** | Backend - single codebase with clear module boundaries; extract services when needed |
-| **Event-driven async** | All AI processing via background workers |
-| **RESTful API** | All client-server communication |
-| **Denormalised read columns** | `matching_score` and `years_of_experience` on applications table for fast sorting without JSONB parsing |
-| **Repository pattern** | Data access layer - decouples business logic from DB |
-| **Status-machine driven** | JD lifecycle and application lifecycle |
+| Pattern | Applied to | Rationale |
+| :--- | :--- | :--- |
+| **Modular Monolith** | Whole System | Code is structured into decoupled modules inside a Monorepo. Enables fast MVP deployment with a shared database while preserving clear boundaries for independent microservice extraction. |
+| **Domain Isolation** | Core API, Parsing, Screening | `core-api`, `parsing-matching`, and `ai-screening` operate as isolated domain packages with strict contract boundaries. |
+| **Shared Storage MVP** | PostgreSQL & S3 | Shared database across modules for single-transaction ACID consistency and high-speed relational JOINs. |
 
+---
+
+### Modular Monolith & Monorepo Structure
+
+The platform is designed as a **Modular Monolith inside a Monorepo**. This guarantees clean separation of concerns without the operational complexity of distributed microservices for MVP.
+
+```text
+EZScreen/
+├── apps/
+│   ├── core-api/                  # Primary FastAPI REST Application
+│   │   ├── src/api/               # Auth, Orgs, Jobs, Applications, Sessions
+│   │   └── main.py
+│   └── web-frontend/              # React SPA (Vite + TailwindCSS)
+│
+├── services/
+│   ├── parsing-matching/          # Standalone Parsing & Matching Module
+│   │   ├── src/
+│   │   │   ├── jd_parser.py       # Direct JD Document & Text Parser
+│   │   │   ├── resume_parser.py   # Candidate Resume Parser
+│   │   │   └── param_matcher.py   # Param.ai Matching & Scoring Engine
+│   │   └── pyproject.toml
+│   │
+│   └── ai-screening/              # Standalone AI Screening & Audio Module
+│       ├── src/
+│       │   ├── question_gen.py    # Auto Session Question Generator
+│       │   ├── stt_engine.py      # Speech-to-Text Pipeline
+│       │   ├── tts_engine.py      # Text-to-Speech Pipeline
+│       │   ├── llm_evaluator.py   # gemma4:31b Transcript Evaluator
+│       │   └── bot_coordinator.py # Attendee.dev Bot Meeting Manager
+│       └── pyproject.toml
+│
+├── packages/
+│   ├── database/                  # Shared SQLAlchemy ORM Models & Migrations
+│   └── schemas/                   # Shared Pydantic DTOs & Domain Schemas
+│
+└── docs/                          # System Specifications & Architecture Docs
+```
+
+#### Service Module Responsibilities
+
+1. **Core Backend Application (`apps/core-api`)**:
+   * System gatekeeper handling Authentication, Multi-tenant Organization Scoping (`organization_id`), User Provisioning, Public Job Board API, Interview Scheduling, and Webhook routing.
+
+2. **Parsing & Matching Engine (`services/parsing-matching`)**:
+   * Pure document parsing and matching engine. Extracts structured `parsed_jd` requirements, parses candidate resumes (`parsed_resume`), and computes Param.ai candidate-JD matching scores (`matching_result`).
+   * *Standalone Capability*: Can be packaged and deployed independently as a "Resume & JD Parsing API".
+
+3. **AI Screening Microservice (`services/ai-screening`)**:
+   * Handles static interview question generation (`generated_questions`), STT-LLM (`gemma4:31b`)-TTS conversation pipeline, Attendee bot coordination, and transcript Q&A evaluation (`interview_analysis`).
+   * *Standalone Capability*: Can be deployed independently on GPU infrastructure for AI video/voice interview execution.
 ---
 
 ## 3. Technology Stack
@@ -120,12 +167,12 @@ The following technologies have been selected for the platform to balance rapid 
 
 ### Frontend
 
-| Component | Selection | Alternative Options Considered | Rationale |
-|-----------|-----------|--------------------------------|-----------|
-| Framework | React (JavaScript) | Vue, Angular, Svelte | Team familiarity, rich ecosystem, SPA model fits this product |
-| UI Library | Modern React Library + TailwindCSS | Material UI, Ant Design, Chakra UI, shadcn/ui | Rapid styling and responsive design |
-| File Upload | Pre-signed S3 URLs via frontend | - | Bypasses backend server to save bandwidth |
-| Other Tooling | Vite, Axios, React Router, Vitest | Next.js, Redux, Playwright, Cypress | Standard React ecosystem defaults |
+| Component | Selection | Rationale |
+| :--- | :--- | :--- |
+| Framework | React (JavaScript) | Team familiarity, rich ecosystem, SPA model fits this product |
+| UI Library | Modern React Library + TailwindCSS | Rapid styling and responsive design |
+| File Upload | Pre-signed S3 URLs via frontend | Bypasses backend server to save bandwidth |
+| Other Tooling | Vite, Axios, React Router, Vitest | Standard React ecosystem defaults |
 
 ---
 
@@ -133,14 +180,14 @@ The following technologies have been selected for the platform to balance rapid 
 
 The backend handles REST APIs, authentication, job orchestration, async task dispatch, and AI processing logic. Python is chosen because the AI/ML ecosystem is strongest in Python.
 
-| Component | Selection | Alternative Options Considered | Rationale |
-|-----------|-----------|--------------------------------|-----------|
-| Framework | FastAPI (Python) | Django REST Framework, Flask, Litestar | Async-native, auto-generated OpenAPI, strong LLM SDK support |
-| Schema Validation | Pydantic | Marshmallow, cerberus | Aligns perfectly with FastAPI and JSONB schemas |
-| API Documentation | Auto-generated via FastAPI | drf-spectacular, Swagger | Zero-maintenance Swagger UI |
-| Email Service | SendGrid or Resend | Twilio, SNS | Simple API, generous free tier for MVP volumes |
-| Data Access | SQLAlchemy (TBD) | Django ORM, Tortoise ORM, Peewee | Standard for FastAPI |
-| Auth & Crypto | python-jose, passlib (bcrypt) | authlib, argon2-cffi | Proven security |
+| Component | Selection | Rationale |
+| :--- | :--- | :--- |
+| Framework | FastAPI (Python) | Async-native, auto-generated OpenAPI, strong LLM SDK support |
+| Schema Validation | Pydantic | Aligns perfectly with FastAPI and JSONB schemas |
+| API Documentation | Auto-generated via FastAPI | Zero-maintenance Swagger UI |
+| Email Service | SendGrid or Resend | Simple API, generous free tier for MVP volumes |
+| Data Access | SQLAlchemy | Standard for FastAPI |
+| Auth & Crypto | python-jose, passlib (bcrypt) | Proven security |
 
 ---
 
@@ -148,36 +195,26 @@ The backend handles REST APIs, authentication, job orchestration, async task dis
 
 AI processing runs as a module within the backend codebase. All AI tasks are executed by background workers to ensure long-running LLM calls never block API responses.
 
-| Component | Selection | Alternative Options Considered | Rationale |
-|-----------|-----------|--------------------------------|-----------|
-| LLM Provider / Model | **`gemma4:31b`** (via Ollama / Hosted API) | OpenAI GPT-4o, Anthropic Claude | Selected open-weight 31B parameter model providing high-quality structured JSON output |
-| Local LLM Runner | Ollama (with `gemma4:31b`) | vLLM, LocalAI | Local runner option for development & self-hosted deployments |
-| Document Parsing | docling | PyMuPDF, MarkItDown | Python-native text extraction |
-| Orchestration | Custom prompt pipeline / Piepcat | Livekit | Simple is better for MVP |
-| Meeting Bot | Attendee.dev API | Recall.ai, Custom Bot | Headless gMeet meeting bot for recording dual-channel audio & transcript |
+| Component | Selection | Rationale |
+| :--- | :--- | :--- |
+| LLM Provider / Model | **`gemma4:31b`** (via Ollama / Hosted API) | Selected open-weight 31B parameter model providing high-quality structured JSON output |
+| Local LLM Runner | Ollama (with `gemma4:31b`) | Local runner option for development & self-hosted deployments |
+| Document Parsing | docling | Python-native text extraction |
+| Orchestration | Custom prompt pipeline / Piepcat | Simple is better for MVP |
+| Meeting Bot | Attendee.dev API | Headless gMeet meeting bot for recording dual-channel audio & transcript |
 
 ---
 
 ### Data Layer
 
-| Component | Selection | Alternative Options Considered | Rationale |
-|-----------|-----------|--------------------------------|-----------|
-| Primary Database | PostgreSQL | MySQL, CockroachDB | JSONB support required for AI-extracted data, proven reliability |
-| Object Storage | S3-compatible | Google Cloud Storage, Azure Blob Storage | S3 API is the standard. MinIO simplifies Docker-based local dev |
+| Component | Selection | Rationale |
+| :--- | :--- | :--- |
+| Primary Database | PostgreSQL | JSONB support required for AI-extracted data, proven reliability |
+| Object Storage | S3-compatible | S3 API is the standard. MinIO simplifies Docker-based local dev |
 
 > **Storage note**: Object storage is the single source of truth for all uploaded files (JDs and resumes). A local MinIO container is used during development. In production, a managed S3-compatible service is used directly.
 
 ---
-
-### Infrastructure
-
-| Component | Selection | Alternative Options Considered | Rationale |
-|-----------|-----------|--------------------------------|-----------|
-| Containerisation | Docker | - | Mandatory per architecture - same images across all environments |
-| Repository | Monorepo | - | Simplifies coordination during early development |
-| Orchestration | AWS ECS / Cloud Run (TBD) | Kubernetes, Docker Swarm | To be decided at deployment |
-| API Gateway | Nginx / Caddy | Traefik, Kong, AWS API Gateway | Standard reverse proxy |
-| Cloud & Secrets | AWS / AWS Secrets Manager (TBD) | GCP, Azure, HashiCorp Vault | Depends on chosen cloud provider |
 
 ### Key Constraints That Drive Choices
 
@@ -192,54 +229,40 @@ The following requirements constrain the option space regardless of preference:
 
 ## 4. Database Design
 
-> **Full Reference**: Entity definitions, column details, ER diagram, JSONB schemas, indexing strategy, data retention, and migration sequence are documented in [DB_DESIGN.md](DB_DESIGN.md).
+> **Full Reference**: Entity definitions, column details, ER diagram, JSONB schemas, indexing strategy, and data lifecycle are documented in [DB_DESIGN.md](DB_DESIGN.md).
 
 ### Entity Summary
 
 | Entity | Purpose | Phase |
-|--------|---------|-------|
-| `companies` | Multi-tenant company records | MVP |
-| `roles` | RBAC role definitions with `permissions` JSONB | MVP |
-| `users` | All user accounts - registered and ghost (candidates without accounts) | MVP |
-| `user_roles` | Many-to-many user-role assignments | MVP |
-| `job_descriptions` | JD records with `extracted_data` JSONB for AI-extracted requirements | MVP |
-| `applications` | Candidate applications with `parsed_data`, `matching_result` JSONB, denormalised `matching_score` and `years_of_experience` | MVP |
-| `interview_schedules` | Interview scheduling with direct invite and self-scheduling support | MVP |
-| `email_templates` | Company-configurable email templates with `{{variable}}` placeholders | MVP (seeded) |
-| `audit_logs` | Comprehensive audit trail (minimal status logging in MVP, full schema in Future) | Future |
-
+| --- | --- | --- |
+| `organizations` | Multi-tenant organization records (`name`, `domain`, `logo_url`) | MVP |
+| `users` | All user accounts (`super_admin`, `organization_admin`, `hr`, `candidate`) | MVP |
+| `job_descriptions` | JD records with `parsed_jd` JSONB for AI-extracted requirements | MVP |
+| `applications` | Candidate applications with `parsed_resume` & `matching_result` JSONB | MVP |
+| `interview_session` | Session-based AI interview scheduling & static question sets (`generated_questions`) | MVP |
+| `interview_analysis` | AI screening report, Q&A transcript analysis (`question_answer`), and call recording URL | MVP |
 
 ### Key Design Decisions
 
-1. **JSONB for Flexible Schemas**: Both `extracted_data` and `matching_result` use PostgreSQL's JSONB type
-   - Allows schema evolution without migrations
+1. **JSONB for Flexible AI Data**: `parsed_jd`, `parsed_resume`, `matching_result`, `generated_questions`, `analysis_result`, and `question_answer` use PostgreSQL's JSONB type
+   - Allows AI extraction schema evolution without complex SQL migrations
    - Enables efficient querying with GIN indexes
-   - Perfect for AI-extracted unstructured data
+   - Perfect for storing rich AI feedback, score breakdowns, and dual-channel transcripts
 
-2. **Status-Driven Workflows**: State machines for job descriptions and applications
-   - Clear lifecycle tracking
-   - Enables conditional business logic
+2. **Status-Driven Workflows**: Enforces state machines via PostgreSQL ENUM types:
+   - `user_status`: `active`, `inactive`, `suspended`
+   - `user_role`: `super_admin`, `organization_admin`, `hr`, `candidate`
+   - `job_status`: `draft`, `published`, `closed`
+   - `application_status`: `applied`, `interview_scheduled`, `interview_completed`, `shortlist_for_l1`, `rejected`
+   - `interview_status`: `scheduled`, `rescheduled`, `completed`, `no_show`, `cancelled`, `failed`
 
-3. **Ghost User Support**: Candidates can apply without creating an account (FR-201)
-   - A "ghost" user record is created in the `users` table with `user_type = ghost`
-   - The application record points to this ghost user via `candidate_user_id` (not null)
-   - If the candidate's email matches an existing user, the application is linked automatically
-   - The ghost user does not have a password or company association
-   - GDPR-compliant: no full account is created without explicit consent, but data is normalized
-   - The application confirmation email includes an opt-in link allowing the ghost user to create a full account later
+3. **Multi-Tenancy & Role Isolation**:
+   - `organization_admin` and `hr` are bound strictly to one organization (`organization_id NOT NULL`).
+   - `super_admin` (global owner) and `candidate` operate across system scopes (`organization_id NULL`).
 
-4. **JD Creation Modes**: Three source types for job descriptions
-   - `document`: HR requests a pre-signed upload URL, uploads the PDF/DOCX to S3, and submits the form with the `document_key`. AI extraction runs automatically in the background.
-   - `manual`: HR creates the JD directly from the UI by filling in the form fields (title + description text) - no AI extraction needed. HR can populate `extracted_data` fields manually and publish when ready (AC-002)
-
-5. **Session Based Interview Scheduling**: Dedicated table for interview management
-   - Supports multiple interview rounds (will need for future scope)
-   - Flexible scheduling (HR-creates interview)
-
-6. **Configurable Email Templates**: Company-level `email_templates` table
-   - Supports rejection, invitation, confirmation, and reminder email types
-   - Templates use variable placeholders (e.g. `{{candidate_name}}`, `{{job_title}}`)
-   - Enables FR-304 (configurable rejection email) and FR-403 (notification customisation)
+4. **Session-Based Interviewing & Analysis Separation**:
+   - `interview_session` handles meeting metadata (gMeet URL, bot dispatch state, scheduled times, static questions).
+   - `interview_analysis` handles post-interview screening output (Q&A transcripts, skill scores, overall recommendation, audio/video recording URLs).
 
 ---
 
@@ -342,32 +365,28 @@ For user and company management endpoints, the same RBAC middleware determines s
 
 ---
 
-### Workflow 1: Job Description Publishing
+### Workflow 1: Job Description Parsing & Publishing
 
 ```mermaid
 sequenceDiagram
     actor HR as HR User
     participant F as Frontend (SPA)
-    participant B as Backend API
-    participant Q as Job Queue
-    participant W as Worker
+    participant B as Backend API (FastAPI)
+    participant AI as AI Parsing Engine (gemma4:31b)
 
-    HR->>F: Upload JD<br/>(PDF or manual)
-    F->>B: POST /jobs
-    Note over B: Save file to Object Storage (S3)<br>Create JD record<br>status = draft
-    B-->>F: Response
-    F-->>HR: 201 (instant)
+    HR->>F: Upload raw JD file (PDF/DOCX) or paste text
+    F->>B: POST /api/v1/jobs/parse
+    Note over B,AI: Direct text/document parsing & AI extraction
+    B->>AI: Extract title, skills, experience_min/max, parsed_jd JSON
+    AI-->>B: Extracted JSON payload
+    B-->>F: 200 OK (returns parsed fields directly to UI form)
     
-    B->>Q: Enqueue<br>parse-jd job
-    Q->>W: Dispatch
-    Note over W: Download file from S3<br>Extract via LLM:<br>skills (must/good)<br>qualifications<br>responsibilities<br>location, type<br><br>Write results to DB<br>status = draft (parsed)
-    
-    Note over HR,B: [HR reviews AI-extracted data, edits if needed, publishes]
-    HR->>F: PATCH status
-    F->>B: PATCH /jobs/:id/status
-    Note over B: Publishing gate check:<br>title + required_skills must exist<br>If valid: status = published<br>If missing: 422 validation error
-    B-->>F: Response
-    F-->>HR: Confirmed<br>[Job now visible on the public job board]
+    Note over HR,F: HR inspects & updates parsed fields directly in UI
+    HR->>F: Click "Save & Publish Job"
+    F->>B: POST /api/v1/jobs (with edited fields & status = published)
+    Note over B: Save Job Description record in DB
+    B-->>F: 201 Created
+    F-->>HR: Confirmed (Job now live on public subdomain portal)
 ```
 
 **JD status flow**:
@@ -375,27 +394,18 @@ sequenceDiagram
 stateDiagram
   direction TB
   classDef Aqua stroke-width:1px,stroke-dasharray:none,stroke:#46EDC8,fill:#DEFFF8,color:#378E7A;
-  classDef Rose stroke-width:1px,stroke-dasharray:none,stroke:#FF5978,fill:#FFDFE5,color:#8E2236;
   classDef Peach stroke-width:1px,stroke-dasharray:none,stroke:#FBB35A,fill:#FFEFDB,color:#8F632D;
   classDef Pine stroke-width:1px,stroke-dasharray:none,stroke:#254336,fill:#27654A,color:#FFFFFF;
   classDef Ash stroke-width:1px,stroke-dasharray:none,stroke:#999999,fill:#EEEEEE,color:#000000;
-  draft --> processing
-  processing --> extraction_failed:(HR notified, can retry)
-  processing --> draft_parsed
-  draft_parsed --> published
+  draft --> published
   published --> closed
-  published --> draft_parsed:(unpublish)
-  draft_parsed:draft (parsed)
-  class processing Aqua
-  class extraction_failed Rose
-  class draft,draft_parsed Peach
+  published --> draft:(unpublish)
+  class draft Peach
   class published Pine
   class closed Ash
 ```
 
-> **Note**: `published → draft` (unpublish) is a valid reverse transition. `extraction_failed` is a terminal failure state that allows HR to retry via `POST /jobs/:id/reprocess` or edit fields manually.
-
-> **Publishing Gate**: A JD can only transition to `published` if both `title` and `required_skills` (in `extracted_data`) are populated - either by AI extraction or manual entry. If either is missing, the API returns a 422 validation error explaining what is required (AC-003).
+> **Direct Parsing Workflow**: When HR uploads a JD file or pastes text, the backend parses the requirements immediately and returns the extracted fields directly to the frontend. HR can adjust any requirements directly in the UI before saving and publishing. No S3 storage is required for job descriptions.
 
 ### Workflow 2: Candidate Application & AI Resume Scoring
 
