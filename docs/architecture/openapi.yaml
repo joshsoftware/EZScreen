@@ -1,0 +1,327 @@
+openapi: 3.0.3
+info:
+  title: EZScreen REST & Inter-Service API Specification
+  description: Complete OpenAPI specification for EZScreen Core API Gateway and Internal Microservices (Parsing, STT, TTS, LLM Evaluation)
+  version: 1.0.0
+servers:
+  - url: https://api.ezscreen.io/api/v1
+    description: Production Core API Gateway
+  - url: http://localhost:8000/api/v1
+    description: Local Development Core API
+  - url: http://parsing-matching:8001/internal/v1
+    description: Internal Parsing & Matching Microservice
+  - url: http://ai-screening:8002/internal/v1
+    description: Internal AI Screening Microservice
+
+tags:
+  - name: Authentication
+    description: User authentication, JWT tokens, and account profile
+  - name: Organizations & User Provisioning
+    description: Multi-tenant organization management and unified user provisioning
+  - name: Job Descriptions
+    description: Direct JD parsing and job posting management
+  - name: Public Candidate Portal
+    description: Subdomain-scoped candidate job browsing and application submission
+  - name: Candidate Applications
+    description: Application visibility, candidate resumes, and scoring dashboards
+  - name: Interview Sessions & Analysis
+    description: Session scheduling, static question generation, and transcript screening reports
+  - name: Webhooks
+    description: Attendee.dev meeting bot webhook ingestion
+  - name: Internal Microservices
+    description: Private inter-service APIs between Core API, Parsing Engine, and AI Screening Service (Bot Dispatch, STT, TTS, Evaluation)
+
+paths:
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate user & receive JWT token
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Successful authentication
+
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Retrieve current authenticated user profile
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: User profile
+
+  /organizations:
+    post:
+      tags: [Organizations & User Provisioning]
+      summary: Super Admin creates a new organization
+      operationId: createOrganization
+      responses:
+        '201':
+          description: Organization created
+    get:
+      tags: [Organizations & User Provisioning]
+      summary: List all organizations (Super Admin only)
+      operationId: listOrganizations
+      responses:
+        '200':
+          description: List of organizations
+
+  /organizations/{id}:
+    get:
+      tags: [Organizations & User Provisioning]
+      summary: View organization details
+      operationId: getOrganization
+      responses:
+        '200':
+          description: Organization details
+    put:
+      tags: [Organizations & User Provisioning]
+      summary: Update organization details
+      operationId: updateOrganization
+      responses:
+        '200':
+          description: Organization updated
+
+  /organizations/{id}/users:
+    get:
+      tags: [Organizations & User Provisioning]
+      summary: List users belonging to an organization
+      operationId: listOrgUsers
+      responses:
+        '200':
+          description: List of organization users
+    post:
+      tags: [Organizations & User Provisioning]
+      summary: Unified endpoint to provision Organization Admin or HR users
+      operationId: provisionOrgUser
+      responses:
+        '201':
+          description: User provisioned successfully
+
+  /jobs/parse:
+    post:
+      tags: [Job Descriptions]
+      summary: Direct in-memory parsing of raw JD file or text
+      operationId: parseJobDescription
+      responses:
+        '200':
+          description: Parsed job description requirements
+
+  /jobs:
+    post:
+      tags: [Job Descriptions]
+      summary: Save & publish job description record
+      operationId: createJobDescription
+      responses:
+        '201':
+          description: Job description created and saved
+    get:
+      tags: [Job Descriptions]
+      summary: List job descriptions for organization
+      operationId: listJobs
+      responses:
+        '200':
+          description: List of job descriptions
+
+  /jobs/{id}:
+    get:
+      tags: [Job Descriptions]
+      summary: View job description details
+      operationId: getJob
+      responses:
+        '200':
+          description: Job description detail
+    put:
+      tags: [Job Descriptions]
+      summary: Unified endpoint to update job description fields, parsed_jd requirements, and/or status
+      operationId: updateJob
+      responses:
+        '200':
+          description: Job description updated
+
+  /public/jobs:
+    get:
+      tags: [Public Candidate Portal]
+      summary: Candidate browse published jobs for organization subdomain
+      operationId: listPublicJobs
+      responses:
+        '200':
+          description: Published jobs list
+
+  /public/jobs/{id}:
+    get:
+      tags: [Public Candidate Portal]
+      summary: Candidate view published job details
+      operationId: getPublicJob
+      responses:
+        '200':
+          description: Public job details
+
+  /public/jobs/{id}/apply:
+    post:
+      tags: [Public Candidate Portal]
+      summary: Candidate submit application with resume
+      operationId: applyJob
+      responses:
+        '201':
+          description: Application submitted and resume scored
+
+  /jobs/{id}/applicants:
+    get:
+      tags: [Candidate Applications]
+      summary: HR view candidate applicants for a job
+      operationId: listApplicants
+      responses:
+        '200':
+          description: Applicants list
+
+  /applications/{id}:
+    get:
+      tags: [Candidate Applications]
+      summary: View application details with parsed resume & match matrix
+      operationId: getApplication
+      responses:
+        '200':
+          description: Application details
+
+  /applications/{id}/status:
+    patch:
+      tags: [Candidate Applications]
+      summary: Update candidate application status
+      operationId: updateApplicationStatus
+      responses:
+        '200':
+          description: Application status updated
+
+  /interview-sessions:
+    post:
+      tags: [Interview Sessions & Analysis]
+      summary: Schedule interview session and generate static questions
+      operationId: scheduleInterviewSession
+      responses:
+        '201':
+          description: Interview session scheduled
+
+  /interview-sessions/{id}:
+    get:
+      tags: [Interview Sessions & Analysis]
+      summary: View interview session details
+      operationId: getInterviewSession
+      responses:
+        '200':
+          description: Session details
+
+  /interview-sessions/{id}/status:
+    patch:
+      tags: [Interview Sessions & Analysis]
+      summary: Update interview session status
+      operationId: updateInterviewSessionStatus
+      responses:
+        '200':
+          description: Session status updated
+
+  /interview-sessions/{id}/analysis:
+    get:
+      tags: [Interview Sessions & Analysis]
+      summary: View AI transcript screening report for interview session
+      operationId: getInterviewAnalysis
+      responses:
+        '200':
+          description: Screening analysis report
+
+  /webhooks/attendee:
+    post:
+      tags: [Webhooks]
+      summary: Attendee.dev meeting bot webhook ingestion
+      operationId: handleAttendeeWebhook
+      responses:
+        '200':
+          description: Webhook ingested successfully
+
+  # ---------------------------------------------------------------------------
+  # INTERNAL MICROSERVICE APIS (services/parsing-matching & services/ai-screening)
+  # ---------------------------------------------------------------------------
+  /internal/v1/parse/jd:
+    post:
+      tags: [Internal Microservices]
+      summary: Internal JD parsing engine (services/parsing-matching)
+      operationId: internalParseJD
+      responses:
+        '200':
+          description: Parsed JD requirements JSON
+
+  /internal/v1/parse/resume:
+    post:
+      tags: [Internal Microservices]
+      summary: Internal resume parsing engine (services/parsing-matching)
+      operationId: internalParseResume
+      responses:
+        '200':
+          description: Parsed candidate resume JSON
+
+  /internal/v1/match/resume-jd:
+    post:
+      tags: [Internal Microservices]
+      summary: Internal candidate-JD matching score calculation (services/parsing-matching)
+      operationId: internalMatchResumeJD
+      responses:
+        '200':
+          description: Param.ai matching result & score
+
+  /internal/v1/screening/questions/generate:
+    post:
+      tags: [Internal Microservices]
+      summary: Internal session question generation (services/ai-screening)
+      operationId: internalGenerateQuestions
+      responses:
+        '200':
+          description: Generated static interview questions array
+
+  /internal/v1/screening/bot/dispatch:
+    post:
+      tags: [Internal Microservices]
+      summary: Dispatches Attendee.dev meeting bot to Google Meet URL (services/ai-screening)
+      operationId: internalDispatchBot
+      responses:
+        '200':
+          description: Bot dispatched with bot_id
+
+  /internal/v1/screening/audio/stt:
+    post:
+      tags: [Internal Microservices]
+      summary: Speech-To-Text audio transcription pipeline (services/ai-screening)
+      operationId: internalSTT
+      responses:
+        '200':
+          description: Transcribed text tokens
+
+  /internal/v1/screening/audio/tts:
+    post:
+      tags: [Internal Microservices]
+      summary: Text-To-Speech voice synthesis pipeline (services/ai-screening)
+      operationId: internalTTS
+      responses:
+        '200':
+          description: Synthesized audio stream URL
+
+  /internal/v1/screening/analysis/evaluate:
+    post:
+      tags: [Internal Microservices]
+      summary: Internal transcript screening evaluation (services/ai-screening)
+      operationId: internalEvaluateTranscript
+      responses:
+        '200':
+          description: Screening analysis result & Q&A evaluation
