@@ -1,24 +1,4 @@
-# AI-Powered Recruitment Screening Platform - System Design
-
-## Table of Contents
-1. [Overview](#1-overview)
-2. [System Architecture](#2-system-architecture)
-3. [Technology Stack](#3-technology-stack)
-4. [Database Design](#4-database-design)
-5. [API Design](#5-api-design)
-6. [Authentication & Authorization](#6-authentication--authorization)
-7. [Core Features & Workflows](#7-core-features--workflows)
-8. [AI Processing Pipeline](#8-ai-processing-pipeline)
-9. [Infrastructure & Deployment](#9-infrastructure--deployment)
-10. [Security Considerations](#10-security-considerations)
-11. [Scalability & Performance](#11-scalability--performance)
-
-13. [Testing Strategy](#13-testing-strategy)
-
-15. [Future Scope](#15-future-scope)
-16. [Conclusion](#16-conclusion)
-
----
+# AI-Powered Recruitment Platform - EZScreen System Design
 
 ## 1. Overview
 
@@ -112,38 +92,6 @@ flowchart TB
 ### Modular Monolith & Monorepo Structure
 
 The platform is designed as a **Modular Monolith inside a Monorepo**. This guarantees clean separation of concerns without the operational complexity of distributed microservices for MVP.
-
-```text
-EZScreen/
-├── apps/
-│   ├── core-api/                  # Primary FastAPI REST Application
-│   │   ├── src/api/               # Auth, Orgs, Jobs, Applications, Sessions
-│   │   └── main.py
-│   └── web-frontend/              # React SPA (Vite + TailwindCSS)
-│
-├── services/
-│   ├── parsing-matching/          # Standalone Parsing & Matching Module
-│   │   ├── src/
-│   │   │   ├── jd_parser.py       # Direct JD Document & Text Parser
-│   │   │   ├── resume_parser.py   # Candidate Resume Parser
-│   │   │   └── param_matcher.py   # Param.ai Matching & Scoring Engine
-│   │   └── pyproject.toml
-│   │
-│   └── ai-screening/              # Standalone AI Screening & Audio Module
-│       ├── src/
-│       │   ├── question_gen.py    # Auto Session Question Generator
-│       │   ├── stt_engine.py      # Speech-to-Text Pipeline
-│       │   ├── tts_engine.py      # Text-to-Speech Pipeline
-│       │   ├── llm_evaluator.py   # gemma4:31b Transcript Evaluator
-│       │   └── bot_coordinator.py # Attendee.dev Bot Meeting Manager
-│       └── pyproject.toml
-│
-├── packages/
-│   ├── database/                  # Shared SQLAlchemy ORM Models & Migrations
-│   └── schemas/                   # Shared Pydantic DTOs & Domain Schemas
-│
-└── docs/                          # System Specifications & Architecture Docs
-```
 
 #### Service Module Responsibilities
 
