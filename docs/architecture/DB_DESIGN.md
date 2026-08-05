@@ -15,21 +15,22 @@
 5. [JSONB Schema Definitions](#5-jsonb-schema-definitions)
 6. [Indexing Strategy](#6-indexing-strategy)
 7. [Data Retention & Deletion](#7-data-retention--deletion)
-8. [Migration Sequence](#8-migration-sequence)
 
 ---
 
 ## 1. Design Principles
 
-1. **JSONB for AI-Extracted Data**: Both `extracted_data` (JD) and `matching_result` (application) use PostgreSQL JSONB - allows schema evolution without migrations and efficient querying with GIN indexes.
+1. **JSONB for AI-Extracted Data**: `parsed_jd` (job_descriptions), `parsed_resume` (applications), `matching_result` (applications), `analysis_result` & `question_answer` (interview_analysis) use PostgreSQL JSONB — allows schema evolution without migrations and efficient querying.
 
-2. **Status-Driven Workflows**: State machines for JD lifecycle (`draft → processing → draft_parsed → published → closed`) and application lifecycle (`applied → processing → screened → shortlisted → interview_scheduled → hired/rejected`). All status transitions are validated at the application layer.
+2. **Status-Driven Workflows**: State machines for JD lifecycle (`draft → published → closed`) and application lifecycle (`applied → interview_scheduled → shortlist_for_l1 / rejected`). All status transitions are validated at the application layer.
 
-3. **Ghost User Support**: Candidates can apply without creating an account. A ghost user record (`user_type = ghost`) is created with no password or company. The application confirmation email includes an opt-in link to create a full account later.
+3. **Role-Based Access**: User roles (`super_admin`, `organization_admin`, `hr`, `candidate`) are stored directly on the `users` table. Organization scoping is enforced via `organization_id` (null for `super_admin` and `candidate`).
 
-4. **Multi-Tenancy**: Company-scoped data isolation. All queries for HR/admin users are automatically scoped to `company_id`.
+4. **Multi-Tenancy**: Organization-scoped data isolation. All queries for HR/admin users are automatically scoped to `organization_id`.
 
-5. **Denormalised Read Columns**: `matching_score` (float) and `years_of_experience` (integer) are stored as typed columns on `applications` for fast `ORDER BY` and `WHERE` without JSONB parsing.
+5. **Denormalised Read Columns**: `resume_score` (decimal) and `candidate_yoe` (float) are stored as typed columns on `applications` for fast `ORDER BY` and `WHERE` without JSONB parsing.
+
+6. **One Interview Analysis per Session**: `interview_analysis.interview_session_id` carries a `UNIQUE` constraint enforcing a strict one-to-one relationship.
 
 ---
 
@@ -37,94 +38,73 @@
 
 ### Summary
 
-| Entity | Purpose | Phase |
-|--------|---------|-------|
-| `companies` | Multi-tenant company records | MVP |
-| `roles` | RBAC role definitions with permission sets | MVP |
-| `users` | All user accounts (registered + ghost) | MVP |
-| `user_roles` | Many-to-many user-role assignments | MVP |
-| `job_descriptions` | Job postings with AI-extracted data | MVP |
-| `applications` | Candidate applications with AI scoring | MVP |
-| `interview_schedules` | Interview scheduling and slot management | MVP |
-| `email_templates` | Company-configurable email templates | MVP (seeded) |
-| `audit_logs` | Comprehensive audit trail | Future (minimal status logging in MVP) |
-| `interview_screenings` | AI video screening session data | Phase 2 |
+| Entity | Purpose |
+|--------|---------|
+| `organizations` | Multi-tenant organization records |
+| `users` | All user accounts (admins, HR, candidates) |
+| `job_descriptions` | Job postings with AI-parsed JD data |
+| `applications` | Candidate applications with AI scoring |
+| `interview_session` | Scheduled AI screening sessions |
+| `interview_analysis` | AI analysis results for a completed session |
 
-### companies
+---
+
+### organizations
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `id` | uuid | PK | |
-| `name` | string | NOT NULL | Company display name |
-| `domain` | string | NOT NULL | Company domain |
-| `logo_url` | string | nullable | Company logo URL |
-| `is_active` | boolean | NOT NULL, default true | Soft-delete flag |
-| `created_at` | datetime | NOT NULL | |
-| `updated_at` | datetime | NOT NULL | |
+| `name` | varchar | NOT NULL | Organization display name |
+| `domain` | varchar | nullable | Organization domain |
+| `logo_url` | text | nullable | Organization logo URL |
+| `is_active` | boolean | default true | Soft-delete / suspension flag |
+| `created_at` | timestamp | | |
+| `updated_at` | timestamp | | |
 
-### roles
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | uuid | PK | |
-| `name` | string | UK, NOT NULL | Role identifier (e.g., `super_admin`, `hr_manager`) |
-| `description` | string | NOT NULL | Human-readable description |
-| `permissions` | jsonb | NOT NULL | Permission set for this role |
-| `created_at` | datetime | NOT NULL | |
-| `updated_at` | datetime | NOT NULL | |
+---
 
 ### users
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `id` | uuid | PK | |
-| `email` | string | UK, NOT NULL | |
-| `password_hash` | string | nullable | Null for ghost users |
-| `first_name` | string | NOT NULL | |
-| `last_name` | string | NOT NULL | |
-| `phone` | string | nullable | |
-| `company_id` | uuid | FK → companies, nullable | Null for ghost users |
-| `user_type` | string | NOT NULL | `registered` or `ghost` |
-| `is_active` | boolean | NOT NULL, default true | |
-| `email_verified` | boolean | NOT NULL, default false | |
-| `last_login_at` | datetime | nullable | |
-| `created_at` | datetime | NOT NULL | |
-| `updated_at` | datetime | NOT NULL | |
+| `organization_id` | uuid | FK → organizations, nullable | NULL for `super_admin` & `candidate` |
+| `role` | user_role | | See [User Role Enum](#user-role) |
+| `email` | varchar | UNIQUE, NOT NULL | |
+| `password_hash` | text | nullable | |
+| `first_name` | varchar | nullable | |
+| `last_name` | varchar | nullable | |
+| `phone` | varchar | nullable | |
+| `status` | user_status | | See [User Status Enum](#user-status) |
+| `last_login_at` | timestamp | nullable | |
+| `created_at` | timestamp | | |
+| `updated_at` | timestamp | | |
 
-### user_roles
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `user_id` | uuid | FK → users, PK (composite) | |
-| `role_id` | uuid | FK → roles, PK (composite) | |
-| `assigned_by` | uuid | FK → users, nullable | Who assigned this role |
-| `created_at` | datetime | NOT NULL | |
+---
 
 ### job_descriptions
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `id` | uuid | PK | |
-| `title` | string | NOT NULL | Mandatory at creation time |
+| `organization_id` | uuid | FK → organizations, NOT NULL | |
+| `created_by` | uuid | FK → users, NOT NULL | HR/admin who created the JD |
+| `title` | varchar | nullable | Job title |
 | `description` | text | nullable | Raw JD text entered from UI |
-| `company_id` | uuid | FK → companies, NOT NULL | |
-| `created_by` | uuid | FK → users, NOT NULL | |
-| `updated_by` | uuid | FK → users, nullable | |
-| `status` | string | NOT NULL | See [JD Status Enum](#jd-status) |
-| `source_type` | string | NOT NULL | `link`, `document`, or `manual` |
-| `source_url` | string | nullable | URL for `link` source type |
-| `document_path` | string | nullable | S3 path for uploaded document |
-| `extracted_data` | jsonb | nullable | See [JD extracted_data Schema](#jd-extracted_data) |
-| `processing_retry_count` | integer | NOT NULL, default 0 | Max 3 retries |
-| `processing_error` | string | nullable | Last error message |
-| `processing_started_at` | datetime | nullable | |
-| `processing_completed_at` | datetime | nullable | |
-| `published_at` | datetime | nullable | When status changed to published |
-| `closed_at` | datetime | nullable | When status changed to closed |
-| `created_at` | datetime | NOT NULL | |
-| `updated_at` | datetime | NOT NULL | |
+| `job_type` | Job_type | | `part_time`, `full_time`, `contract` |
+| `work_type` | work_type | | `onsite`, `hybrid`, `remote` |
+| `location` | varchar | nullable | |
+| `experience_min` | int | nullable | Minimum years of experience |
+| `experience_max` | int | nullable | Maximum years of experience |
+| `skills` | text | nullable | JSON array string of required skills |
+| `status` | job_status | | See [Job Status Enum](#job-status) |
+| `parsed_jd` | jsonb | nullable | See [parsed_jd Schema](#jd-parsed_jd) |
+| `published_at` | timestamp | nullable | When status changed to `published` |
+| `closed_at` | timestamp | nullable | When status changed to `closed` |
+| `created_at` | timestamp | | |
+| `updated_at` | timestamp | | |
 
-**Publishing Gate**: Status can only transition to `published` if `title` and `extracted_data.required_skills` are populated.
+---
 
 ### applications
 
@@ -132,90 +112,51 @@
 |--------|------|-------------|-------------|
 | `id` | uuid | PK | |
 | `job_description_id` | uuid | FK → job_descriptions, NOT NULL | |
-| `candidate_user_id` | uuid | FK → users, NOT NULL | Composite UK with `job_description_id` |
-| `resume_path` | string | NOT NULL | S3 path for uploaded resume |
-| `cover_letter` | text | nullable | |
-| `parsed_data` | jsonb | nullable | See [Application parsed_data Schema](#application-parsed_data) |
-| `matching_score` | decimal | nullable | 0-10, denormalised for fast sort |
-| `years_of_experience` | integer | nullable | Denormalised from `parsed_data.total_experience_years` |
-| `matching_result` | jsonb | nullable | See [Application matching_result Schema](#application-matching_result) |
-| `status` | string | NOT NULL | See [Application Status Enum](#application-status) |
-| `processing_retry_count` | integer | NOT NULL, default 0 | Max 3 retries |
-| `processing_error` | string | nullable | |
-| `applied_at` | datetime | NOT NULL | |
-| `screened_at` | datetime | nullable | When AI scoring completed |
-| `shortlisted_at` | datetime | nullable | |
-| `rejected_at` | datetime | nullable | |
-| `rejected_by` | string | nullable | |
-| `rejection_reason` | string | nullable | |
-| `created_at` | datetime | NOT NULL | |
-| `updated_at` | datetime | NOT NULL | |
+| `candidate_id` | uuid | FK → users, NOT NULL | Composite UK with `job_description_id` |
+| `resume_url` | varchar | nullable | URL / S3 path for uploaded resume |
+| `parsed_resume` | jsonb | nullable | See [parsed_resume Schema](#application-parsed_resume) |
+| `candidate_yoe` | float | nullable | Denormalised years of experience |
+| `resume_score` | decimal | nullable | AI match score (0–100) |
+| `matching_result` | jsonb | nullable | See [matching_result Schema](#application-matching_result) |
+| `status` | application_status | | See [Application Status Enum](#application-status) |
+| `applied_at` | timestamp | nullable | |
+| `created_at` | timestamp | | |
+| `updated_at` | timestamp | | |
 
-**Unique Constraint**: `(job_description_id, candidate_user_id)` - one application per candidate per JD.
+**Unique Constraint**: `(job_description_id, candidate_id)` — one application per candidate per JD.
 
-### interview_schedules
+---
+
+### interview_session
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `id` | uuid | PK | |
 | `application_id` | uuid | FK → applications, NOT NULL | |
-| `interview_type` | string | NOT NULL | `initial`, `technical`, `hr`, `final` |
-| `status` | string | NOT NULL | See [Interview Status Enum](#interview-status) |
-| `meeting_link` | string | nullable | For direct invite (Option A) |
-| `scheduled_at` | datetime | nullable | Confirmed interview time |
-| `time_slot_options` | jsonb | nullable | Array of slot options for self-scheduling |
-| `scheduling_token` | string | UK | Unique single-use token for self-scheduling URL |
-| `slot_deadline` | datetime | nullable | Default 48h deadline for self-scheduling |
-| `created_by` | uuid | FK → users, NOT NULL | HR user who created the invite |
-| `created_at` | datetime | NOT NULL | |
-| `updated_at` | datetime | NOT NULL | |
+| `scheduled_by` | uuid | FK → users, NOT NULL | HR/admin who scheduled the session |
+| `interview_type` | interview_type | | e.g. `screening_ai` |
+| `status` | interview_status | | See [Interview Status Enum](#interview-status) |
+| `interview_metadata` | jsonb | nullable | Flexible metadata (links, tokens, etc.) |
+| `comment` | varchar | nullable | Internal notes |
+| `generated_questions` | jsonb | nullable | AI-generated question set for the session |
+| `scheduled_at` | timestamp | nullable | Confirmed session time |
+| `completed_at` | timestamp | nullable | |
+| `created_at` | timestamp | | |
 
-### email_templates
+---
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | uuid | PK | |
-| `company_id` | uuid | FK → companies, NOT NULL | |
-| `template_type` | string | NOT NULL | See [Email Template Type Enum](#email-template-type) |
-| `subject` | string | NOT NULL | Subject line (supports `{{variable}}` placeholders) |
-| `body` | text | NOT NULL | Email body (supports `{{variable}}` placeholders) |
-| `is_active` | boolean | NOT NULL, default true | |
-| `created_at` | datetime | NOT NULL | |
-| `updated_at` | datetime | NOT NULL | |
-
-### audit_logs (Future - minimal status logging in MVP)
+### interview_analysis
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `id` | uuid | PK | |
-| `performed_by` | uuid | FK → users, nullable | Null for system actions |
-| `entity_type` | string | NOT NULL | `job_description`, `application`, `interview_schedule`, `user` |
-| `entity_id` | uuid | NOT NULL | |
-| `action` | string | NOT NULL | `create`, `update`, `delete`, `status_change`, `bulk_status_change` |
-| `old_values` | jsonb | nullable | Previous state |
-| `new_values` | jsonb | nullable | New state |
-| `ip_address` | string | nullable | |
-| `created_at` | datetime | NOT NULL | |
-
-### interview_screenings (Phase 2)
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | uuid | PK | |
-| `interview_schedule_id` | uuid | FK → interview_schedules, NOT NULL | One-to-one |
-| `session_token` | string | UK | Unique session identifier |
-| `video_recording_path` | string | | S3 path for video recordings |
-| `transcript` | text | | Full transcript |
-| `questions_asked` | jsonb | | Array of {question, answer, score, analysis} |
-| `screening_score` | decimal | | 0-100 |
-| `evaluation_data` | jsonb | | communication_score, technical_score, confidence_score, etc. |
-| `ai_recommendation` | string | | `proceed`, `reject`, `review` |
-| `started_at` | datetime | | |
-| `completed_at` | datetime | | |
-| `created_at` | datetime | NOT NULL | |
-| `updated_at` | datetime | NOT NULL | |
-
-
+| `interview_session_id` | uuid | FK → interview_session, NOT NULL, UNIQUE | One-to-one with session |
+| `application_id` | uuid | FK → applications, NOT NULL | |
+| `analysis_result` | jsonb | nullable | See [analysis_result Schema](#interview_analysis-analysis_result) |
+| `question_answer` | jsonb | nullable | Array of `{question, answer, score, analysis}` |
+| `recording_url` | text | nullable | URL / S3 path for session recording |
+| `interview_type` | interview_type | | |
+| `created_at` | timestamp | | |
 
 ---
 
@@ -234,336 +175,301 @@
   }
 }%%
 erDiagram
-    companies {
+    organizations {
         uuid id PK
-        string name
-        string domain
-        string logo_url "nullable"
-        boolean is_active
-        datetime created_at
-        datetime updated_at
-    }
-    roles {
-        uuid id PK
-        string name UK
-        string description
-        jsonb permissions
-        datetime created_at
-        datetime updated_at
+        varchar name
+        varchar domain "nullable"
+        text logo_url "nullable"
+        boolean is_active "default true"
+        timestamp created_at
+        timestamp updated_at
     }
     users {
         uuid id PK
-        string email UK
-        string password_hash "nullable for ghost users"
-        string first_name
-        string last_name
-        string phone "nullable"
-        uuid company_id FK "nullable for ghost users"
-        string user_type "enum: registered, ghost"
-        boolean is_active
-        boolean email_verified
-        datetime last_login_at "nullable"
-        datetime created_at
-        datetime updated_at
-    }
-    user_roles {
-        uuid user_id FK
-        uuid role_id FK
-        uuid assigned_by FK "nullable"
-        datetime created_at
+        uuid organization_id FK "nullable - NULL for super_admin and candidate"
+        varchar role "enum: super_admin, organization_admin, hr, candidate"
+        varchar email UK
+        text password_hash "nullable"
+        varchar first_name "nullable"
+        varchar last_name "nullable"
+        varchar phone "nullable"
+        varchar status "enum: active, inactive, suspended"
+        timestamp last_login_at "nullable"
+        timestamp created_at
+        timestamp updated_at
     }
     job_descriptions {
         uuid id PK
-        string title
-        text description "nullable - raw JD text entered from UI"
-        uuid company_id FK
+        uuid organization_id FK
         uuid created_by FK
-        uuid updated_by FK "nullable"
-        string status "enum: draft, processing, extraction_failed, draft_parsed, published, closed"
-        string source_type "enum: link, document, manual"
-        string source_url "nullable"
-        string document_path "nullable"
-        jsonb extracted_data "required_skills, preferred_skills, minimum_experience_years, preferred_experience_years, education_requirements, certifications, job_type, work_mode, location, salary_range, responsibilities, role_summary"
-        integer processing_retry_count "default 0, max 3"
-        string processing_error "nullable"
-        datetime processing_started_at
-        datetime processing_completed_at
-        datetime published_at
-        datetime closed_at
-        datetime created_at
-        datetime updated_at
+        varchar title "nullable"
+        text description "nullable"
+        varchar job_type "enum: part_time, full_time, contract"
+        varchar work_type "enum: onsite, hybrid, remote"
+        varchar location "nullable"
+        int experience_min "nullable"
+        int experience_max "nullable"
+        text skills "JSON array string"
+        varchar status "enum: draft, published, closed"
+        jsonb parsed_jd "role, required_skills, preferred_skills, experience, education, responsibilities"
+        timestamp published_at "nullable"
+        timestamp closed_at "nullable"
+        timestamp created_at
+        timestamp updated_at
     }
     applications {
         uuid id PK
         uuid job_description_id FK
-        uuid candidate_user_id FK "Composite UK with job_description_id"
-        string resume_path
-        text cover_letter "nullable"
-        jsonb parsed_data "candidate_summary, primary_skills, secondary_skills, domain_expertise, experience, total_experience_years, education, certifications, languages"
-        decimal matching_score "0-10, denormalised for fast sort"
-        integer years_of_experience "denormalised from parsed_data"
-        jsonb matching_result "skills_match, experience_match, education_match, overall_fit"
-        string status "enum: applied, processing, screened, shortlisted, interview_scheduled, hired, rejected"
-        integer processing_retry_count "default 0, max 3"
-        string processing_error "nullable"
-        datetime applied_at
-        datetime screened_at
-        datetime shortlisted_at "nullable"
-        datetime rejected_at "nullable"
-        string rejected_by "nullable"
-        string rejection_reason "nullable"
-        datetime created_at
-        datetime updated_at
+        uuid candidate_id FK "Composite UK with job_description_id"
+        varchar resume_url "nullable"
+        jsonb parsed_resume "candidate_name, email, phone, summary, skills, experience_years, education, certifications, projects"
+        float candidate_yoe "nullable - denormalised"
+        decimal resume_score "nullable - AI match score 0-100"
+        jsonb matching_result "score_breakdown, matched_skills, missing_skills, experience_match, education_match, reasoning"
+        varchar status "enum: applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected"
+        timestamp applied_at "nullable"
+        timestamp created_at
+        timestamp updated_at
     }
-    interview_schedules {
+    interview_session {
         uuid id PK
         uuid application_id FK
-        string interview_type "enum: initial, technical, hr, final"
-        string status "enum: pending, scheduled, completed, cancelled"
-        string meeting_link "nullable"
-        datetime scheduled_at "nullable"
-        jsonb time_slot_options "nullable"
-        string scheduling_token UK "unique single-use token for self-scheduling"
-        datetime slot_deadline "nullable - default 48h for self-scheduling"
-        uuid created_by FK
-        datetime created_at
-        datetime updated_at
+        uuid scheduled_by FK
+        varchar interview_type "enum: screening_ai"
+        varchar status "enum: scheduled, rescheduled, completed, no_show, cancelled, failed"
+        jsonb interview_metadata "nullable"
+        varchar comment "nullable"
+        jsonb generated_questions "nullable"
+        timestamp scheduled_at "nullable"
+        timestamp completed_at "nullable"
+        timestamp created_at
     }
-    interview_screenings {
+    interview_analysis {
         uuid id PK
-        uuid interview_schedule_id FK
-        string session_token UK
-        string video_recording_path
-        text transcript
-        jsonb questions_asked "question, answer, score, analysis"
-        decimal screening_score "0-100"
-        jsonb evaluation_data "communication_score, technical_score, confidence_score, engagement_score, strengths, concerns, recommendation, detailed_analysis"
-        string ai_recommendation "enum: proceed, reject, review"
-        datetime started_at
-        datetime completed_at
-        datetime created_at
-        datetime updated_at
+        uuid interview_session_id FK "UNIQUE - one-to-one with session"
+        uuid application_id FK
+        jsonb analysis_result "overall_feedback, technical_summary, communication_summary, skill_breakdown, final_recommendation"
+        jsonb question_answer "array of question/answer/score/analysis objects"
+        text recording_url "nullable"
+        varchar interview_type "enum: screening_ai"
+        timestamp created_at
     }
 
-    email_templates {
-        uuid id PK
-        uuid company_id FK
-        string template_type "enum: rejection, interview_invite, application_confirmation, reminder_24h, reminder_1h, scheduling_link, slot_confirmation"
-        string subject
-        text body "supports variable placeholders"
-        boolean is_active
-        datetime created_at
-        datetime updated_at
-    }
-    audit_logs {
-        uuid id PK
-        uuid performed_by FK "nullable for system actions"
-        string entity_type "enum: job_description, application, interview_schedule, user"
-        uuid entity_id
-        string action "enum: create, update, delete, status_change, bulk_status_change"
-        jsonb old_values "nullable"
-        jsonb new_values "nullable"
-        string ip_address "nullable"
-        datetime created_at
-    }
-
-    companies ||--o{ users : ""
-    companies ||--o{ email_templates : ""
-    companies ||--o{ job_descriptions : ""
-    users ||--o{ user_roles : ""
-    roles ||--o{ user_roles : ""
+    organizations ||--o{ users : "organization_id"
+    organizations ||--o{ job_descriptions : "organization_id"
     users ||--o{ job_descriptions : "created_by"
-    users ||--o{ audit_logs : "performed_by (Future)"
-    job_descriptions ||--o{ applications : ""
-    users ||--o{ applications : "candidate_user_id"
-    applications ||--o{ interview_schedules : ""
-    users ||--o{ interview_schedules : "created_by"
-    interview_schedules ||--o| interview_screenings : "Phase 2"
+    job_descriptions ||--o{ applications : "job_description_id"
+    users ||--o{ applications : "candidate_id"
+    applications ||--o{ interview_session : "application_id"
+    users ||--o{ interview_session : "scheduled_by"
+    interview_session ||--o| interview_analysis : "interview_session_id (1-to-1)"
+    applications ||--o{ interview_analysis : "application_id"
 ```
 
 ---
 
 ## 4. Enum & Status Definitions
 
-### JD Status
+### User Status
+
+| Value | Description |
+|-------|-------------|
+| `active` | Account is active and can log in |
+| `inactive` | Account deactivated (not suspended) |
+| `suspended` | Account suspended by admin |
+
+### User Role
+
+| Role | Scope | Description |
+|------|-------|-------------|
+| `super_admin` | All organizations | Full system access; `organization_id` is NULL |
+| `organization_admin` | Own organization | Manage users and all org data |
+| `hr` | Own organization | Create/publish jobs, review applicants, schedule interviews |
+| `candidate` | Own data | Browse jobs, submit applications; `organization_id` is NULL |
+
+### Job Status
 
 | Status | Description | Transitions To |
 |--------|-------------|---------------|
-| `draft` | Created, no AI extraction yet | `processing` |
-| `processing` | AI extraction in progress | `draft_parsed`, `extraction_failed` |
-| `extraction_failed` | AI extraction failed after retries | Terminal (retry via reprocess) |
-| `draft_parsed` | AI extraction complete, awaiting HR review | `published` |
-| `published` | Visible on public job board | `closed`, `draft_parsed` (unpublish) |
+| `draft` | Created, not yet visible to candidates | `published` |
+| `published` | Visible; accepting applications | `closed` |
 | `closed` | No longer accepting applications | Terminal |
+
+### Work Type
+
+| Value | Description |
+|-------|-------------|
+| `onsite` | In-office only |
+| `hybrid` | Mix of office and remote |
+| `remote` | Fully remote |
+
+### Job Type
+
+| Value | Description |
+|-------|-------------|
+| `part_time` | Part-time engagement |
+| `full_time` | Full-time employment |
+| `contract` | Contract / freelance |
 
 ### Application Status
 
 | Status | Description | Transitions To |
 |--------|-------------|---------------|
-| `applied` | Submitted, awaiting processing | `processing` |
-| `processing` | AI extraction/matching in progress | `screened` |
-| `screened` | AI scoring complete, awaiting HR review | `shortlisted`, `rejected` |
-| `shortlisted` | HR marked as potential candidate | `interview_scheduled`, `rejected` |
-| `interview_scheduled` | Interview has been scheduled | `hired`, `rejected` |
-| `hired` | Candidate accepted | Terminal |
+| `applied` | Application submitted | `interview_scheduled` |
+| `interview_scheduled` | AI screening session scheduled | `interview_completed` |
+| `interview_completed` | Session completed, awaiting HR review | `shortlist_for_l1`, `rejected` |
+| `shortlist_for_l1` | Shortlisted for L1 human interview | Terminal (next pipeline step) |
 | `rejected` | Candidate rejected | Terminal |
+
+### Interview Type
+
+| Value | Description |
+|-------|-------------|
+| `screening_ai` | AI-conducted screening interview |
 
 ### Interview Status
 
 | Status | Description |
 |--------|-------------|
-| `pending` | Self-scheduling invite sent, awaiting candidate selection |
-| `scheduled` | Time confirmed (direct invite or slot selected) |
-| `completed` | Interview completed |
-| `cancelled` | Interview cancelled |
-
-### User Type
-
-| Value | Description |
-|-------|-------------|
-| `registered` | Full account with password and company |
-| `ghost` | Auto-created for guest applicants - no password, no company |
-
-### Role Names
-
-| Role | Scope | Description |
-|------|-------|-------------|
-| `super_admin` | All companies | Full system access |
-| `company_admin` | Own company | Manage users, view all company data |
-| `hr_manager` | Own company | Create/publish/close jobs, view all applicants, schedule interviews |
-| `recruiter` | Own company | Create/publish jobs, view applicants for own jobs, schedule interviews |
-| `candidate` | Own data | Browse jobs, submit applications, view own application status |
-
-### Email Template Type
-
-| Value | Description |
-|-------|-------------|
-| `rejection` | Candidate rejection notification |
-| `interview_invite` | Interview invitation email |
-| `application_confirmation` | Application received confirmation |
-| `reminder_24h` | Interview reminder (24 hours before) - Future |
-| `reminder_1h` | Interview reminder (1 hour before) - Future |
-| `scheduling_link` | Self-scheduling link email |
-| `slot_confirmation` | Slot selection confirmation email |
+| `scheduled` | Session confirmed and upcoming |
+| `rescheduled` | Session rescheduled |
+| `completed` | Session successfully completed |
+| `no_show` | Candidate did not join |
+| `cancelled` | Session cancelled |
+| `failed` | Session failed due to a technical error |
 
 ---
 
 ## 5. JSONB Schema Definitions
 
-### JD `extracted_data`
+### JD `parsed_jd`
 
 ```json
-{
-  "required_skills":           [ "Python", "PostgreSQL", "REST APIs" ],
-  "preferred_skills":          [ "Kubernetes", "GraphQL" ],
-  "minimum_experience_years":  3,
-  "preferred_experience_years": 5,
-  "education_requirements":    [ "Bachelor's in Computer Science or related" ],
-  "certifications":            [],
-  "job_type":                  "full-time",
-  "work_mode":                 "hybrid",
-  "location":                  "Mumbai, India",
-  "salary_range":              { "min": 1200000, "max": 1800000, "currency": "INR" },
-  "responsibilities":          [ "Design and maintain backend services", "..." ],
-  "role_summary":              "..."
-}
+{{
+  "title": null,
+  "company": null,
+  "company_description": null,
+  "experience_required": {{
+    "min_years": null,
+    "max_years": null
+  }},
+  "skills": {{
+    "must_have": ["skill1", "skill2"],
+    "good_to_have": ["skill1", "skill2"]
+  }},
+  "qualifications": ["degree1", "degree2"],
+  "responsibilities": ["resp1", "resp2"],
+  "location": null,
+  "employment_type": "Full-time"
+}}
+
 ```
 
 All fields return `null` if not explicitly found in the JD. The LLM prompt constrains: "Do not infer or hallucinate values."
 
-### Application `parsed_data`
+---
+
+### Application `parsed_resume`
 
 ```json
-{
-  "candidate_summary":        "...",
-  "primary_skills":           [ "Python", "FastAPI", "PostgreSQL" ],
-  "secondary_skills":         [ "Docker", "Redis" ],
-  "domain_expertise":         [ "FinTech", "e-commerce" ],
-  "experience": [
-    {
-      "company":          "Acme Corp",
-      "title":            "Backend Engineer",
-      "start_date":       "2021-06",
-      "end_date":         "2024-03",
-      "duration_months":  33,
-      "responsibilities": [ "..." ],
-      "technologies":     [ "Python", "Django" ]
-    }
-  ],
-  "total_experience_years":   4.5,
-  "education": [
-    {
-      "degree":           "B.Tech",
-      "field":            "Computer Science",
-      "institution":      "IIT Bombay",
-      "graduation_year":  "2019"
-    }
-  ],
-  "certifications":           [ "AWS Certified Developer" ],
-  "languages":                [ "English (fluent)", "Hindi (native)" ]
-}
+{{
+  "primary_skills": ["string"],
+  "secondary_skills": ["string"],
+  "domain_expertise": ["string"],
+  "relevant_experience": {{
+    "total_years": "number or null",
+    "roles": [
+      {{
+        "title": "string or null",
+        "company": "string or null",
+        "start_date": "string or null",
+        "end_date": "string or null",
+        "years": "number or null",
+        "highlights": ["string"]
+      }}
+    ]
+  }},
+  "education_certificates": [
+    {{
+      "name": "string",
+      "issuer": "string or null",
+      "year": "string or null",
+      "type": "degree or certification"
+    }}
+  ]
+}}
 ```
+
+---
 
 ### Application `matching_result`
 
 ```json
-{
-  "skills_match": {
-    "score":           0.85,
-    "matched_skills":  [ "Python", "PostgreSQL", "REST APIs" ],
-    "missing_skills":  [ "Kubernetes" ]
-  },
-  "experience_match": {
-    "score":                  0.90,
-    "years_required":         3,
-    "years_candidate_has":    4.5
-  },
-  "education_match": {
-    "score":                  1.0,
-    "meets_requirements":     true
-  },
-  "overall_fit": {
-    "score":           8.7,
-    "recommendation":  "strong_fit",
-    "strengths":       [ "Strong Python skills", "Exceeds experience requirement" ],
-    "concerns":        [ "No Kubernetes experience" ],
-    "summary":         "..."
-  }
-}
+{{
+  "score_breakdown": {{
+    "must_have_skills_score": 32.0,
+    "experience_score": 30.0,
+    "good_to_have_skills_score": 15.0,
+    "qualifications_score": 10.0
+  }},
+  "match_score": 8.7,
+  "reasoning": [
+    "point 1",
+    "point 2",
+    "point 3"
+  ],
+  "matched_skills": {{
+    "must_have": ["..."],
+    "good_to_have": ["..."]
+  }},
+  "missing_skills": {{
+    "must_have": ["..."],
+    "good_to_have": ["..."]
+  }},
+  "qualification_match": true,
+  "experience_match": true
+}}
 ```
+---
 
 ### Denormalised Columns on `applications`
 
 | Column | Type | Source | Purpose |
 |--------|------|--------|---------|
-| `matching_score` | float (0-10) | `matching_result.overall_fit.score` | Fast `ORDER BY` sorting |
-| `years_of_experience` | integer | `parsed_data.total_experience_years` | Fast filter/sort |
+| `resume_score` | decimal (0–100) | `matching_result.score_breakdown.overall_score` | Fast `ORDER BY` sorting |
+| `candidate_yoe` | float | `parsed_resume.experience_years` | Fast filter/sort by experience |
 
 ---
 
 ## 6. Indexing Strategy
 
-| Table | Index | Columns | Type | Access Pattern | Required For |
-|-------|-------|---------|------|----------------|-------------|
-| `job_descriptions` | Status filter | `status` | B-tree | Filter by published/draft/closed | Public job browsing, HR dashboard |
-| `job_descriptions` | Company isolation | `company_id` | B-tree | Multi-tenant queries | All JD queries |
-| `applications` | Applications by JD | `job_description_id` | B-tree | All applicants for a job | Applicant list |
-| `applications` | Score ranking | `matching_score DESC` | B-tree | Sort candidates by score | Ranked applicant list |
-| `applications` | Status filter | `status` | B-tree | Filter by screened/shortlisted/etc | HR dashboard filters |
-| `applications` | Combined HR query | `(job_description_id, status, matching_score DESC)` | Composite B-tree | Single-query HR dashboard with filter + sort | Applicant list performance |
-| `applications` | Duplicate check | `(job_description_id, candidate_user_id)` | Composite B-tree UK | Enforce one application per user per JD | Application submission |
-| `applications` | Experience filter | `years_of_experience` | B-tree | Filter candidates by experience range | HR dashboard filters |
-| `job_descriptions` | AI data search | `extracted_data` | GIN | Query inside JSONB | AI pipeline, search |
-| `applications` | Resume data search | `parsed_data` | GIN | Query inside JSONB | AI pipeline, search |
-| `interview_schedules` | Token lookup | `scheduling_token` | B-tree UK | Token-based self-scheduling URL | Self-scheduling flow |
-| `email_templates` | Template lookup | `(company_id, template_type)` | Composite B-tree | Fetch company-specific templates | Email sending |
+| Table | Index | Columns | Type | Access Pattern |
+|-------|-------|---------|------|----------------|
+| `organizations` | Active lookup | `is_active` | B-tree | Filter active orgs |
+| `users` | Org isolation | `organization_id` | B-tree | All user queries scoped to org |
+| `users` | Role filter | `role` | B-tree | Filter by role |
+| `users` | Status filter | `status` | B-tree | Filter active/suspended users |
+| `job_descriptions` | Org isolation | `organization_id` | B-tree | Multi-tenant JD queries |
+| `job_descriptions` | Status filter | `status` | B-tree | Filter published/draft/closed |
+| `job_descriptions` | AI data search | `parsed_jd` | GIN | Query inside JSONB |
+| `applications` | Applications by JD | `job_description_id` | B-tree | All applicants for a job |
+| `applications` | Score ranking | `resume_score DESC` | B-tree | Sort candidates by AI score |
+| `applications` | Status filter | `status` | B-tree | Filter by pipeline stage |
+| `applications` | Combined HR query | `(job_description_id, status, resume_score DESC)` | Composite B-tree | Single-query dashboard |
+| `applications` | Duplicate check | `(job_description_id, candidate_id)` | Composite UK | Enforce one application per user per JD |
+| `applications` | Experience filter | `candidate_yoe` | B-tree | Filter by experience range |
+| `applications` | Resume data search | `parsed_resume` | GIN | Query inside JSONB |
+| `interview_session` | Session by application | `application_id` | B-tree | All sessions for an application |
+| `interview_session` | Session status | `status` | B-tree | Filter by session state |
+| `interview_analysis` | Unique session link | `interview_session_id` | UK | Enforce 1-to-1 with session |
+| `interview_analysis` | Analysis by application | `application_id` | B-tree | All analyses for an application |
 
 ### Query Patterns to Avoid
 
-- **N+1 queries** - always eager-load associated records in a single query
-- **Full table scans on large tables** - all `WHERE` clauses on `applications` and `job_descriptions` must use indexed columns
-- **Sorting unindexed JSONB fields** - sort on the denormalised `matching_score` float column, not on `extracted_data->>'score'`
-- **Unbounded queries** - all list endpoints must enforce a `LIMIT` and use cursor or offset pagination
+- **N+1 queries** — always eager-load associated records in a single query
+- **Full table scans on large tables** — all `WHERE` clauses on `applications` and `job_descriptions` must use indexed columns
+- **Sorting unindexed JSONB fields** — sort on the denormalised `resume_score` decimal column, not on `matching_result->>'overall_score'`
+- **Unbounded queries** — all list endpoints must enforce a `LIMIT` and use cursor or offset pagination
 
 ---
 
@@ -574,41 +480,10 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
 | Record Type | Retention Period |
 |-------------|-----------------|
 | Rejected applications | 180 days |
-| Hired candidate records | 7 years |
-| Withdrawn applications | 30 days |
+| Shortlisted / hired candidate records | 7 years |
 | Closed job descriptions | 5 years |
-| Screening interview recordings (Phase 2) | 2 years (or until deletion requested) |
+| Interview session recordings | 2 years (or until deletion requested) |
 
-### Right to Erasure (GDPR Article 17)
-
-When a deletion request is received for a candidate:
-1. All application records for that email are deleted from the database
-2. All uploaded files (resumes) are deleted from object storage
-3. A deletion confirmation record is retained (no personal data - only timestamp and hash of email)
-
-The deletion process is triggered via an authenticated API endpoint restricted to admin roles.
 
 ---
-
-## 8. Migration Sequence
-
-### MVP (Phase 1A)
-
-1. `companies` - base tenant table
-2. `roles` - RBAC role definitions
-3. `users` - all user accounts
-4. `user_roles` - role assignments
-5. `job_descriptions` - JD records with AI extraction
-6. `applications` - candidate applications with AI scoring
-7. `email_templates` - seeded with default templates
-8. `interview_schedules` - interview management
-
-### Post-MVP
-
-9. `audit_logs` - comprehensive audit trail (minimal status logging before this)
-
-### Phase 2
-
-10. `interview_screenings` - AI video screening data
-
 
