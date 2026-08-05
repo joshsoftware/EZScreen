@@ -187,23 +187,15 @@ This document serves as the single source of truth for developer user stories on
   - API connects to Google Calendar API to create an event, generate a Google Meet URL, and send a confirmation email to the candidate with the meet link and calendar invite attachment (.ics).
 * **Scope / Phase:** MVP (Phase 4: HR Review & Scheduling)
 
-### US-6.2: Candidate Time Slot Self-Scheduling (Option B)
-* **User Story:** As an HR User, I want to provide 2-5 time slots so the candidate can choose their preferred slot so that scheduling is automated without back-and-forth emails.
-* **Acceptance Criteria:**
-  - HR enters slot options in the form.
-  - System generates a unique scheduling token URL sent to the candidate via email.
-  - Candidate clicks link, selects a slot, and system updates session status to `scheduled` with the selected time, sending confirmations to both.
-* **Scope / Phase:** Post-MVP (Deferred)
-
 ---
 
 ## Epic 7: AI Meeting Bot & Automated Call Screening (Attendee Bot)
 
-### US-7.1: Gap-Based Screening Question Auto-Generation
-* **User Story:** As the system, I want to auto-generate tailored interview questions based on the candidate's resume vs. JD gaps so that the bot can screen the candidate on their missing skills and experience.
+### US-7.1: Compatibility Matching Question Auto-Generation
+* **User Story:** As the system, I want to auto-generate tailored interview questions based on the compatibility match between the candidate's resume and the job description requirements so that the bot can screen the candidate on their alignment with the role.
 * **Acceptance Criteria:**
   - Runs as a background task upon interview scheduling.
-  - Generates 5-7 questions covering missing skills, role requirements, and technical depth.
+  - Generates 5-7 questions covering core role competencies, required experience context, and technical compatibility.
   - Saves questions inside `interview_session.generated_questions`.
 * **Scope / Phase:** MVP (Phase 4: HR Review & Scheduling)
 
@@ -238,21 +230,4 @@ This document serves as the single source of truth for developer user stories on
   - HR opens report view. Displays question-by-question candidate response scoring, general remarks, and overall fit recommendation.
 * **Scope / Phase:** MVP (Phase 4: HR Review & Scheduling)
 
----
 
-## Epic 8: Param ATS Automated Integration
-
-### US-8.1: ATS Interview Trigger Hook
-* **User Story:** As a Recruiter using Param ATS, I want scheduling an interview in the ATS to automatically create an interview session in EZScreen so that I don't have to manually create the candidate profile or job description.
-* **Acceptance Criteria:**
-  - ATS email confirmation sent to dedicated Josh mailbox monitors.
-  - Gmail Watch webhook pushes notification, regex extracts `interview_kit_id` from email body.
-* **Scope / Phase:** Post-MVP (Deferred / Next in Line)
-
-### US-8.2: Automated ATS Data Sync
-* **User Story:** As the system, I want to authenticate with Param ATS and pull JD & Candidate details using `interview_kit_id` so that the profile is fully populated automatically.
-* **Acceptance Criteria:**
-  - Backend calls `POST /get_auth_token/` with service account credentials to fetch JWT token and session ID.
-  - Calls `GET /api/interview_kit/get_interview_details/{id}/` to retrieve HTML job description, required skills, candidate details (name, email, phone), and signed resume URL.
-  - Saves details to database tables automatically.
-* **Scope / Phase:** Post-MVP (Deferred / Next in Line)
