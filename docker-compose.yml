@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: ezscreen-db
+    restart: always
+    environment:
+      POSTGRES_USER: ezscreen_user
+      POSTGRES_PASSWORD: ezscreen_password
+      POSTGRES_DB: ezscreen_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ezscreen_user -d ezscreen_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: ezscreen-minio
+    restart: always
+    ports:
+      - "9000:9000"      # API
+      - "9001:9001"      # Console
+    environment:
+      MINIO_ROOT_USER: minio_admin
+      MINIO_ROOT_PASSWORD: minio_password
+    volumes:
+      - miniodata:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Helper service to auto-create the initial MinIO buckets
+  minio-init:
+    image: minio/mc:latest
+    container_name: ezscreen-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set local http://minio:9000 minio_admin minio_password;
+      /usr/bin/mc mb --ignore-existing local/resumes;
+      /usr/bin/mc mb --ignore-existing local/jds;
+      exit 0;
+      "
+
+  core-api:
+    build:
+      context: ./apps/core-api
+      dockerfile: Dockerfile
+    container_name: ezscreen-core-api
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://ezscreen_user:ezscreen_password@db:5432/ezscreen_db
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minio_admin
+      - MINIO_SECRET_KEY=minio_password
+      - MINIO_SECURE=False
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  ai-screening:
+    build:
+      context: ./services/ai-screening
+      dockerfile: Dockerfile
+    container_name: ezscreen-ai-screening
+    restart: always
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://ezscreen_user:ezscreen_password@db:5432/ezscreen_db
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minio_admin
+      - MINIO_SECRET_KEY=minio_password
+      - MINIO_SECURE=False
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    container_name: ezscreen-frontend
+    restart: always
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_CORE_API_URL=http://localhost:8000
+      - VITE_AI_SCREENING_URL=ws://localhost:8001
+    depends_on:
+      - core-api
+      - ai-screening
+
+volumes:
+  pgdata:
+  miniodata:
