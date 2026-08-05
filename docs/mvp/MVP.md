@@ -69,7 +69,7 @@ The MVP is complete when:
 | 11 | Unauthenticated application submission (no candidate account required) | Application |
 | 12 | Candidate confirmation email | Application |
 | 13 | AI resume extraction (background) | AI Scoring |
-| 14 | AI matching & scoring benchmarked against Param.ai logic (background) | Core Matching |
+| 14 | AI matching & scoring benchmarked against logic (background) | Core Matching |
 | 15 | Recommendation output (fit/no-fit/moderate, gaps, strengths) | Core Matching |
 | 16 | Status update to screened | AI Scoring |
 | 17 | Visibility Dashboards (JD Mgmt, Resume Mgmt, Resume Scoring, summary) | Visibility Layer |
@@ -145,7 +145,7 @@ The following are explicitly excluded from MVP / designated for **Next in Line**
 2. Enters name, email, phone → requests upload URL → uploads resume PDF directly to S3
 3. Submits application form with `resume_key` → System creates application record (status: `applied`)
 4. Application confirmation email sent to candidate
-5. Background: AI worker parses resume data → matches against JD using Param.ai benchmarked rules → scores candidate
+5. Background: AI worker parses resume data → matches against JD using benchmarked rules → scores candidate
 6. Application status updated to `screened` (visible on HR Visibility Dashboard)
 
 ### Journey 3: HR Reviews Candidates & Schedules Interview
