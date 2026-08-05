@@ -23,6 +23,29 @@ This document serves as the single source of truth for developer user stories on
   - The `super_admin` role operates globally (e.g., seeding companies, global user roles) without organization constraints.
 * **Scope / Phase:** MVP (Phase 1: Foundation)
 
+### US-1.3: CLI-Based Organization & Admin Seeding
+* **User Story:** As a Developer / System Administrator, I want to create organizations and initial company admins using a database seed script so that company workspaces can be initialized without requiring a management UI.
+* **Acceptance Criteria:**
+  - Running a seed CLI command populates the database with default roles (`super_admin`, `organization_admin`, `hr`).
+  - Creates at least one default active Organization record.
+  - Creates one default active User with the `organization_admin` role linked to that organization.
+* **Scope / Phase:** MVP (Phase 1: Foundation)
+
+### US-1.4: Super Admin Organization Creation UI
+* **User Story:** As a Super Admin, I want an admin dashboard UI to create and configure new client organizations on the platform so that I can onboard new customers.
+* **Acceptance Criteria:**
+  - Accessible only by users with the `super_admin` role.
+  - Enters company name, domain, and uploads a company logo.
+  - Submitting creates the Organization record in PostgreSQL and configures their isolated schema/scoping.
+* **Scope / Phase:** Post-MVP (Deferred)
+
+### US-1.5: Company Admin Creation UI
+* **User Story:** As a Super Admin / Organization Admin, I want a user provisioning interface to invite and assign users as Company Admins or HR Managers within the organization.
+* **Acceptance Criteria:**
+  - `super_admin` can create admins for any company; `organization_admin` can only create users/HR within their own company scope.
+  - Generates a registration invite link sent via email to the new user.
+* **Scope / Phase:** Post-MVP (Deferred)
+
 ---
 
 ## Epic 2: Job Description (JD) Management & Parsing (JD Pipeline)
