@@ -13,7 +13,8 @@
 2. [AI Prompt Engineering](#2-ai-prompt-engineering)
 3. [Matching Score Formula](#3-matching-score-formula)
 4. [Document Parsing](#4-document-parsing)
-5. [Task Execution & Chaining](#5-task-execution--chaining)
+
+> **Related**: For full prompt evaluation results, JD/Resume test profiles, and all 8 parsed JSON match outputs, see [PROMPT_EVALUATION_REPORT.md](../PROMPT_EVALUATION_REPORT.md).
 
 ---
 
@@ -33,7 +34,7 @@ flowchart LR
         PA2["Backend API<br>saves file to S3<br>creates JD record (draft)"]
         PA3["Enqueue<br>parse-jd task"]
         PA4["Worker picks up task"]
-        PA5["① Download file from S3<br>② LLM extraction: skills, qualifications,<br>responsibilities, location, type<br>③ Fuzzy-map keys to schema<br>④ Write results to DB"]
+        PA5["① LLM extraction: skills, qualifications,<br>responsibilities, location, type<br>② Fuzzy-map keys to schema<br>③ Write results to DB"]
   end
     PA1 --> PA2
     PA2 --> PA3
@@ -90,76 +91,162 @@ flowchart LR
 
 ## 2. AI Prompt Engineering
 
-The system sends structured prompts to the LLM for each processing step. The prompts are designed to always return **valid JSON** so the output can be stored directly as JSONB in the database.
-
-### Job Description Extraction
-
-**Input**: Raw JD text (extracted from uploaded document or fetched from URL)
-
-**Prompt instructs the LLM to extract**:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `required_skills` | array | Must-have skills explicitly stated |
-| `preferred_skills` | array | Good-to-have or bonus skills |
-| `minimum_experience_years` | number | Minimum years explicitly mentioned |
-| `preferred_experience_years` | number | Preferred/ideal years if mentioned |
-| `education_requirements` | array | Degrees required |
-| `certifications` | array | Professional certifications required or preferred |
-| `job_type` | string | full-time / part-time / contract / internship |
-| `work_mode` | string | remote / hybrid / on-site |
-| `location` | string | City and country if mentioned |
-| `salary_range` | object | min, max, currency if mentioned |
-| `responsibilities` | array | Key duties of the role |
-| `role_summary` | string | 2-3 sentence overview |
-
-**Constraints applied in prompt**: Return `null` for any field not explicitly found. Do not infer or hallucinate values.
+The system uses three sequential LLM prompts. Each prompt is designed to return **strict JSON only**, stored directly as JSONB in the database. No markdown, code fences, or explanatory text is permitted in the response.
 
 ---
 
-### Resume Extraction
+### A. Resume Parsing Prompt
 
-**Input**: Raw text extracted from PDF or DOCX resume file
+**Input**: Raw resume text extracted from PDF/DOCX via Docling.
 
-**Prompt instructs the LLM to extract**:
+```text
+You are an expert resume parser specializing in tech and business resumes.
+Your task is to meticulously extract specific information and return it as a valid JSON object.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `candidate_summary` | string | 2-3 sentence professional summary |
-| `primary_skills` | array | Core technical skills |
-| `secondary_skills` | array | Supporting technical skills |
-| `domain_expertise` | array | Industry/domain knowledge |
-| `experience` | array | Each role: company, title, start/end date, responsibilities |
-| `total_experience_years` | number | Calculated from all roles (no overlaps) |
-| `education` | array | Degree, field, institution, year |
-| `certifications` | array | Named certifications |
-| `languages` | array | Languages with proficiency level |
+Rules:
+- STRICTLY adhere to the JSON schema.
+- If information is not explicitly present, set the value to null or an empty list (e.g., []).
+  Do NOT guess.
+- Primary skills are core, hard skills (e.g., programming languages, specific frameworks).
+  Secondary skills are softer skills or less central technologies.
+- Domain expertise should be a list of industries or business areas
+  (e.g., 'Finance', 'E-commerce', 'Logistics').
+- Skills should be concise keywords/tokens, not full sentences.
+  Deduplicate and normalize them.
+- CRITICAL: For each work experience role, you MUST find and provide the "start_date" and
+  "end_date". If the end date is ongoing, use "present".
+- Output ONLY the JSON object. Do NOT include any markdown, code fences, or explanatory
+  text before or after the JSON.
 
-**Constraints applied in prompt**: Calculate `total_experience_years` accurately accounting for overlapping roles. Do not count current employer tenure beyond the present date.
+Schema:
+{
+  "primary_skills": ["string"],
+  "secondary_skills": ["string"],
+  "domain_expertise": ["string"],
+  "relevant_experience": {
+    "total_years": "number or null",
+    "roles": [
+      {
+        "title": "string or null",
+        "company": "string or null",
+        "start_date": "string or null",
+        "end_date": "string or null",
+        "years": "number or null",
+        "highlights": ["string"]
+      }
+    ]
+  },
+  "education_certificates": [
+    {
+      "name": "string",
+      "issuer": "string or null",
+      "year": "string or null",
+      "type": "degree or certification"
+    }
+  ]
+}
+```
+
+**Key constraints**:
+- `total_years` must be calculated from role dates — do not copy a self-reported figure from the resume.
+- Current roles use `"end_date": "present"` and tenure is computed up to today's date.
 
 ---
 
-### Candidate-JD Matching
+### B. Job Description Parsing Prompt
 
-**Input**: JD `extracted_data` JSONB + Resume `parsed_data` JSONB (both already stored in DB)
+**Input**: Raw JD text (extracted from uploaded document or fetched from URL).
 
-**Prompt instructs the LLM to compare and score**:
+```text
+You are an expert job description parser. Parse this JD systematically.
+Return ONLY a JSON object in this format:
+{
+  "title": null,
+  "company": null,
+  "company_description": null,
+  "experience_required": {
+    "min_years": null,
+    "max_years": null
+  },
+  "skills": {
+    "must_have": ["skill1", "skill2"],
+    "good_to_have": ["skill1", "skill2"]
+  },
+  "qualifications": ["degree1", "degree2"],
+  "responsibilities": ["resp1", "resp2"],
+  "location": null,
+  "employment_type": "Full-time"
+}
+```
 
-| Output field | Type | Description |
-|-------------|------|-------------|
-| `skills_match.score` | 0.0-1.0 | Fraction of required skills matched |
-| `skills_match.matched_skills` | array | Skills found in both JD and resume |
-| `skills_match.missing_skills` | array | JD required skills absent from resume |
-| `experience_match.score` | 0.0-1.0 | Experience level match |
-| `experience_match.years_required` | number | From JD |
-| `experience_match.years_candidate_has` | number | From resume |
-| `education_match.score` | 0.0-1.0 | Education requirements met |
-| `education_match.meets_requirements` | boolean | Whether minimum education requirements are satisfied |
-| `overall_fit.score` | 0.0-10.0 | Weighted overall match |
-| `overall_fit.recommendation` | string | strong_fit / moderate_fit / weak_fit / not_suitable |
-| `overall_fit.strengths` | array | Notable positives |
-| `overall_fit.concerns` | array | Notable gaps |
-| `overall_fit.summary` | string | 2-3 paragraph analysis |
+**Key constraints**: Return `null` for any field not explicitly mentioned. Do not infer or hallucinate values.
+
+---
+
+### C. Candidate–JD Matching Prompt
+
+**Input**: Both parsed JSONs (resume + JD) already stored in DB, injected into the prompt.
+
+```text
+You are an expert technical recruiter and data analyst.
+Compare the given candidate resume with the job description and calculate a match score
+based strictly on the predefined evaluation criteria below.
+Return STRICT JSON only, no commentary.
+
+### Candidate Resume (parsed JSON):
+{resume_json}
+
+### Job Description (parsed JSON):
+{jd_json}
+
+### Predefined Evaluation Criteria (Total: 100 Points)
+1. Must-Have Skills (40 Points):
+   - Calculate the percentage of JD must-have skills found in the resume.
+     Multiply that percentage by 40.
+2. Relevant Experience (30 Points):
+   - If candidate's total_years is null or 0, award 0 points.
+   - Award 30 points if the candidate meets or exceeds the minimum required years
+     (or if the JD specifies no minimum).
+   - If they have less experience, pro-rate the score
+     (e.g., 2 years out of 4 required = 15 points).
+3. Good-to-Have Skills (20 Points):
+   - Calculate the percentage of JD good-to-have skills found.
+     Multiply that percentage by 20.
+4. Qualifications & Domain (Maximum 10 Points):
+   - Award 10 points if they have at least one exact degree/qualification match.
+   - Award 5 points if their best match is a somewhat related field.
+   - Award 5 points if they have a relevant certificate that comes under qualifications.
+   - Award 0 points if completely unrelated and lacking relevant certificates.
+
+### Instructions:
+1. Compare candidate's skills with JD must-have and good-to-have skills.
+2. Systematically calculate the score for each of the 4 criteria.
+3. Sum the scores to get a total out of 100.
+4. Convert the total to a 0.0–10.0 scale (e.g., 85 points = 8.5 final match_score).
+5. Output reasoning in 2–4 short bullet points.
+
+### Output Format (STRICT JSON):
+{
+  "score_breakdown": {
+    "must_have_skills_score": 32.0,
+    "experience_score": 30.0,
+    "good_to_have_skills_score": 15.0,
+    "qualifications_score": 10.0
+  },
+  "match_score": 8.7,
+  "reasoning": ["point 1", "point 2", "point 3"],
+  "matched_skills": {
+    "must_have": ["..."],
+    "good_to_have": ["..."]
+  },
+  "missing_skills": {
+    "must_have": ["..."],
+    "good_to_have": ["..."]
+  },
+  "qualification_match": true,
+  "experience_match": true
+}
+```
 
 > **Human-in-the-loop**: The AI matching score is an advisory signal, not an automated decision. No candidate is automatically rejected based on matching score alone. HR must explicitly review and confirm every status transition.
 
@@ -167,24 +254,33 @@ The system sends structured prompts to the LLM for each processing step. The pro
 
 ## 3. Matching Score Formula
 
-The final `matching_score` (0-10) stored on the application is a weighted average of the three sub-scores:
+The final `match_score` (0.0–10.0) is derived from a **100-point rubric** evaluated by the LLM matching prompt. The four criteria and their point allocations are:
 
 ```
-  matching_score =
-      ( skills_match.score    × 0.40
-      + experience_match.score × 0.35
-      + education_match.score  × 0.25 ) × 10
+  total_points (max 100) =
+      must_have_skills_score     (max 40)
+    + experience_score           (max 30)
+    + good_to_have_skills_score  (max 20)
+    + qualifications_score       (max 10)
+
+  match_score = total_points / 10
 ```
 
-| Weight | Dimension | Rationale |
-|--------|-----------|-----------|
-| 40% | Skills match | Most direct signal of capability |
-| 35% | Experience match | Seniority and role relevance |
-| 25% | Education match | Threshold signal, not a differentiator |
+| Max Points | Criterion | Scoring Logic |
+|:-----------:|-----------|---------------|
+| **40** | Must-Have Skills | `(matched / total must-haves) × 40` |
+| **30** | Relevant Experience | Full 30 if meets/exceeds min years; pro-rated otherwise; 0 if `total_years` is null or 0 |
+| **20** | Good-to-Have Skills | `(matched / total good-to-haves) × 20` |
+| **10** | Qualifications & Domain | 10 = exact match · 5 = related field or relevant cert · 0 = unrelated |
 
-The score is stored as a denormalised `float` column on the applications table to allow fast `ORDER BY matching_score DESC` queries without re-computing.
+The `match_score` is stored as a denormalised `float` column on the `applications` table to allow fast `ORDER BY match_score DESC` queries without recomputation.
 
-> **Edge case**: If a dimension cannot be evaluated (e.g., the JD has no education requirements), that dimension scores 0 for the component. This ensures the formula always produces a valid result.
+> **Edge cases**:
+> - If the JD specifies no minimum experience, the candidate receives the full 30 points provided `total_years` is not null/0.
+> - If the JD has no `good_to_have` skills, that component scores 0 (not redistributed).
+> - If `qualifications` list is empty in the JD, the prompt falls back to evaluating domain relevance.
+
+> **Evaluation data**: The formula was validated against 8 test combinations (4 candidate profiles × 2 JDs). See [PROMPT_EVALUATION_REPORT.md](./PROMPT_EVALUATION_REPORT.md) for full results.
 
 ---
 
@@ -222,31 +318,3 @@ Supported input formats: PDF, DOCX. Files are validated by MIME type and magic b
 
 ---
 
-## 5. Task Execution & Chaining
-
-### Task Types
-
-| Task | Input | Output | Status Update |
-|------|-------|--------|---------------|
-| `parse-jd` | JD record ID | `extracted_data` JSONB | `draft` → `processing` → `draft_parsed` (or `extraction_failed`) |
-| `parse-resume` | Application ID | `parsed_data` JSONB | `applied` → `processing` |
-| `match-candidate` | Application ID | `matching_result` JSONB, `matching_score`, `years_of_experience` | `processing` → `screened` |
-| `send-email` | Template + recipient | Email sent | N/A |
-
-### Task Chaining
-
-The `parse-resume` and `match-candidate` tasks are chained:
-1. When `parse-resume` completes successfully, it automatically enqueues `match-candidate` for the same application
-2. `match-candidate` fetches the JD's `extracted_data` from the database
-3. Runs the LLM matching prompt
-4. Writes `matching_result`, `matching_score`, and `years_of_experience` to the application record
-5. Updates application status to `screened`
-
-### Reliability
-
-| Concern | Approach |
-|---------|----------|
-| Retry policy | 3 retries with exponential backoff (e.g. 30s, 120s, 300s) |
-| Dead-letter queue | Failed tasks after max retries go to DLQ for investigation |
-| Idempotency | Tasks check current record status before processing - safe to re-run |
-| Observability | Task start, completion, and failure all written to application logs |
