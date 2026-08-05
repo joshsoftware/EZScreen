@@ -159,6 +159,7 @@ AI processing runs as a module within the backend codebase. All AI tasks are exe
 | :--- | :--- | :--- |
 | Primary Database | PostgreSQL | JSONB support required for AI-extracted data, proven reliability |
 | Object Storage | S3-compatible | S3 API is the standard. MinIO simplifies Docker-based local dev |
+| Key-Value Data Store | - (To Be Decided) | To be evaluated based on lightweight storing requirements |
 
 > **Storage note**: Object storage is the single source of truth for all uploaded files (JDs and resumes). A local MinIO container is used during development. In production, a managed S3-compatible service is used directly.
 
