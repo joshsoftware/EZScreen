@@ -1,9 +1,12 @@
 openapi: 3.0.3
 info:
   title: EZScreen REST & Inter-Service API Specification
-  description: Complete OpenAPI specification for EZScreen Core API Gateway and Internal Microservices (Parsing, STT, TTS, LLM Evaluation)
+  description: Complete OpenAPI specification for EZScreen Core API Gateway and Internal Microservices
   version: 1.0.0
 servers:
+  # Added by API Auto Mocking Plugin
+  - description: SwaggerHub API Auto Mocking
+    url: https://virtserver.swaggerhub.com/josh-ac8/EZScreen_API_specifications/1.0.0
   - url: https://api.ezscreen.io/api/v1
     description: Production Core API Gateway
   - url: http://localhost:8000/api/v1
@@ -25,13 +28,14 @@ tags:
   - name: Candidate Applications
     description: Application visibility, candidate resumes, and scoring dashboards
   - name: Interview Sessions & Analysis
-    description: Session scheduling, static question generation, and transcript screening reports
-  - name: Webhooks
-    description: Attendee.dev meeting bot webhook ingestion
-  - name: Internal Microservices
-    description: Private inter-service APIs between Core API, Parsing Engine, and AI Screening Service (Bot Dispatch, STT, TTS, Evaluation)
+    description: Session scheduling, Attendee bot dispatch, static question generation, and transcript screening reports
+  - name: Internal Service
+    description: Private inter-service APIs between Core API, Parsing Engine, and AI Screening Service
 
 paths:
+  # ---------------------------------------------------------------------------
+  # 1. AUTHENTICATION & ACCOUNT MANAGEMENT
+  # ---------------------------------------------------------------------------
   /auth/login:
     post:
       tags: [Authentication]
@@ -48,11 +52,106 @@ paths:
                 email:
                   type: string
                   format: email
+                  example: admin@acme.com
                 password:
                   type: string
+                  example: SecurePassword123!
       responses:
         '200':
           description: Successful authentication
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  token_type:
+                    type: string
+                    example: bearer
+                  expires_in:
+                    type: integer
+                    example: 3600
+                  user:
+                    $ref: '#/components/schemas/UserResponse'
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke session token and logout
+      operationId: logoutUser
+      responses:
+        '200':
+          description: Successfully logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Successfully logged out
+
+  /auth/forgot-password:
+    post:
+      tags: [Authentication]
+      summary: Request password reset link via email
+      operationId: forgotPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: hr.jane@acme.com
+      responses:
+        '200':
+          description: Reset instructions sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Password reset instructions sent to your email
+
+  /auth/reset-password:
+    post:
+      tags: [Authentication]
+      summary: Reset password using email token
+      operationId: resetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token:
+                  type: string
+                  example: reset_token_abc123xyz
+                new_password:
+                  type: string
+                  example: NewSecurePassword456!
+      responses:
+        '200':
+          description: Password successfully reset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Password successfully reset
 
   /auth/me:
     get:
@@ -61,267 +160,1102 @@ paths:
       operationId: getCurrentUser
       responses:
         '200':
-          description: User profile
+          description: User profile details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
 
+  # ---------------------------------------------------------------------------
+  # 2. ORGANIZATIONS & USER PROVISIONING
+  # ---------------------------------------------------------------------------
   /organizations:
     post:
       tags: [Organizations & User Provisioning]
       summary: Super Admin creates a new organization
       operationId: createOrganization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: Acme Corporation
+                domain:
+                  type: string
+                  example: acme
+                logo_url:
+                  type: string
+                  example: https://acme.com/logo.png
       responses:
         '201':
           description: Organization created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
     get:
       tags: [Organizations & User Provisioning]
       summary: List all organizations (Super Admin only)
       operationId: listOrganizations
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
           description: List of organizations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrganizationResponse'
 
   /organizations/{id}:
     get:
       tags: [Organizations & User Provisioning]
       summary: View organization details
       operationId: getOrganization
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Organization details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
     put:
       tags: [Organizations & User Provisioning]
       summary: Update organization details
       operationId: updateOrganization
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Acme Global Inc.
+                domain:
+                  type: string
+                  example: acmeglobal
+                logo_url:
+                  type: string
+                  example: https://acmeglobal.com/new_logo.png
       responses:
         '200':
           description: Organization updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+    delete:
+      tags: [Organizations & User Provisioning]
+      summary: Soft delete / deactivate organization
+      operationId: deleteOrganization
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Organization deactivated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  is_active:
+                    type: boolean
+                    example: false
+                  message:
+                    type: string
+                    example: Organization deactivated
 
   /organizations/{id}/users:
     get:
       tags: [Organizations & User Provisioning]
       summary: List users belonging to an organization
       operationId: listOrgUsers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: List of organization users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserResponse'
     post:
       tags: [Organizations & User Provisioning]
       summary: Unified endpoint to provision Organization Admin or HR users
       operationId: provisionOrgUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, role]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: hr.jane@acme.com
+                password:
+                  type: string
+                  example: SecurePassword123!
+                first_name:
+                  type: string
+                  example: Jane
+                last_name:
+                  type: string
+                  example: Smith
+                phone:
+                  type: string
+                  example: "+1-555-0199"
+                role:
+                  type: string
+                  enum: [organization_admin, hr]
+                  example: hr
       responses:
         '201':
           description: User provisioned successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
 
+  # ---------------------------------------------------------------------------
+  # 3. JOB DESCRIPTIONS
+  # ---------------------------------------------------------------------------
   /jobs/parse:
     post:
       tags: [Job Descriptions]
       summary: Direct in-memory parsing of raw JD file or text
       operationId: parseJobDescription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                raw_text:
+                  type: string
+                  example: Senior Java Developer with 3-5 years experience in Spring Boot, PostgreSQL, and Docker.
       responses:
         '200':
           description: Parsed job description requirements
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  title:
+                    type: string
+                    example: Senior Java Developer
+                  job_type:
+                    type: string
+                    example: full_time
+                  work_type:
+                    type: string
+                    example: hybrid
+                  location:
+                    type: string
+                    example: Bangalore
+                  experience_min:
+                    type: integer
+                    example: 3
+                  experience_max:
+                    type: integer
+                    example: 5
+                  skills:
+                    type: string
+                    example: Java, Spring Boot, PostgreSQL, Docker
+                  parsed_jd:
+                    type: object
 
   /jobs:
     post:
       tags: [Job Descriptions]
       summary: Save & publish job description record
       operationId: createJobDescription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, parsed_jd]
+              properties:
+                title:
+                  type: string
+                  example: Senior Java Developer
+                description:
+                  type: string
+                  example: Looking for a Senior Java Developer...
+                job_type:
+                  type: string
+                  enum: [part_time, full_time, contract]
+                  example: full_time
+                work_type:
+                  type: string
+                  enum: [onsite, hybrid, remote]
+                  example: hybrid
+                location:
+                  type: string
+                  example: Bangalore
+                experience_min:
+                  type: integer
+                  example: 3
+                experience_max:
+                  type: integer
+                  example: 5
+                skills:
+                  type: string
+                  example: Java, Spring Boot, PostgreSQL, Docker
+                status:
+                  type: string
+                  enum: [draft, published, closed]
+                  example: published
+                parsed_jd:
+                  type: object
       responses:
         '201':
           description: Job description created and saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDescriptionResponse'
     get:
       tags: [Job Descriptions]
       summary: List job descriptions for organization
       operationId: listJobs
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, published, closed]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
           description: List of job descriptions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JobDescriptionResponse'
 
   /jobs/{id}:
     get:
       tags: [Job Descriptions]
       summary: View job description details
       operationId: getJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Job description detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDescriptionResponse'
     put:
       tags: [Job Descriptions]
       summary: Unified endpoint to update job description fields, parsed_jd requirements, and/or status
       operationId: updateJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  example: Lead Java Backend Engineer
+                description:
+                  type: string
+                  example: Updated job description text...
+                job_type:
+                  type: string
+                  enum: [part_time, full_time, contract]
+                work_type:
+                  type: string
+                  enum: [onsite, hybrid, remote]
+                location:
+                  type: string
+                experience_min:
+                  type: integer
+                experience_max:
+                  type: integer
+                skills:
+                  type: string
+                status:
+                  type: string
+                  enum: [draft, published, closed]
+                  example: closed
+                parsed_jd:
+                  type: object
       responses:
         '200':
           description: Job description updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDescriptionResponse'
 
+  # ---------------------------------------------------------------------------
+  # 4. PUBLIC CANDIDATE PORTAL
+  # ---------------------------------------------------------------------------
   /public/jobs:
     get:
       tags: [Public Candidate Portal]
       summary: Candidate browse published jobs for organization subdomain
       operationId: listPublicJobs
+      parameters:
+        - name: org_subdomain
+          in: query
+          schema:
+            type: string
+            example: acme
       responses:
         '200':
           description: Published jobs list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JobDescriptionResponse'
 
   /public/jobs/{id}:
     get:
       tags: [Public Candidate Portal]
       summary: Candidate view published job details
       operationId: getPublicJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Public job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDescriptionResponse'
 
   /public/jobs/{id}/apply:
     post:
       tags: [Public Candidate Portal]
-      summary: Candidate submit application with resume
+      summary: Candidate submit application with resume file
       operationId: applyJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [email, first_name, last_name, phone, resume]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: john.doe@example.com
+                first_name:
+                  type: string
+                  example: John
+                last_name:
+                  type: string
+                  example: Doe
+                phone:
+                  type: string
+                  example: "+1-555-0188"
+                resume:
+                  type: string
+                  format: binary
       responses:
         '201':
           description: Application submitted and resume scored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
 
+  # ---------------------------------------------------------------------------
+  # 5. CANDIDATE APPLICATIONS
+  # ---------------------------------------------------------------------------
   /jobs/{id}/applicants:
     get:
       tags: [Candidate Applications]
-      summary: HR view candidate applicants for a job
+      summary: HR view candidate applicants for a job sorted by score
       operationId: listApplicants
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: sort
+          in: query
+          schema:
+            type: string
+            default: resume_score_desc
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
       responses:
         '200':
           description: Applicants list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApplicationResponse'
 
   /applications/{id}:
     get:
       tags: [Candidate Applications]
       summary: View application details with parsed resume & match matrix
       operationId: getApplication
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Application details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
 
   /applications/{id}/status:
     patch:
       tags: [Candidate Applications]
       summary: Update candidate application status
       operationId: updateApplicationStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected]
+                  example: interview_scheduled
       responses:
         '200':
           description: Application status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
 
+  # ---------------------------------------------------------------------------
+  # 6. INTERVIEW SESSIONS & ANALYSIS
+  # ---------------------------------------------------------------------------
   /interview-sessions:
     post:
       tags: [Interview Sessions & Analysis]
       summary: Schedule interview session and generate static questions
       operationId: scheduleInterviewSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [application_id, scheduled_at]
+              properties:
+                application_id:
+                  type: string
+                  format: uuid
+                  example: 555e4567-e89b-12d3-a456-426614174000
+                interview_type:
+                  type: string
+                  enum: [screening_ai]
+                  example: screening_ai
+                scheduled_at:
+                  type: string
+                  format: date-time
+                  example: "2026-08-05T10:00:00Z"
+                comment:
+                  type: string
+                  example: Initial AI screening call
+                interview_metadata:
+                  type: object
       responses:
         '201':
           description: Interview session scheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewSessionResponse'
+
+  /interview-sessions/{id}/dispatch-bot:
+    post:
+      tags: [Interview Sessions & Analysis]
+      summary: Dispatch Attendee.dev meeting bot to Google Meet URL
+      operationId: dispatchMeetingBot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gmeet_link]
+              properties:
+                gmeet_link:
+                  type: string
+                  example: https://meet.google.com/abc-defg-hij
+                bot_name:
+                  type: string
+                  example: EZScreen Screening Assistant
+      responses:
+        '200':
+          description: Attendee bot dispatched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  interview_session_id:
+                    type: string
+                    format: uuid
+                  bot_id:
+                    type: string
+                    example: bot_99182371a
+                  status:
+                    type: string
+                    example: scheduled
+                  gmeet_link:
+                    type: string
+                    example: https://meet.google.com/abc-defg-hij
+                  dispatched_at:
+                    type: string
+                    example: "2026-08-05T09:55:00Z"
+                  message:
+                    type: string
+                    example: Attendee bot successfully scheduled for call entry
 
   /interview-sessions/{id}:
     get:
       tags: [Interview Sessions & Analysis]
       summary: View interview session details
       operationId: getInterviewSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewSessionResponse'
 
   /interview-sessions/{id}/status:
     patch:
       tags: [Interview Sessions & Analysis]
       summary: Update interview session status
       operationId: updateInterviewSessionStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [scheduled, rescheduled, completed, no_show, cancelled, failed]
+                  example: completed
       responses:
         '200':
           description: Session status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewSessionResponse'
 
   /interview-sessions/{id}/analysis:
     get:
       tags: [Interview Sessions & Analysis]
       summary: View AI transcript screening report for interview session
       operationId: getInterviewAnalysis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Screening analysis report
-
-  /webhooks/attendee:
-    post:
-      tags: [Webhooks]
-      summary: Attendee.dev meeting bot webhook ingestion
-      operationId: handleAttendeeWebhook
-      responses:
-        '200':
-          description: Webhook ingested successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewAnalysisResponse'
 
   # ---------------------------------------------------------------------------
-  # INTERNAL MICROSERVICE APIS (services/parsing-matching & services/ai-screening)
+  # 7. INTERNAL SERVICE APIS
   # ---------------------------------------------------------------------------
   /internal/v1/parse/jd:
     post:
-      tags: [Internal Microservices]
+      tags: [Internal Service]
       summary: Internal JD parsing engine (services/parsing-matching)
       operationId: internalParseJD
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                raw_text:
+                  type: string
       responses:
         '200':
           description: Parsed JD requirements JSON
+          content:
+            application/json:
+              schema:
+                type: object
 
   /internal/v1/parse/resume:
     post:
-      tags: [Internal Microservices]
+      tags: [Internal Service]
       summary: Internal resume parsing engine (services/parsing-matching)
       operationId: internalParseResume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resume_base64:
+                  type: string
+                file_name:
+                  type: string
       responses:
         '200':
           description: Parsed candidate resume JSON
+          content:
+            application/json:
+              schema:
+                type: object
 
   /internal/v1/match/resume-jd:
     post:
-      tags: [Internal Microservices]
+      tags: [Internal Service]
       summary: Internal candidate-JD matching score calculation (services/parsing-matching)
       operationId: internalMatchResumeJD
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parsed_jd:
+                  type: object
+                parsed_resume:
+                  type: object
       responses:
         '200':
           description: Param.ai matching result & score
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resume_score:
+                    type: number
+                  matching_result:
+                    type: object
 
   /internal/v1/screening/questions/generate:
     post:
-      tags: [Internal Microservices]
+      tags: [Internal Service]
       summary: Internal session question generation (services/ai-screening)
       operationId: internalGenerateQuestions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parsed_jd:
+                  type: object
+                parsed_resume:
+                  type: object
       responses:
         '200':
           description: Generated static interview questions array
-
-  /internal/v1/screening/bot/dispatch:
-    post:
-      tags: [Internal Microservices]
-      summary: Dispatches Attendee.dev meeting bot to Google Meet URL (services/ai-screening)
-      operationId: internalDispatchBot
-      responses:
-        '200':
-          description: Bot dispatched with bot_id
-
-  /internal/v1/screening/audio/stt:
-    post:
-      tags: [Internal Microservices]
-      summary: Speech-To-Text audio transcription pipeline (services/ai-screening)
-      operationId: internalSTT
-      responses:
-        '200':
-          description: Transcribed text tokens
-
-  /internal/v1/screening/audio/tts:
-    post:
-      tags: [Internal Microservices]
-      summary: Text-To-Speech voice synthesis pipeline (services/ai-screening)
-      operationId: internalTTS
-      responses:
-        '200':
-          description: Synthesized audio stream URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generated_questions:
+                    type: array
+                    items:
+                      type: object
 
   /internal/v1/screening/analysis/evaluate:
     post:
-      tags: [Internal Microservices]
+      tags: [Internal Service]
       summary: Internal transcript screening evaluation (services/ai-screening)
       operationId: internalEvaluateTranscript
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                transcript:
+                  type: array
+                  items:
+                    type: object
+                generated_questions:
+                  type: array
+                  items:
+                    type: object
       responses:
         '200':
           description: Screening analysis result & Q&A evaluation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  analysis_result:
+                    type: object
+                  question_answer:
+                    type: array
+                    items:
+                      type: object
+
+# ---------------------------------------------------------------------------
+# COMPONENTS & SCHEMAS
+# ---------------------------------------------------------------------------
+components:
+  schemas:
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 123e4567-e89b-12d3-a456-426614174000
+        organization_id:
+          type: string
+          format: uuid
+          example: 987e6543-e89b-12d3-a456-426614174000
+        email:
+          type: string
+          example: admin@acme.com
+        first_name:
+          type: string
+          example: Alice
+        last_name:
+          type: string
+          example: Admin
+        phone:
+          type: string
+          example: "+1-555-0199"
+        role:
+          type: string
+          enum: [super_admin, organization_admin, hr, candidate]
+          example: organization_admin
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+          example: active
+
+    OrganizationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 987e6543-e89b-12d3-a456-426614174000
+        name:
+          type: string
+          example: Acme Corporation
+        domain:
+          type: string
+          example: acme
+        logo_url:
+          type: string
+          example: https://acme.com/logo.png
+        is_active:
+          type: boolean
+          example: true
+
+    JobDescriptionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 444e4567-e89b-12d3-a456-426614174000
+        organization_id:
+          type: string
+          format: uuid
+          example: 987e6543-e89b-12d3-a456-426614174000
+        created_by:
+          type: string
+          format: uuid
+          example: 333e4567-e89b-12d3-a456-426614174000
+        title:
+          type: string
+          example: Senior Java Developer
+        description:
+          type: string
+          example: Looking for a Senior Java Developer...
+        job_type:
+          type: string
+          enum: [part_time, full_time, contract]
+          example: full_time
+        work_type:
+          type: string
+          enum: [onsite, hybrid, remote]
+          example: hybrid
+        location:
+          type: string
+          example: Bangalore
+        experience_min:
+          type: integer
+          example: 3
+        experience_max:
+          type: integer
+          example: 5
+        skills:
+          type: string
+          example: Java, Spring Boot, PostgreSQL, Docker
+        status:
+          type: string
+          enum: [draft, published, closed]
+          example: published
+        parsed_jd:
+          type: object
+
+    ApplicationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 555e4567-e89b-12d3-a456-426614174000
+        job_description_id:
+          type: string
+          format: uuid
+          example: 444e4567-e89b-12d3-a456-426614174000
+        candidate_id:
+          type: string
+          format: uuid
+          example: 777e4567-e89b-12d3-a456-426614174000
+        status:
+          type: string
+          enum: [applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected]
+          example: applied
+        candidate_yoe:
+          type: number
+          example: 5.0
+        resume_score:
+          type: number
+          example: 85.0
+        parsed_resume:
+          type: object
+        matching_result:
+          type: object
+
+    InterviewSessionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 666e4567-e89b-12d3-a456-426614174000
+        application_id:
+          type: string
+          format: uuid
+          example: 555e4567-e89b-12d3-a456-426614174000
+        scheduled_by:
+          type: string
+          format: uuid
+          example: 333e4567-e89b-12d3-a456-426614174000
+        interview_type:
+          type: string
+          enum: [screening_ai]
+          example: screening_ai
+        status:
+          type: string
+          enum: [scheduled, rescheduled, completed, no_show, cancelled, failed]
+          example: scheduled
+        scheduled_at:
+          type: string
+          format: date-time
+          example: "2026-08-05T10:00:00Z"
+        generated_questions:
+          type: array
+          items:
+            type: object
+
+    InterviewAnalysisResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 888e4567-e89b-12d3-a456-426614174000
+        interview_session_id:
+          type: string
+          format: uuid
+          example: 666e4567-e89b-12d3-a456-426614174000
+        application_id:
+          type: string
+          format: uuid
+          example: 555e4567-e89b-12d3-a456-426614174000
+        interview_type:
+          type: string
+          enum: [screening_ai]
+          example: screening_ai
+        recording_url:
+          type: string
+          example: https://media.attendee.dev/recordings/rec_99182.mp3
+        analysis_result:
+          type: object
+        question_answer:
+          type: array
+          items:
+            type: object
