@@ -99,7 +99,7 @@ The platform is designed as a **Modular Monolith inside a Monorepo**. This guara
    * System gatekeeper handling Authentication, Multi-tenant Organization Scoping (`organization_id`), User Provisioning, Public Job Board API, Interview Scheduling, and Webhook routing.
 
 2. **Parsing & Matching Engine (`services/parsing-matching`)**:
-   * Pure document parsing and matching engine. Extracts structured `parsed_jd` requirements, parses candidate resumes (`parsed_resume`), and computes Param.ai candidate-JD matching scores (`matching_result`).
+   * Pure document parsing and matching engine. Extracts structured `parsed_jd` requirements, parses candidate resumes (`parsed_resume`), and computes candidate-JD matching scores (`matching_result`).
    * *Standalone Capability*: Can be packaged and deployed independently as a "Resume & JD Parsing API".
 
 3. **AI Screening Microservice (`services/ai-screening`)**:
@@ -389,7 +389,7 @@ sequenceDiagram
     
     B->>Q: Enqueue parse-resume job
     Q->>W: Dispatch
-    Note over W: Download resume from S3<br>Extract qualifications & skills<br>Match against JD requirements<br>Calculate Param.ai score (0-10)<br>Generate fit recommendation & gaps<br><br>Update DB record<br>status = resume_screened
+    Note over W: Download resume from S3<br>Extract qualifications & skills<br>Match against JD requirements<br>Calculate score (0-10)<br>Generate fit recommendation & gaps<br><br>Update DB record<br>status = resume_screened
     
     HR->>F: Open job candidate dashboard
     F->>B: GET /api/v1/jobs/:id/applicants
