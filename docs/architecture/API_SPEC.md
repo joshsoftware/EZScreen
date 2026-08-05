@@ -1,644 +1,581 @@
-# API Specification - AI-Powered Recruitment Platform
+# EZScreen REST & Inter-Service API Specification
 
-> **Source of Truth**: This document is the authoritative reference for all API contracts - routes, methods, roles, request/response schemas, status codes, error format, and query parameters.
->
-> For architectural decisions explaining *why* the API is designed this way, see [SYSTEM_DESIGN.md](../architecture/SYSTEM_DESIGN.md) §5.
-
----
-
-## Table of Contents
-
-1. [Conventions](#1-conventions)
-2. [Authentication Endpoints (MVP)](#2-authentication-endpoints-mvp)
-3. [Job Description Endpoints (MVP)](#3-job-description-endpoints-mvp)
-4. [Public Endpoints (MVP)](#4-public-endpoints-mvp)
-5. [Application Endpoints (MVP)](#5-application-endpoints-mvp)
-6. [Interview Scheduling Endpoints (MVP)](#6-interview-scheduling-endpoints-mvp)
-7. [User & Company Management Endpoints (Post-MVP)](#7-user--company-management-endpoints-post-mvp)
-8. [System Endpoints (MVP)](#8-system-endpoints-mvp)
-9. [Phase 2 Endpoints](#9-phase-2-endpoints)
+> **Version**: 1.0.0  
+> **Base URL**: `https://api.ezscreen.io/api/v1` (Production Core API) / `http://localhost:8000/api/v1` (Local Dev)  
+> **Internal Service Base URL**: `http://parsing-matching:8001/internal/v1`, `http://ai-screening:8002/internal/v1`  
+> **Format**: JSON (`Content-Type: application/json`)  
+> **Auth**: Bearer Token (`Authorization: Bearer <jwt>`)
 
 ---
 
-## 1. Conventions
+## 1. System Roles & Multi-Tenancy Architecture
 
-### Base Path
-
-All endpoints are prefixed with `/api/v1/`.
-
-### Authentication
-
-Unless explicitly marked as public, all endpoints require a valid JWT access token:
-```
-Authorization: Bearer <jwt_token>
-```
-
-Token lifecycle:
-- Access token: 15-30 min TTL, stored in memory
-- Refresh token: 7 day TTL, stored in httpOnly cookie
-- On 401: client silently refreshes via `POST /auth/refresh`
-
-### Error Response Format
-
-All errors return a consistent JSON structure:
-
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Human-readable description",
-    "details": [
-      {
-        "field": "title",
-        "message": "Title is required"
-      }
-    ]
-  }
-}
-```
-
-### Common Status Codes
-
-| Code | Meaning |
-|------|---------|
-| 200 | Success |
-| 201 | Created |
-| 204 | No content (successful delete) |
-| 400 | Bad request (malformed input) |
-| 401 | Unauthorized (missing/invalid token) |
-| 403 | Forbidden (insufficient role/permissions) |
-| 404 | Resource not found |
-| 409 | Conflict (e.g., duplicate application) |
-| 422 | Unprocessable entity (validation error, infected file, publishing gate) |
-| 429 | Rate limit exceeded |
-| 500 | Internal server error |
-
-### Pagination
-
-All list endpoints support pagination:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `page` | integer | 1 | Page number |
-| `per_page` | integer | 20 | Results per page (max: 50) |
-
-Response includes pagination metadata:
-```json
-{
-  "page": 1,
-  "per_page": 20,
-  "total_pages": 5,
-  "total_count": 95,
-  "data": [...]
-}
-```
-
-### Idempotency
-
-Endpoints that create resources support the `Idempotency-Key` header:
-```
-Idempotency-Key: <unique-uuid>
-```
-If a request with the same key is received within 24 hours, the original response is returned without creating a duplicate.
-
-### Rate Limiting
-
-| Endpoint Group | Limit |
-|----------------|-------|
-| Public job application | 5 per hour per IP per JD |
-| Auth login | 10 per 15 min per IP |
-| AI-intensive endpoints | 20 per minute per authenticated user |
-| General API | 300 per minute per authenticated user |
-
-### File Uploads
-
-File uploads use **pre-signed S3 URLs** to reduce backend load:
-1. Client requests an upload URL via `POST /api/v1/jobs/upload-url` or `POST /api/v1/public/jobs/{id}/upload-url`.
-2. Backend returns a pre-signed PUT URL and a unique `file_key`.
-3. Client uploads the file directly to S3 via PUT.
-4. Client submits the final form with the `file_key` in a standard JSON payload.
-- Allowed types: PDF, DOCX
-- Max size: 10MB
-- Validated by MIME type AND magic byte signature
-- Scanned for malware before storage
-
-### File Downloads (Signed URLs)
-
-All file downloads (resumes, JD documents) also use pre-signed URLs:
-- Backend generates signed GET URL with 15-minute TTL
-- Frontend uses the signed URL to download/display
-- Object storage bucket remains private
+| Role | Scope | Key Capabilities & Provisioning Rules |
+| :--- | :--- | :--- |
+| **`super_admin`** | Platform Scope (`organization_id NULL`) | Platform owner. Creates Organizations (`organizations`); provisions `organization_admin` and `hr` users. |
+| **`organization_admin`** | Organization Scope (`organization_id NOT NULL`) | Organization Administrator. Bound strictly to one organization. Provisions secondary `organization_admin` and `hr` users within their organization. |
+| **`hr`** | Organization Scope (`organization_id NOT NULL`) | Operational HR user. Bound strictly to one organization. Parses & publishes JDs, views applicant scores, schedules AI interview sessions, and reviews screening reports. |
+| **`candidate`** | Candidate Scope (`organization_id NULL`) | Guest / Candidate applicant. Browses published jobs via organization subdomain (`{org}.ezscreen.io`) and submits resume applications. |
 
 ---
 
-## 2. Authentication Endpoints (MVP)
+## 2. Modular Architecture & Inter-Service API Boundaries
 
-All auth endpoints are public (no token required) except where noted.
+The API architecture mirrors our **Modular Monolith / Microservices boundary design**:
 
-### POST /api/v1/auth/register
-**Purpose**: Create a new user account
-**Phase**: MVP
-**Roles**: Public
+```
+ ┌────────────────────────────────────────────────────────────────────────┐
+ │                      React SPA (apps/web-frontend)                     │
+ └───────────────────────────────────┬────────────────────────────────────┘
+                                     │ External REST / Webhook
+                                     ▼
+ ┌────────────────────────────────────────────────────────────────────────┐
+ │                   Core API Service (apps/core-api)                     │
+ └─────────────────┬──────────────────────────────────────┬───────────────┘
+                   │                                      │
+  Internal REST    │                                      │ Internal REST
+  POST /parse/jd   │                                      │ POST /questions/generate
+  POST /match      ▼                                      ▼ POST /bot/dispatch & /evaluate
+ ┌────────────────────────────────────┐  ┌────────────────────────────────────┐
+ │    Parsing & Matching Service      │  │        AI Screening Service        │
+ │    (services/parsing-matching)     │  │        (services/ai-screening)      │
+ └────────────────────────────────────┘  └────────────────────────────────────┘
+```
+
+---
+
+## 3. Core API Service Endpoints (`apps/core-api`)
+
+### A. Authentication & Account Management
+
+#### POST /api/v1/auth/login
+**Purpose**: Authenticate Super Admin, Organization Admin, or HR user and return JWT access token.  
+**Roles**: Public  
 
 ```json
 Request:
 {
-  "email": "hr@company.com",
-  "password": "SecurePass123!",
-  "first_name": "Jane",
-  "last_name": "Doe",
-  "company_id": "uuid"
-}
-
-Response 201:
-{
-  "id": "uuid",
-  "email": "hr@company.com",
-  "first_name": "Jane",
-  "last_name": "Doe",
-  "created_at": "2026-07-07T10:00:00Z"
-}
-```
-
-### POST /api/v1/auth/login
-**Purpose**: Authenticate and receive tokens
-**Phase**: MVP
-**Roles**: Public
-
-```json
-Request:
-{
-  "email": "hr@company.com",
-  "password": "SecurePass123!"
+  "email": "admin@acme.com",
+  "password": "SecurePassword123!"
 }
 
 Response 200:
 {
-  "access_token": "eyJhbG...",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "token_type": "bearer",
-  "expires_in": 1800,
+  "expires_in": 3600,
   "user": {
-    "id": "uuid",
-    "email": "hr@company.com",
-    "roles": ["hr_manager"],
-    "company_id": "uuid"
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "email": "admin@acme.com",
+    "first_name": "Alice",
+    "last_name": "Admin",
+    "role": "organization_admin",
+    "status": "active",
+    "organization_id": "987e6543-e89b-12d3-a456-426614174000"
   }
 }
 ```
-Refresh token set as httpOnly cookie.
 
-### POST /api/v1/auth/refresh
-**Purpose**: Issue new access token using refresh token
-**Phase**: MVP
-**Roles**: Authenticated (refresh token in cookie)
+#### POST /api/v1/auth/logout
+**Purpose**: Revoke current session token and clear refresh cookie.  
+**Roles**: Authenticated  
 
-### POST /api/v1/auth/logout
-**Purpose**: Revoke refresh token
-**Phase**: MVP
-**Roles**: Authenticated
+#### POST /api/v1/auth/forgot-password
+**Purpose**: Request a password reset link via email.  
+**Roles**: Public  
 
-### POST /api/v1/auth/forgot-password
-**Purpose**: Request password reset email
-**Phase**: MVP
-**Roles**: Public
+#### POST /api/v1/auth/reset-password
+**Purpose**: Reset password using token received in email.  
+**Roles**: Public (valid token required)  
 
-### POST /api/v1/auth/reset-password
-**Purpose**: Reset password using token from email
-**Phase**: MVP
-**Roles**: Public (valid reset token required)
-
-### GET /api/v1/auth/me
-**Purpose**: Get current user profile
-**Phase**: MVP
-**Roles**: Authenticated
-
-### PUT /api/v1/auth/me
-**Purpose**: Update current user profile
-**Phase**: MVP
-**Roles**: Authenticated
+#### GET /api/v1/auth/me
+**Purpose**: Retrieve profile of current authenticated user.  
+**Roles**: Authenticated  
 
 ---
 
-## 3. Job Description Endpoints (MVP)
+### B. Organization & User Provisioning Endpoints
 
-### Create Job Description & Upload URL
-
-To upload a JD document, the client must first request a pre-signed upload URL, then submit the JD form with the resulting `document_key`.
-
-#### 1. Request Upload URL
+#### POST /api/v1/organizations
+**Purpose**: Super Admin creates a new Organization (`organizations`).  
+**Roles**: `super_admin`  
 
 ```json
-POST /api/v1/jobs/upload-url
-Authorization: Bearer <jwt>
-
 Request:
 {
-  "content_type": "application/pdf",
-  "file_name": "backend_jd.pdf"
+  "name": "Acme Corporation",
+  "domain": "acme",
+  "logo_url": "https://acme.com/logo.png"
 }
 
 Response 201:
 {
-  "upload_url": "https://s3.amazonaws.com/bucket/jds/uuid?signature...",
-  "document_key": "jds/uuid",
-  "expires_in": 900
+  "id": "987e6543-e89b-12d3-a456-426614174000",
+  "name": "Acme Corporation",
+  "domain": "acme",
+  "logo_url": "https://acme.com/logo.png",
+  "is_active": true,
+  "created_at": "2026-08-04T12:00:00Z"
 }
 ```
 
-#### 2. Create Job Description
+#### GET /api/v1/organizations
+**Purpose**: List all organizations across the platform.  
+**Roles**: `super_admin`  
 
-### GET /api/v1/jobs
-**Purpose**: List all jobs for the authenticated user's company
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`, `super_admin`
+#### GET /api/v1/organizations/{id}
+**Purpose**: View details for organization `{id}`.  
+**Roles**: `super_admin`, `organization_admin` (own org)  
 
-**Query Parameters**:
+#### PUT /api/v1/organizations/{id}
+**Purpose**: Update organization details (name, domain, logo URL).  
+**Roles**: `super_admin`, `organization_admin` (own org)  
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `status` | string | Filter by JD status |
-| `page` | integer | Page number |
-| `per_page` | integer | Results per page |
+#### DELETE /api/v1/organizations/{id}
+**Purpose**: Soft delete / deactivate an organization (`is_active = false`).  
+**Roles**: `super_admin`  
 
-### POST /api/v1/jobs
-**Purpose**: Create a new job description
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`
-**Headers**: `Idempotency-Key` supported
-**Content-Type**: `application/json`
+#### GET /api/v1/organizations/{id}/users
+**Purpose**: List all users belonging to organization `{id}`.  
+**Roles**: `super_admin`, `organization_admin` (own org)  
+
+#### POST /api/v1/organizations/{id}/users
+**Purpose**: Unified provisioning endpoint to create an `organization_admin` or `hr` user for organization `{id}`. Accessible by both `super_admin` and `organization_admin`.  
+**Roles**: `super_admin`, `organization_admin` (own org)  
 
 ```json
 Request:
 {
-  "title": "Senior Backend Engineer",
-  "source_type": "document",
-  "document_key": "jds/uuid",
-  "status": "draft"
+  "email": "hr.jane@acme.com",
+  "password": "SecurePassword123!",
+  "first_name": "Jane",
+  "last_name": "Smith",
+  "phone": "+1-555-0199",
+  "role": "hr"
 }
 
 Response 201:
 {
-  "id": "uuid",
-  "title": "Senior Backend Engineer",
-  "status": "draft",
-  "created_at": "2026-07-07T10:00:00Z",
-  "message": "Job description created. AI processing will begin shortly."
+  "id": "333e4567-e89b-12d3-a456-426614174000",
+  "organization_id": "987e6543-e89b-12d3-a456-426614174000",
+  "role": "hr",
+  "email": "hr.jane@acme.com",
+  "first_name": "Jane",
+  "last_name": "Smith",
+  "phone": "+1-555-0199",
+  "status": "active",
+  "created_at": "2026-08-04T12:10:00Z"
 }
 ```
 
-### GET /api/v1/jobs/{id}
-**Purpose**: Get job description details including extracted data
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`, `super_admin`
+---
 
-### PUT /api/v1/jobs/{id}
-**Purpose**: Update job description (edit title, description, extracted_data fields)
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`
+### C. Job Description Endpoints (Direct Parsing, Unified Update)
 
-### DELETE /api/v1/jobs/{id}
-**Purpose**: Delete job description (draft or closed only)
-**Phase**: MVP
-**Roles**: `hr_manager`, `company_admin`
+#### POST /api/v1/jobs/parse
+**Purpose**: Direct in-memory parsing of raw JD file (PDF/DOCX) or raw text. Calls `services/parsing-matching` internally and returns extracted `parsed_jd` fields directly to the UI form for HR verification.  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
 
-### PATCH /api/v1/jobs/{id}/status
-**Purpose**: Change JD status (publish, close, unpublish)
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`
+```json
+Request (JSON or Multipart Form-Data):
+{
+  "raw_text": "Senior Java Developer with 3-5 years experience in Spring Boot, PostgreSQL, and Docker."
+}
 
-**Publishing gate**: Transition to `published` requires `title` and `extracted_data.required_skills` to be populated. Returns 422 if missing.
+Response 200:
+{
+  "title": "Senior Java Developer",
+  "job_type": "full_time",
+  "work_type": "hybrid",
+  "location": "Bangalore",
+  "experience_min": 3,
+  "experience_max": 5,
+  "skills": "Java, Spring Boot, PostgreSQL, Docker",
+  "parsed_jd": {
+    "role": "Senior Java Developer",
+    "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
+    "preferred_skills": ["Docker", "AWS"],
+    "experience": {"min": 3, "max": 5},
+    "education": "Bachelor Degree",
+    "responsibilities": ["Develop REST APIs", "Optimize DB queries"]
+  }
+}
+```
+
+#### POST /api/v1/jobs
+**Purpose**: Save and publish a `job_descriptions` record using HR-verified fields directly into PostgreSQL.  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
 
 ```json
 Request:
 {
+  "title": "Senior Java Developer",
+  "description": "Looking for a Senior Java Developer...",
+  "job_type": "full_time",
+  "work_type": "hybrid",
+  "location": "Bangalore",
+  "experience_min": 3,
+  "experience_max": 5,
+  "skills": "Java, Spring Boot, PostgreSQL, Docker",
+  "parsed_jd": {
+    "role": "Senior Java Developer",
+    "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
+    "preferred_skills": ["Docker", "AWS"],
+    "experience": {"min": 3, "max": 5},
+    "education": "Bachelor Degree",
+    "responsibilities": ["Develop REST APIs", "Optimize DB queries"]
+  },
   "status": "published"
 }
 
-Response 200:
+Response 201:
 {
-  "id": "uuid",
+  "id": "444e4567-e89b-12d3-a456-426614174000",
+  "organization_id": "987e6543-e89b-12d3-a456-426614174000",
+  "created_by": "333e4567-e89b-12d3-a456-426614174000",
+  "title": "Senior Java Developer",
+  "job_type": "full_time",
+  "work_type": "hybrid",
+  "location": "Bangalore",
+  "experience_min": 3,
+  "experience_max": 5,
+  "skills": "Java, Spring Boot, PostgreSQL, Docker",
   "status": "published",
-  "published_at": "2026-07-07T12:00:00Z"
+  "parsed_jd": { ... },
+  "published_at": "2026-08-04T12:15:00Z",
+  "created_at": "2026-08-04T12:15:00Z"
 }
 ```
 
-### POST /api/v1/jobs/{id}/reprocess
-**Purpose**: Trigger re-extraction of AI data from the original document
-**Phase**: Post-MVP
-**Roles**: `hr_manager`, `company_admin`, `super_admin`
+#### GET /api/v1/jobs
+**Purpose**: List all job descriptions for the authenticated user's organization.  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
 
-### GET /api/v1/jobs/{id}/applicants
-**Purpose**: Get ranked applicant list for a job description
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`, `super_admin`
+#### GET /api/v1/jobs/{id}
+**Purpose**: Get detailed job description and `parsed_jd` JSONB payload.  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
 
-**Query Parameters**:
+#### PUT /api/v1/jobs/{id}
+**Purpose**: Unified endpoint to update job description fields, `parsed_jd` requirements, AND/OR status (`draft`, `published`, `closed`).  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `sort` | string | Sort field: `score` (default), `date`, `name`, `experience` |
-| `order` | string | Sort order: `desc` (default), `asc` |
-| `status` | string | Filter by application status |
-| `score_min` | float | Minimum matching score (0-10) |
-| `score_max` | float | Maximum matching score (0-10) |
-| `experience_min` | integer | Minimum years of experience |
-| `experience_max` | integer | Maximum years of experience |
-| `page` | integer | Page number |
-| `per_page` | integer | Results per page (max: 50) |
+```json
+Request:
+{
+  "title": "Lead Java Backend Engineer",
+  "description": "Updated job description text...",
+  "status": "closed"
+}
+
+Response 200:
+{
+  "id": "444e4567-e89b-12d3-a456-426614174000",
+  "title": "Lead Java Backend Engineer",
+  "status": "closed",
+  "updated_at": "2026-08-04T19:30:00Z"
+}
+```
+
+---
+
+### D. Public Candidate Endpoints (Subdomain Scoped)
+
+#### GET /api/v1/public/jobs
+**Purpose**: Public candidates view published jobs for an organization resolved via subdomain (`{org}.ezscreen.io`).  
+**Roles**: `candidate` (Public)  
+
+#### GET /api/v1/public/jobs/{id}
+**Purpose**: View details of a specific published job description.  
+**Roles**: `candidate` (Public)  
+
+#### POST /api/v1/public/jobs/{id}/apply
+**Purpose**: Candidate submits job application with resume file. Automatically invokes `services/parsing-matching` to parse resume (`parsed_resume`) and calculate matching score (`matching_result`).  
+**Roles**: `candidate` (Public)  
+
+```json
+Request (Multipart Form-Data):
+{
+  "email": "john.doe@example.com",
+  "first_name": "John",
+  "last_name": "Doe",
+  "phone": "+1-555-0188",
+  "resume": "<file_binary>"
+}
+
+Response 201:
+{
+  "id": "555e4567-e89b-12d3-a456-426614174000",
+  "job_description_id": "444e4567-e89b-12d3-a456-426614174000",
+  "candidate_id": "777e4567-e89b-12d3-a456-426614174000",
+  "status": "applied",
+  "resume_score": 85.00,
+  "candidate_yoe": 5.0,
+  "applied_at": "2026-08-04T12:30:00Z"
+}
+```
+
+---
+
+### E. Candidate Visibility & Application Management Endpoints
+
+#### GET /api/v1/jobs/{id}/applicants
+**Purpose**: List all candidate applications for a job posting sorted by `resume_score` DESC.  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
+
+#### GET /api/v1/applications/{id}
+**Purpose**: Get full application details, including `parsed_resume` and `matching_result` JSONB schemas.  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
 
 ```json
 Response 200:
 {
-  "job_id": "uuid",
-  "job_title": "Senior Backend Engineer",
-  "total_applicants": 45,
-  "page": 1,
-  "per_page": 20,
-  "total_pages": 3,
-  "applicants": [
+  "id": "555e4567-e89b-12d3-a456-426614174000",
+  "job_description_id": "444e4567-e89b-12d3-a456-426614174000",
+  "candidate_id": "777e4567-e89b-12d3-a456-426614174000",
+  "status": "applied",
+  "candidate_yoe": 5.0,
+  "resume_score": 85.00,
+  "parsed_resume": {
+    "candidate_name": "John Doe",
+    "email": "john.doe@example.com",
+    "phone": "+1-555-0188",
+    "summary": "5 years Java Backend Developer",
+    "skills": ["Java", "Spring Boot", "PostgreSQL", "Docker"],
+    "experience_years": 5.0,
+    "education": ["B.Tech Computer Science"]
+  },
+  "matching_result": {
+    "score_breakdown": {
+      "skills_score": 40,
+      "experience_score": 30,
+      "education_score": 15,
+      "overall_score": 85
+    },
+    "matched_skills": ["Java", "Spring Boot", "PostgreSQL"],
+    "missing_skills": ["Kafka", "Redis"],
+    "experience_match": true,
+    "education_match": true,
+    "reasoning": ["Candidate meets experience min (5 >= 3)", "Matched 3 core skills"]
+  }
+}
+```
+
+#### PATCH /api/v1/applications/{id}/status
+**Purpose**: HR updates application status (`applied`, `interview_scheduled`, `interview_completed`, `shortlist_for_l1`, `rejected`).  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
+
+---
+
+### F. Interview Session & Analysis Endpoints
+
+#### POST /api/v1/interview-sessions
+**Purpose**: HR schedules an AI screening interview session (`interview_session`). Triggers internal call to `services/ai-screening` to generate static session questions (`generated_questions`).  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
+
+```json
+Request:
+{
+  "application_id": "555e4567-e89b-12d3-a456-426614174000",
+  "interview_type": "screening_ai",
+  "scheduled_at": "2026-08-05T10:00:00Z",
+  "comment": "Initial AI screening call",
+  "interview_metadata": {
+    "gmeet_link": "https://meet.google.com/abc-defg-hij",
+    "time_zone": "Asia/Kolkata"
+  }
+}
+
+Response 201:
+{
+  "id": "666e4567-e89b-12d3-a456-426614174000",
+  "application_id": "555e4567-e89b-12d3-a456-426614174000",
+  "scheduled_by": "333e4567-e89b-12d3-a456-426614174000",
+  "interview_type": "screening_ai",
+  "status": "scheduled",
+  "scheduled_at": "2026-08-05T10:00:00Z",
+  "generated_questions": [
     {
-      "id": "uuid",
-      "candidate_first_name": "Alice",
-      "candidate_last_name": "Smith",
-      "candidate_email": "alice@example.com",
-      "matching_score": 9.2,
-      "years_of_experience": 7,
-      "status": "screened",
-      "applied_at": "2026-07-05T14:20:00Z",
-      "matching_result": {
-        "skills_match": { "score": 0.95 },
-        "experience_match": { "score": 0.90 },
-        "education_match": { "score": 0.88 },
-        "overall_fit": { "recommendation": "strong_fit" }
-      }
+      "id": 1,
+      "question": "How have you handled container orchestration using Kubernetes in production?",
+      "expected_keywords": ["Pods", "Deployments", "Services", "Autoscaling"],
+      "example_depth": "Candidate should explain pod lifecycle and deployment manifests.",
+      "follow_up": "Can you share a specific production issue you debugged?"
     }
   ]
 }
 ```
 
-### GET /api/v1/jobs/{id}/analytics
-**Purpose**: Job statistics (application count, score distribution, etc.)
-**Phase**: Future Scope
-**Roles**: `hr_manager`, `company_admin`
+#### GET /api/v1/interview-sessions/{id}
+**Purpose**: Get details of interview session `{id}`.  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
 
----
+#### PATCH /api/v1/interview-sessions/{id}/status
+**Purpose**: Update session status (`scheduled`, `rescheduled`, `completed`, `no_show`, `cancelled`, `failed`).  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
 
-## 4. Public Endpoints (MVP)
-
-All public endpoints require NO authentication.
-
-### Apply for Job & Upload URL
-
-To apply with a resume, the client must first request a pre-signed upload URL, then submit the application with the resulting `resume_key`.
-
-#### 1. Request Upload URL (Public)
+#### GET /api/v1/interview-sessions/{id}/analysis
+**Purpose**: Retrieve AI transcript screening report (`interview_analysis`) for a completed session.  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
 
 ```json
-POST /api/v1/public/jobs/{job_id}/upload-url
-
-Request:
+Response 200:
 {
-  "content_type": "application/pdf",
-  "file_name": "john_doe_resume.pdf"
-}
-
-Response 201:
-{
-  "upload_url": "https://s3.amazonaws.com/bucket/resumes/uuid?signature...",
-  "resume_key": "resumes/uuid",
-  "expires_in": 900
-}
-```
-
-#### 2. Submit Application
-
-### GET /api/v1/public/jobs
-**Purpose**: Browse published jobs
-**Phase**: MVP
-**Roles**: Public (no auth)
-
-### GET /api/v1/public/jobs/{id}
-**Purpose**: View published job details
-**Phase**: MVP
-**Roles**: Public (no auth)
-
-### POST /api/v1/public/jobs/{id}/apply
-**Purpose**: Submit a job application (guest or authenticated)
-**Phase**: MVP
-**Roles**: Public (no auth required)
-**Headers**: `Idempotency-Key` supported
-**Content-Type**: `application/json`
-
-```json
-POST /api/v1/public/jobs/{job_id}/apply
-Idempotency-Key: <unique-uuid>
-
-Request:
-{
-  "candidate_first_name": "John",
-  "candidate_last_name": "Doe",
-  "candidate_email": "john@example.com",
-  "candidate_phone": "+1234567890",
-  "resume_key": "resumes/uuid",
-  "cover_letter": "I am excited to apply..."
-}
-
-Response 201:
-{
-  "id": "uuid",
-  "job_id": "uuid",
-  "status": "applied",
-  "message": "Application submitted. We'll review your profile shortly.",
-  "applied_at": "2026-07-07T11:30:00Z"
-}
-```
-
-**Duplicate check**: Returns 409 if the same email already has an application for this JD.
-
----
-
-## 5. Application Endpoints (MVP)
-
-### GET /api/v1/applications
-**Purpose**: List all applications (HR view, company-scoped)
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`, `super_admin`
-
-### GET /api/v1/applications/{id}
-**Purpose**: Get full application details including AI scoring breakdown, resume download (signed URL)
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`, `super_admin`, `candidate` (own only)
-
-### PATCH /api/v1/applications/{id}/status
-**Purpose**: Update application status (shortlist, reject)
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`
-
-**Valid transitions**:
-- `screened` → `shortlisted`
-- `screened` → `rejected`
-- `shortlisted` → `rejected`
-- `shortlisted` → `interview_scheduled` (triggers scheduling flow)
-
-```json
-Request:
-{
-  "status": "shortlisted"
-}
-```
-
-### PATCH /api/v1/applications/bulk/status
-**Purpose**: Bulk update application status (shortlist/reject multiple)
-**Phase**: Future Scope
-**Roles**: `hr_manager`, `company_admin`
-
-### POST /api/v1/applications/{id}/reprocess
-**Purpose**: Trigger re-parsing and re-scoring
-**Phase**: Post-MVP
-**Roles**: `hr_manager`, `company_admin`, `super_admin`
-
----
-
-## 6. Interview Scheduling Endpoints (MVP)
-
-### POST /api/v1/interviews
-**Purpose**: Create interview invitation (Option A: direct invite, or Option B: self-scheduling)
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`
-
-**Option A - Direct Invite**:
-```json
-Request:
-{
-  "application_id": "uuid",
-  "interview_type": "initial",
-  "meeting_link": "https://meet.google.com/abc",
-  "scheduled_at": "2026-07-15T10:00:00Z"
-}
-
-Response 201:
-{
-  "id": "uuid",
-  "status": "scheduled",
-  "scheduled_at": "2026-07-15T10:00:00Z"
-}
-```
-
-**Option B - Self-Scheduling**:
-```json
-Request:
-{
-  "application_id": "uuid",
-  "interview_type": "initial",
-  "time_slot_options": [
-    "2026-07-15T10:00:00Z",
-    "2026-07-16T14:00:00Z",
-    "2026-07-17T11:00:00Z"
+  "id": "888e4567-e89b-12d3-a456-426614174000",
+  "interview_session_id": "666e4567-e89b-12d3-a456-426614174000",
+  "application_id": "555e4567-e89b-12d3-a456-426614174000",
+  "interview_type": "screening_ai",
+  "recording_url": "https://media.attendee.dev/recordings/rec_99182.mp3",
+  "analysis_result": {
+    "overall_feedback": "Candidate demonstrated strong backend development skills.",
+    "technical_summary": "Strong in Java and Spring Boot.",
+    "communication_summary": "Clear communication with good confidence.",
+    "skill_breakdown": {
+      "Java": 9,
+      "Spring Boot": 8,
+      "PostgreSQL": 9,
+      "Kafka": 5
+    },
+    "final_recommendation": "Shortlist for L1"
+  },
+  "question_answer": [
+    {
+      "question_id": 1,
+      "question": "How have you handled container orchestration using Kubernetes in production?",
+      "candidate_answer": "I deployed Pods, Services, and set up HPA scaling...",
+      "score": 9
+    }
   ],
-  "slot_deadline": "2026-07-14T10:00:00Z"
-}
-
-Response 201:
-{
-  "id": "uuid",
-  "status": "pending",
-  "scheduling_token": "abc123",
-  "scheduling_url": "/interviews/schedule/abc123"
+  "created_at": "2026-08-05T10:35:00Z"
 }
 ```
 
-### GET /api/v1/interviews/{id}
-**Purpose**: Get interview details
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`, `super_admin`
+#### POST /api/v1/webhooks/attendee
+**Purpose**: Webhook listener for Attendee meeting bot status, transcript, and audio recording. Ingests transcript Q&A and triggers `services/ai-screening` to populate `interview_analysis`.  
+**Roles**: Public (Webhook Signature Validated)  
 
-### PUT /api/v1/interviews/{id}
-**Purpose**: Update interview (change time, meeting link)
-**Phase**: MVP
-**Roles**: `hr_manager`, `recruiter`, `company_admin`
+---
 
-### DELETE /api/v1/interviews/{id}
-**Purpose**: Cancel interview
-**Phase**: MVP
-**Roles**: `hr_manager`, `company_admin`
+## 4. Internal Inter-Service Microservice APIs
 
-### GET /api/v1/interviews/schedule/{token}
-**Purpose**: Public page - candidate views available time slots
-**Phase**: MVP
-**Roles**: Public (valid scheduling token required)
+These private internal endpoints are invoked exclusively over the internal cluster network between service modules (`apps/core-api` $\leftrightarrow$ `services/parsing-matching` & `services/ai-screening`).
 
-### POST /api/v1/interviews/schedule/{token}
-**Purpose**: Candidate selects a time slot
-**Phase**: MVP
-**Roles**: Public (valid scheduling token required)
+---
+
+### A. Parsing & Matching Microservice (`services/parsing-matching`)
+* **Base URL**: `http://parsing-matching:8001/internal/v1`
+
+#### POST /internal/v1/parse/jd
+**Caller**: `apps/core-api`  
+**Purpose**: Parses raw JD document/text into structured `parsed_jd` JSON.  
+
+#### POST /internal/v1/parse/resume
+**Caller**: `apps/core-api`  
+**Purpose**: Parses uploaded candidate resume file into structured `parsed_resume` JSON.  
+
+#### POST /internal/v1/match/resume-jd
+**Caller**: `apps/core-api`  
+**Purpose**: Evaluates `parsed_resume` against `parsed_jd` using Param.ai scoring algorithm. Returns overall `resume_score` and detailed `matching_result` JSON.  
+
+---
+
+### B. AI Screening Microservice (`services/ai-screening`)
+* **Base URL**: `http://ai-screening:8002/internal/v1`
+
+#### POST /internal/v1/screening/questions/generate
+**Caller**: `apps/core-api`  
+**Purpose**: Receives `parsed_jd` and `parsed_resume` for an application $\rightarrow$ Generates static session questions (`generated_questions`) tailored to candidate skill gaps.  
+
+#### POST /internal/v1/screening/bot/dispatch
+**Caller**: `apps/core-api` (5 mins before scheduled session time or HR manual trigger)  
+**Purpose**: Dispatches Attendee.dev meeting bot to join the Google Meet URL. Returns `bot_id` and sets `interview_metadata`.  
 
 ```json
 Request:
 {
-  "selected_slot": "2026-07-16T14:00:00Z"
+  "interview_session_id": "666e4567-e89b-12d3-a456-426614174000",
+  "gmeet_link": "https://meet.google.com/abc-defg-hij",
+  "bot_name": "EZScreen Screening Assistant"
 }
 
 Response 200:
 {
-  "status": "scheduled",
-  "scheduled_at": "2026-07-16T14:00:00Z",
-  "message": "Interview scheduled. Confirmation emails sent."
+  "bot_id": "bot_99182371a",
+  "status": "dispatching",
+  "dispatched_at": "2026-08-05T09:55:00Z"
 }
 ```
 
----
+#### POST /internal/v1/screening/audio/stt
+**Caller**: `services/ai-screening` internal worker  
+**Purpose**: Converts live audio stream into real-time text transcript tokens.  
 
-## 7. User & Company Management Endpoints (Post-MVP)
+```json
+Request:
+{
+  "audio_chunk_base64": "<audio_stream>",
+  "language": "en"
+}
 
-These endpoints consolidate administrative operations under standard resource URLs. Access is controlled by RBAC - there is no separate `/admin/` namespace.
+Response 200:
+{
+  "transcript_text": "I deployed Pods and configured Horizontal Pod Autoscaling...",
+  "confidence": 0.96
+}
+```
 
-### GET /api/v1/users
-**Purpose**: List users
-**Phase**: Post-MVP
-**Roles**: `super_admin` (all), `company_admin` (own company)
+#### POST /internal/v1/screening/audio/tts
+**Caller**: `services/ai-screening` internal bot pipeline  
+**Purpose**: Synthesizes AI question text or follow-up prompts into spoken audio stream for the Attendee meeting bot.  
 
-### POST /api/v1/users
-**Purpose**: Create user
-**Phase**: Post-MVP
-**Roles**: `super_admin` (any company), `company_admin` (own company)
+```json
+Request:
+{
+  "text": "How have you handled container orchestration using Kubernetes in production?",
+  "voice_id": "en_us_professional_female"
+}
 
-### PUT /api/v1/users/{id}
-**Purpose**: Update user (role-scoped)
-**Phase**: Post-MVP
-**Roles**: `super_admin`, `company_admin` (own company)
+Response 200:
+{
+  "audio_url": "https://media.ezscreen.io/tts/audio_9912.mp3",
+  "duration_seconds": 5.2
+}
+```
 
-### DELETE /api/v1/users/{id}
-**Purpose**: Deactivate user (role-scoped)
-**Phase**: Post-MVP
-**Roles**: `super_admin`, `company_admin` (own company)
+#### POST /internal/v1/screening/analysis/evaluate
+**Caller**: `apps/core-api` (upon receiving Attendee webhook transcript)  
+**Purpose**: Runs `gemma4:31b` LLM evaluation on completed call transcript $\rightarrow$ Returns structured `analysis_result` and `question_answer` JSON payloads to populate `interview_analysis`.  
 
-### GET /api/v1/companies
-**Purpose**: List companies
-**Phase**: Post-MVP
-**Roles**: `super_admin` only
+```json
+Request:
+{
+  "transcript": [
+    {"speaker": "Bot", "text": "How have you handled container orchestration using Kubernetes in production?"},
+    {"speaker": "Candidate", "text": "I deployed Pods, Services, and configured HPA..."}
+  ],
+  "generated_questions": [ ... ]
+}
 
-### POST /api/v1/companies
-**Purpose**: Create company
-**Phase**: Post-MVP
-**Roles**: `super_admin` only
-
-### GET /api/v1/roles
-**Purpose**: List roles
-**Phase**: Post-MVP
-**Roles**: `super_admin` (all), `company_admin` (assignable roles)
-
-### POST /api/v1/roles
-**Purpose**: Create/update roles
-**Phase**: Post-MVP
-**Roles**: `super_admin` only
-
----
-
-## 8. System Endpoints (MVP)
-
-### GET /api/v1/system/health
-**Purpose**: System health check
-**Phase**: MVP
-**Roles**: `super_admin` only
-
-
+Response 200:
+{
+  "analysis_result": {
+    "overall_feedback": "Candidate demonstrated strong backend development skills.",
+    "technical_summary": "Strong in Java and Spring Boot.",
+    "communication_summary": "Clear communication with good confidence.",
+    "skill_breakdown": {
+      "Java": 9,
+      "Spring Boot": 8,
+      "PostgreSQL": 9,
+      "Kafka": 5
+    },
+    "final_recommendation": "Shortlist for L1"
+  },
+  "question_answer": [
+    {
+      "question_id": 1,
+      "question": "How have you handled container orchestration using Kubernetes in production?",
+      "candidate_answer": "I deployed Pods, Services, and configured HPA...",
+      "score": 9
+    }
+  ]
+}
+```
