@@ -286,35 +286,50 @@ The `match_score` is stored as a denormalised `float` column on the `application
 
 ## 4. Document Parsing
 
-Before the LLM can extract structured data, the raw file must be converted to plain text. The document parser handles this step:
+Before the LLM can extract structured data, the raw file must be converted to clean plain text / Markdown. **Docling** is the selected parsing library for this step.
+
+### Selected Library: Docling
+
+Docling was chosen after evaluating 5 libraries across 6 document styles (graphical CVs, table-heavy CVs, two-column layouts, simple CVs, dense CVs, and standard JDs).
+
+| Capability | Docling |
+|---|---|
+| Multi-column / sidebar reading order | ✅ Correct |
+| Markdown table reconstruction | ✅ Flawless |
+| Bullet point preservation | ✅ Clean `-` bullets |
+| Graphical / image-heavy layout | ✅ Excellent |
+| Execution | Local (no cloud API, no cost) |
+| Known limitation | On dense-header PDFs, name/contact can be displaced to the bottom (PDF artifact — handled by LLM prompt) |
+
+> **Full evaluation**: See [PDF_PARSING_LIBRARIES.md](../tools_research/PDF_PARSING_LIBRARIES.md) for the complete comparison table across all 5 libraries and 6 document types.
+
+### Parsing Flow
 
 ```mermaid
 flowchart TD
-    %% Define color classes
     classDef actor fill:#3b82f6,stroke:#2563eb,stroke-width:2px,color:white;
     classDef backend fill:#10b981,stroke:#059669,stroke-width:2px,color:white;
-    classDef queue fill:#f59e0b,stroke:#d97706,stroke-width:2px,color:white;
-    classDef ai fill:#8b5cf6,stroke:#7c3aed,stroke-width:2px,color:white;
     classDef process fill:#f3f4f6,stroke:#9ca3af,stroke-width:2px,color:#1f2937;
+    classDef ai fill:#8b5cf6,stroke:#7c3aed,stroke-width:2px,color:white;
 
     Upload["Uploaded file (PDF or DOCX)"]:::actor
     Detect["File type detection<br>(MIME type + magic bytes check)"]:::backend
-    
+
     Upload --> Detect
 
-    PDF["PDF path<br>PDF parsing library<br>(page-by-page text extract)"]:::process
-    DOCX["DOCX path<br>DOCX parsing library<br>(paragraph extraction)"]:::process
+    PDF["PDF path<br>Docling<br>(layout-aware text + Markdown extract)"]:::process
+    DOCX["DOCX path<br>Docling<br>(paragraph + table extraction)"]:::process
 
     Detect --> PDF
     Detect --> DOCX
 
-    Output["Plain text string<br>(passed to LLM prompt)"]:::ai
-    
+    Output["Clean Markdown string<br>(passed to LLM prompt)"]:::ai
+
     PDF --> Output
     DOCX --> Output
 ```
 
-Supported input formats: PDF, DOCX. Files are validated by MIME type and magic byte signature - not just file extension - before processing begins.
+Supported input formats: **PDF, DOCX**. Files are validated by MIME type and magic byte signature — not just file extension — before processing begins.
 
 ---
 
