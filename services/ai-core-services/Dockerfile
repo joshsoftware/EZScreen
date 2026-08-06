@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+# Copy uv binary from official image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -8,11 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy pyproject.toml
+COPY pyproject.toml .
+
+# Install dependencies using uv
+RUN uv pip install --system .
 
 COPY . .
 
-EXPOSE 8001
+EXPOSE 8002
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8002"]
