@@ -45,12 +45,23 @@ class OllamaClient:
         if system:
             payload["system"] = system
 
-        logger.info(f"Sending prompt to Ollama Cloud model '{target_model}' at {endpoint_url}")
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(endpoint_url, json=payload, headers=self._get_headers())
-            response.raise_for_status()
-            data = response.json()
-            return data.get("response", "")
+        logger.info(
+            "Sending prompt to Ollama Cloud",
+            extra={"model": target_model, "endpoint": endpoint_url}
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(endpoint_url, json=payload, headers=self._get_headers())
+                response.raise_for_status()
+                data = response.json()
+                return data.get("response", "")
+        except httpx.HTTPError as err:
+            logger.error(
+                "HTTP error during Ollama generation",
+                extra={"model": target_model, "endpoint": endpoint_url, "error": str(err)}
+            )
+            raise
 
     async def chat(
         self,
@@ -72,11 +83,22 @@ class OllamaClient:
             "options": {"temperature": temperature},
         }
 
-        logger.info(f"Sending chat payload to Ollama Cloud model '{target_model}' at {endpoint_url}")
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(endpoint_url, json=payload, headers=self._get_headers())
-            response.raise_for_status()
-            return response.json()
+        logger.info(
+            "Sending chat payload to Ollama Cloud",
+            extra={"model": target_model, "endpoint": endpoint_url, "message_count": len(messages)}
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(endpoint_url, json=payload, headers=self._get_headers())
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPError as err:
+            logger.error(
+                "HTTP error during Ollama chat",
+                extra={"model": target_model, "endpoint": endpoint_url, "error": str(err)}
+            )
+            raise
 
 
 # Direct LLM Client instance configured via environment variables
