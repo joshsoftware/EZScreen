@@ -488,7 +488,7 @@ This stores the raw Q&A combinations generated during the session BEFORE the fin
       "is_sufficient": true,
       "decision": "NEXT_QUESTION",
       "feedback": "The candidate provided a solid and accurate definition of the exceptions.",
-      "suggested_follow_up": null
+      "follow_ups": []
     },
     {
       "question_id": 2,
@@ -501,15 +501,19 @@ This stores the raw Q&A combinations generated during the session BEFORE the fin
       "is_sufficient": false,
       "decision": "ASK_FOLLOW_UP",
       "feedback": "The candidate correctly identified the basic difference regarding thread-safety, but failed to explain *how* it achieves this.",
-      "suggested_follow_up": "You mentioned it handles synchronization; can you explain how it does that differently than a global lock to maintain performance?",
-      "follow_up_answer": "It uses a technique called lock stripping or bucket-level locking to allow multiple threads.",
-      "follow_up_score": 9,
-      "follow_up_coverage": 100.0,
-      "follow_up_keywords_found": ["segment locking", "thread-safety", "multi-threading"],
-      "follow_up_keywords_missing": [],
-      "follow_up_is_sufficient": true,
-      "follow_up_decision": "NEXT_QUESTION",
-      "follow_up_feedback": "The candidate correctly identified lock stripping/bucket-level locking as the mechanism to reduce contention."
+      "follow_ups": [
+        {
+          "follow_up_question": "You mentioned it handles synchronization; can you explain how it does that differently than a global lock to maintain performance?",
+          "follow_up_answer": "It uses a technique called lock stripping or bucket-level locking to allow multiple threads.",
+          "score": 9,
+          "coverage_percent": 100.0,
+          "keywords_found": ["segment locking", "thread-safety", "multi-threading"],
+          "keywords_missing": [],
+          "is_sufficient": true,
+          "decision": "NEXT_QUESTION",
+          "feedback": "The candidate correctly identified lock stripping/bucket-level locking as the mechanism to reduce contention."
+        },
+      ]
     }
   ],
   "final_summary": {
@@ -520,7 +524,7 @@ This stores the raw Q&A combinations generated during the session BEFORE the fin
   }
 }
 ```
-*(Note: The `max_possible_score` and `final_percentage` are mathematically calculated based on the dynamic number of questions).*
+*(Note: The `max_possible_score` and `final_percentage` are mathematically calculated based on the dynamic number of questions. The `follow_ups` array is empty `[]` when `decision` is `NEXT_QUESTION`, and contains one or more objects when `decision` is `ASK_FOLLOW_UP`.)*
 
 ---
 
