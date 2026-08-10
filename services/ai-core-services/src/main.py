@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from src.core.config import settings
 
 app = FastAPI(
     title="EZScreen Service",
@@ -19,7 +20,10 @@ app.add_middleware(
 def health_check():
     return {
         "status": "healthy",
-        "service": "ai-service",
-        "port": 8002,
+        "service": settings.service_name,
+        "port": settings.port,
+        "environment": settings.environment,
         "modules": ["parsing", "matching-result", "question-generation", "screening-pipeline", "meeting-bot", "interview-analysis"]
     }
+
+

@@ -1,27 +1,29 @@
+import sys
 from pathlib import Path
-from typing import Optional
+from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
-    SERVICE_NAME: str = "ai-core-services"
-    PORT: int = 8002
-    ENVIRONMENT: str = "development"
-    LOG_LEVEL: str = "INFO"
+    service_name: str 
+    port: int
+    environment: str 
+    log_level: str
 
     # Ollama Cloud Credentials & Configuration
-    OLLAMA_URL: str = "https://api.ollama.com"
-    OLLAMA_MODEL: str = "gemma4:31b"
-    OLLAMA_API_KEY: str = ""
+    ollama_url: str 
+    ollama_model: str 
+    ollama_api_key: str 
 
     # Attendee.dev Meeting Bot Credentials
-    ATTENDEE_API_KEY: str = ""
-    ATTENDEE_API_URL: str = "https://api.attendee.dev/v1"
+    attendee_api_key: str
+    attendee_api_url: str
 
-    # Database Connection
-    DATABASE_URL: Optional[str] = None
+    # Database & Storage Connection Credentials
+    database_url: str
+
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),
@@ -30,4 +32,8 @@ class Settings(BaseSettings):
     )
 
 
-settings = Settings()
+try:
+    settings = Settings()
+except ValidationError as err:
+    sys.stderr.write(f"[FATAL] Configuration validation error loading settings from .env:\n{err}\n")
+    sys.exit(1)
