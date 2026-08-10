@@ -446,6 +446,17 @@ Generate EXACTLY 15 questions in total across the following categories:
 3. CATEGORY "good_to_have" — from JD good-to-have skills (2–3 questions)
 4. CATEGORY "experience_domain" — from JD responsibilities (~2 purely technical questions)
 
+═══ ANSWER DEPTH LEVELS ═══
+Each question must include an `answer_depth` level ("aware", "partial_depth", or "full_depth") based on how strictly the answer should be evaluated:
+- "aware" → awareness only: any reasonable attempt at a response is acceptable.
+- "partial_depth" → partial coverage: the answer must touch some of the expected keywords with a basic explanation.
+- "full_depth" → full depth: the answer must cover most expected keywords with a clear, accurate explanation.
+
+Assign depth dynamically based on the candidate's {years} years of experience AND the question category:
+- Use "aware" for "lacking_skill" and "good_to_have" categories, OR if the candidate has < 2 years experience (awareness check only).
+- Use "partial_depth" for "must_have_matched" questions when the candidate has 2-4 years experience, OR if experience_match is false.
+- Use "full_depth" for "must_have_matched" and "experience_domain" questions only when the candidate has 5+ years experience and clearly possesses the skill.
+
 ═══ OUTPUT FORMAT ═══
 Return a JSON array only. No markdown, no commentary.
 [
@@ -455,7 +466,7 @@ Return a JSON array only. No markdown, no commentary.
     "skill_focus": "the specific skill or topic",
     "question": "the interview question",
     "expected_keywords": ["3 to 5 keywords a correct answer must touch"],
-    "answer_depth": "one sentence describing what a passing answer should cover at this screening level"
+    "answer_depth": "aware | partial_depth | full_depth"
   }
 ]
 ```
@@ -469,15 +480,21 @@ You are evaluating a candidate's answer in a FIRST SCREENING interview.
 QUESTION: {question}
 CANDIDATE ANSWER: {answer}
 EXPECTED KEYWORDS (answer should address most of these): {keywords}
-EXPECTED DEPTH FOR PASSING: {depth}
+EVALUATION STRICTNESS LEVEL: {depth}
+
+STRICTNESS DEFINITIONS:
+- "aware": Accept the answer as-is. Any reasonable attempt at a response is sufficient. Do not penalize for missing keywords.
+- "partial_depth": Accept if the answer covers some of the expected keywords with a basic explanation. Partial understanding is acceptable.
+- "full_depth": Accept only if the answer covers most of the expected keywords with a clear and accurate explanation. Vague or incomplete answers are not sufficient.
 
 SCORING RULES:
-- Score 0–10. Coverage 0–100%.
-- Score 7–10: correct and clear, even if brief.
-- Score 5–6: partially correct, key concept there but something important missing.
-- Score 0–4: wrong, confused, or vague with no real understanding shown.
-- Do NOT penalize for informal phrasing or brevity if the concept is correct.
-- DO penalize for factually wrong statements or restating the question without substance.
+- Score 0–10. Your score MUST reflect BOTH keyword coverage AND the EVALUATION STRICTNESS LEVEL above.
+- If STRICTNESS LEVEL is "aware": Score generously (7-10) if they show basic understanding, even if missing keywords.
+- If STRICTNESS LEVEL is "partial_depth": Score 7-10 only if they hit some keywords and explain the basic concept.
+- If STRICTNESS LEVEL is "full_depth": Score strictly. Score 7-10 ONLY if they hit most keywords with a clear, accurate explanation.
+- Score 5–6: Candidate fell short of the required strictness level or missed key concepts.
+- Score 0–4: Wrong, confused, or vague with no real understanding shown.
+- Do NOT penalize for informal phrasing if the technical concept is correct.
 
 DECISION:
 - "NEXT_QUESTION" if score >= 6 AND coverage_percent >= 50 (candidate understood it well enough for screening).
@@ -492,7 +509,7 @@ Return STRICT JSON only. No markdown:
   "is_sufficient": <true|false>,
   "decision": "NEXT_QUESTION | ASK_FOLLOW_UP",
   "feedback": "2-3 sentences: what was good, what was missing, pass/fail on this topic for screening",
-  "suggested_follow_up": "If decision is ASK_FOLLOW_UP and this is NOT a follow-up evaluation itself, write a specific, conversational follow-up question here to probe what they missed based on the missing keywords. Otherwise null."
+  "suggested_follow_up": "If decision is ASK_FOLLOW_UP and this is NOT a follow-up evaluation itself, write a specific, conversational follow-up question here to probe what they missed based on the missing keywords. Otherwise omit this field entirely."
 }
 ```
 
@@ -523,12 +540,12 @@ else:
 **Aggregate Scoring:**
 *   **Total Score:** The sum of all resolved `topic_score` values.
 *   **Max Possible Score:** `{total_questions} * 10` points (e.g., 150 for a 15-question set).
-*   **Final Percentage:** `(total_score / max_possible_score) * 100`
+*   **Overall Score:** `(total_score / max_possible_score) * 10`
 
 **Recommendation Threshold:**
-The system enforces a strict, deterministic pass/fail threshold at **60%**:
+The system enforces a strict, deterministic pass/fail threshold at **6.0 / 10**:
 ```python
-if final_percentage >= 60.0:
+if overall_score >= 6.0:
     final_recommendation = "shortlist_for_l1"
 else:
     final_recommendation = "reject"
