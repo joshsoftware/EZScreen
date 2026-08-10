@@ -487,8 +487,8 @@ This stores the raw Q&A combinations generated during the session BEFORE the fin
       "keywords_missing": ["throws"],
       "is_sufficient": true,
       "decision": "NEXT_QUESTION",
-      "feedback": "The candidate provided a solid and accurate definition of the exceptions.",
-      "follow_ups": []
+      "feedback": "The candidate provided a solid and accurate definition of the exceptions."
+     
     },
     {
       "question_id": 2,
@@ -512,7 +512,7 @@ This stores the raw Q&A combinations generated during the session BEFORE the fin
           "is_sufficient": true,
           "decision": "NEXT_QUESTION",
           "feedback": "The candidate correctly identified lock stripping/bucket-level locking as the mechanism to reduce contention."
-        },
+        }
       ]
     }
   ],
