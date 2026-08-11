@@ -23,7 +23,8 @@ def health_check():
         "service": settings.service_name,
         "port": settings.port,
         "environment": settings.environment,
-        "modules": ["parsing", "matching-result", "question-generation", "screening-pipeline", "meeting-bot", "interview-analysis"]
+        "modules": ["parsing", "job_fit_analysis", "question_generation", "screening_pipeline", "meeting_bot", "interview_analysis"]
     }
+
 
 
