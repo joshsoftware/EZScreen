@@ -1,9 +1,17 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-    database_url: str = (
-        "postgresql+psycopg2://ezscreen_user:EZScreen123!@127.0.0.1:5432/ezscreen_db"
+    """Application settings. Secrets must come from environment / .env — never commit them."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
+
+    # Required. Set DATABASE_URL in apps/core-api/.env (not committed).
+    database_url: str
+
 
 settings = Settings()
