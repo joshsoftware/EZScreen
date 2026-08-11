@@ -397,7 +397,7 @@ These are the MVP-relevant acceptance criteria from the Requirements Document:
 | AC-003 | Publishing gate: required_skills required, else 422 | Phase 2 |
 | AC-004 | Guest application → 201 in <500ms → confirmation email sent | Phase 3 |
 | AC-005 | Duplicate application → 422 with clear error | Phase 3 |
-| AC-006 | Resume scoring → status = screened, score 0-10, matching_result populated | Phase 3 |
+| AC-006 | Resume scoring → status = screened, score 0-10, job_fit_analysis populated | Phase 3 |
 | AC-007 | Ranked list: 10+ applicants sorted by score, shows name, score, skills bar, experience, status | Phase 4 |
 | AC-008 | Direct interview invite → email within 2 min with meeting link and time | Phase 4 |
 

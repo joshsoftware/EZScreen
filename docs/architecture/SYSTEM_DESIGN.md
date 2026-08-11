@@ -99,7 +99,7 @@ The platform is designed as a **Modular Monolith inside a Monorepo**. This guara
    * System gatekeeper handling Authentication, Multi-tenant Organization Scoping (`organization_id`), User Provisioning, Public Job Board API, Interview Scheduling, and Webhook routing.
 
 2. **Parsing & Matching Engine (`services/parsing-matching`)**:
-   * Pure document parsing and matching engine. Extracts structured `parsed_jd` requirements, parses candidate resumes (`parsed_resume`), and computes candidate-JD matching scores (`matching_result`).
+   * Pure document parsing and matching engine. Extracts structured `parsed_jd` requirements, parses candidate resumes (`parsed_resume`), and computes candidate-JD matching scores (`job_fit_analysis`).
    * *Standalone Capability*: Can be packaged and deployed independently as a "Resume & JD Parsing API".
 
 3. **AI Screening Microservice (`services/ai-screening`)**:
@@ -187,13 +187,13 @@ The following requirements constrain the option space regardless of preference:
 | `organizations` | Multi-tenant organization records (`name`, `domain`, `logo_url`) | MVP |
 | `users` | All user accounts (`super_admin`, `organization_admin`, `hr`, `candidate`) | MVP |
 | `job_descriptions` | JD records with `parsed_jd` JSONB for AI-extracted requirements | MVP |
-| `applications` | Candidate applications with `parsed_resume` & `matching_result` JSONB | MVP |
+| `applications` | Candidate applications with `parsed_resume` & `job_fit_analysis` JSONB | MVP |
 | `interview_session` | Session-based AI interview scheduling & static question sets (`generated_questions`) | MVP |
 | `interview_analysis` | AI screening report, Q&A transcript analysis (`question_answer`), and call recording URL | MVP |
 
 ### Key Design Decisions
 
-1. **JSONB for Flexible AI Data**: `parsed_jd`, `parsed_resume`, `matching_result`, `generated_questions`, `analysis_result`, and `question_answer` use PostgreSQL's JSONB type
+1. **JSONB for Flexible AI Data**: `parsed_jd`, `parsed_resume`, `job_fit_analysis`, `generated_questions`, `analysis_result`, and `question_answer` use PostgreSQL's JSONB type
    - Allows AI extraction schema evolution without complex SQL migrations
    - Enables efficient querying with GIN indexes
    - Perfect for storing rich AI feedback, score breakdowns, and dual-channel transcripts

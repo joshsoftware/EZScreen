@@ -20,7 +20,7 @@
 
 ## 1. Design Principles
 
-1. **JSONB for AI-Extracted Data**: `parsed_jd` (job_descriptions), `parsed_resume` (applications), `matching_result` (applications), `analysis_result` & `question_answer` (interview_analysis) use PostgreSQL JSONB — allows schema evolution without migrations and efficient querying.
+1. **JSONB for AI-Extracted Data**: `parsed_jd` (job_descriptions), `parsed_resume` (applications), `job_fit_analysis` (applications), `analysis_result` & `question_answer` (interview_analysis) use PostgreSQL JSONB — allows schema evolution without migrations and efficient querying.
 
 2. **Status-Driven Workflows**: State machines for JD lifecycle (`draft → published → closed`) and application lifecycle (`applied → interview_scheduled → shortlist_for_l1 / rejected`). All status transitions are validated at the application layer.
 
@@ -117,7 +117,7 @@
 | `parsed_resume` | jsonb | nullable | See [parsed_resume Schema](#application-parsed_resume) |
 | `candidate_yoe` | float | nullable | Denormalised years of experience |
 | `resume_score` | decimal | nullable | AI match score (0–100) |
-| `matching_result` | jsonb | nullable | See [matching_result Schema](#application-matching_result) |
+| `job_fit_analysis` | jsonb | nullable | See [job_fit_analysis Schema](#application-job_fit_analysis) |
 | `status` | application_status | | See [Application Status Enum](#application-status) |
 | `applied_at` | timestamp | nullable | |
 | `created_at` | timestamp | | |
@@ -225,7 +225,7 @@ erDiagram
         jsonb parsed_resume "candidate_name, email, phone, summary, skills, experience_years, education, certifications, projects"
         float candidate_yoe "nullable - denormalised"
         decimal resume_score "nullable - AI match score 0-100"
-        jsonb matching_result "score_breakdown, matched_skills, missing_skills, experience_match, education_match, reasoning"
+        jsonb job_fit_analysis "score_breakdown, matched_skills, missing_skills, experience_match, education_match, reasoning"
         varchar status "enum: applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected"
         timestamp applied_at "nullable"
         timestamp created_at
@@ -402,7 +402,7 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
 
 ---
 
-### Application `matching_result`
+### Application `job_fit_analysis`
 
 ```json
 {
@@ -536,7 +536,7 @@ This stores the raw Q&A combinations generated during the session BEFORE the fin
 
 | Column | Type | Source | Purpose |
 |--------|------|--------|---------|
-| `resume_score` | decimal (0–100) | `matching_result.score_breakdown.overall_score` | Fast `ORDER BY` sorting |
+| `resume_score` | decimal (0–100) | `job_fit_analysis.score_breakdown.overall_score` | Fast `ORDER BY` sorting |
 | `candidate_yoe` | float | `parsed_resume.experience_years` | Fast filter/sort by experience |
 
 ---
@@ -568,7 +568,7 @@ This stores the raw Q&A combinations generated during the session BEFORE the fin
 
 - **N+1 queries** — always eager-load associated records in a single query
 - **Full table scans on large tables** — all `WHERE` clauses on `applications` and `job_descriptions` must use indexed columns
-- **Sorting unindexed JSONB fields** — sort on the denormalised `resume_score` decimal column, not on `matching_result->>'overall_score'`
+- **Sorting unindexed JSONB fields** — sort on the denormalised `resume_score` decimal column, not on `job_fit_analysis->>'overall_score'`
 - **Unbounded queries** — all list endpoints must enforce a `LIMIT` and use cursor or offset pagination
 
 ---
