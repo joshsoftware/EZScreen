@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Design prototype (Stitch HTML kit — local only)
+design/ezscreen-stitch/
