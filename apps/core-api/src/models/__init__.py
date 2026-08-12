@@ -3,6 +3,7 @@ from src.models.interview_analysis import InterviewAnalysis
 from src.models.interview_session import InterviewSession
 from src.models.job_description import JobDescription
 from src.models.organization import Organization
+from src.models.refresh_token_revocation import RefreshTokenRevocation
 from src.models.user import User
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "Application",
     "InterviewSession",
     "InterviewAnalysis",
+    "RefreshTokenRevocation",
 ]
