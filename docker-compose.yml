@@ -73,14 +73,14 @@ services:
       minio:
         condition: service_healthy
 
-  ai-screening:
+  ai-core-services:
     build:
-      context: ./services/ai-screening
+      context: ./services/ai-core-services
       dockerfile: Dockerfile
-    container_name: ezscreen-ai-screening
+    container_name: ezscreen-ai-core-services
     restart: always
     ports:
-      - "8001:8001"
+      - "8002:8002"
     environment:
       - DATABASE_URL=postgresql://ezscreen_user:ezscreen_password@db:5432/ezscreen_db
       - MINIO_ENDPOINT=minio:9000
