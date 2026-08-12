@@ -2,8 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer utilities {
-  .bg-gradient-radial {
-    background-image: radial-gradient(var(--tw-gradient-stops));
-  }
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  @apply font-sans bg-surface text-on-surface antialiased;
+}
+
+.font-display-lg,
+.font-headline-md,
+.font-headline-sm,
+.font-label-md,
+.font-mono-sm {
+  font-family: Geist, Inter, system-ui, sans-serif;
 }
