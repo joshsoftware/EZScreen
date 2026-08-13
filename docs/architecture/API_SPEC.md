@@ -83,6 +83,63 @@ Response 200:
 }
 ```
 
+#### POST /api/v1/auth/org/login
+**Tag**: `Authentication`  
+**Summary**: Authenticate Organization Admin or HR for workspace access  
+**Operation ID**: `orgWorkspaceLogin`  
+**Roles**: Public  
+
+Organization workspace portal login. Rejects `super_admin` / `candidate`, and rejects users whose organization is missing or suspended. Same token + refresh-cookie response shape as `/auth/login`.
+
+```json
+Request:
+{
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "email": "admin@acme.com",
+    "password": "SecurePassword123!"
+  }
+}
+
+Response 200:
+{
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token_type": "bearer",
+    "expires_in": 3600,
+    "user": {
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "email": "admin@acme.com",
+      "first_name": "Alice",
+      "last_name": "Admin",
+      "phone": "+1-555-0199",
+      "role": "organization_admin",
+      "status": "active",
+      "organization_id": "987e6543-e89b-12d3-a456-426614174000"
+    }
+}
+
+Response 401:
+{ "detail": "Invalid email or password" }
+
+Response 403:
+{ "detail": "Organization workspace access only" }
+```
+
+#### GET /api/v1/auth/org/check
+**Tag**: `Authentication`  
+**Summary**: Verify Organization Admin or HR token and role  
+**Operation ID**: `orgWorkspaceCheck`  
+**Roles**: `organization_admin`, `hr`
+
+```json
+Response 200:
+{
+  "message": "Organization workspace access confirmed"
+}
+```
+
 #### POST /api/v1/auth/logout
 **Tag**: `Authentication`  
 **Summary**: Revoke session token and logout  

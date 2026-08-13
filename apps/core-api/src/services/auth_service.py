@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from uuid import UUID
 
 from sqlalchemy import select
@@ -15,18 +17,37 @@ from src.core.jwt import (
     decode_refresh_token,
 )
 from src.core.security import verify_password
-from src.models.enums import UserStatus
+from src.models.enums import UserRole, UserStatus
+from src.models.organization import Organization
 from src.models.refresh_token_revocation import RefreshTokenRevocation
 from src.models.user import User
 
 __all__ = [
+    "OrgAuthError",
+    "OrgAuthFailure",
     "authenticate_user",
+    "authenticate_org_workspace_user",
     "get_user_by_id",
     "get_user_by_email",
     "issue_token_pair",
     "refresh_access_token",
     "revoke_refresh_token",
 ]
+
+_ORG_WORKSPACE_ROLES = frozenset({UserRole.organization_admin, UserRole.hr})
+
+
+class OrgAuthFailure(str, Enum):
+    invalid_credentials = "invalid_credentials"
+    wrong_role = "wrong_role"
+    org_missing = "org_missing"
+    org_suspended = "org_suspended"
+
+
+@dataclass(frozen=True)
+class OrgAuthError:
+    failure: OrgAuthFailure
+    detail: str
 
 
 def get_user_by_email(db: Session, email: str) -> User | None:
@@ -47,6 +68,44 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
         return None
     if user.status != UserStatus.active:
         return None
+    return user
+
+
+def authenticate_org_workspace_user(
+    db: Session, email: str, password: str
+) -> User | OrgAuthError:
+    """Authenticate for Organization Admin portal (organization_admin or hr)."""
+    user = authenticate_user(db, email, password)
+    if user is None:
+        return OrgAuthError(
+            failure=OrgAuthFailure.invalid_credentials,
+            detail="Invalid email or password",
+        )
+
+    if user.role not in _ORG_WORKSPACE_ROLES:
+        return OrgAuthError(
+            failure=OrgAuthFailure.wrong_role,
+            detail="Organization workspace access only",
+        )
+
+    if user.organization_id is None:
+        return OrgAuthError(
+            failure=OrgAuthFailure.org_missing,
+            detail="Organization not found",
+        )
+
+    org = db.get(Organization, user.organization_id)
+    if org is None:
+        return OrgAuthError(
+            failure=OrgAuthFailure.org_missing,
+            detail="Organization not found",
+        )
+    if not org.is_active:
+        return OrgAuthError(
+            failure=OrgAuthFailure.org_suspended,
+            detail="Organization is suspended",
+        )
+
     return user
 
 

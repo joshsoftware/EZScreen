@@ -27,7 +27,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @router.post(
     "/login",
     response_model=LoginResponse,
-    summary="Authenticate user & receive JWT access token",
+    summary="Authenticate user & receive JWT access token (platform / shared login)",
 )
 def login(body: LoginRequest, db: DbSession, response: Response) -> LoginResponse:
     user = auth_service.authenticate_user(db, body.email, body.password)
@@ -108,6 +108,48 @@ def logout(
         auth_service.revoke_refresh_token(db, refresh_token)
     clear_refresh_cookie(response)
     return MessageResponse(message="Successfully logged out")
+
+
+@router.post(
+    "/org/login",
+    response_model=LoginResponse,
+    summary="Authenticate Organization Admin or HR for workspace access",
+)
+def org_login(body: LoginRequest, db: DbSession, response: Response) -> LoginResponse:
+    result = auth_service.authenticate_org_workspace_user(db, body.email, body.password)
+    if isinstance(result, auth_service.OrgAuthError):
+        if result.failure == auth_service.OrgAuthFailure.invalid_credentials:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=result.detail,
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=result.detail,
+        )
+
+    access_token, expires_in, refresh_token = auth_service.issue_token_pair(db, result)
+    set_refresh_cookie(response, refresh_token)
+    return LoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=expires_in,
+        user=UserResponse.model_validate(result),
+    )
+
+
+@router.get(
+    "/org/check",
+    response_model=MessageResponse,
+    summary="Verify Organization Admin or HR token and role",
+)
+def org_workspace_check(
+    _user: Annotated[
+        User,
+        Depends(require_roles(UserRole.organization_admin, UserRole.hr)),
+    ],
+) -> MessageResponse:
+    return MessageResponse(message="Organization workspace access confirmed")
 
 
 # Super-admin-only smoke route — confirms role guard for platform login flow.
