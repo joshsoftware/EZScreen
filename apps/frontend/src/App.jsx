@@ -1,9 +1,11 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { Toaster } from 'sonner'
 import { AuthProvider } from './features/auth/AuthContext'
 import { RequireRole } from './features/auth/RequireRole'
 import { SuperAdminShell } from './components/layout/SuperAdminShell'
 import { SuperAdminLoginPage } from './pages/super-admin/SuperAdminLoginPage'
+import { PageSkeleton } from './components/ui/Skeleton'
 
 const SuperAdminOrgsPage = lazy(() =>
   import('./pages/super-admin/SuperAdminOrgsPage').then((m) => ({
@@ -36,20 +38,25 @@ const SuperAdminSettingsPage = lazy(() =>
   })),
 )
 
-function PageFallback() {
-  return (
-    <div className="text-body-sm text-on-surface-variant py-lg">Loading…</div>
-  )
-}
-
 function Lazy({ children }) {
-  return <Suspense fallback={<PageFallback />}>{children}</Suspense>
+  return <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
 }
 
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            className: 'font-body-sm text-body-sm',
+            style: {
+              background: '#ffffff',
+              color: '#0f2740',
+              border: '1px solid #c5d8ea',
+            },
+          }}
+        />
         <Routes>
           <Route path="/" element={<Navigate to="/super-admin/login" replace />} />
           <Route path="/super-admin/login" element={<SuperAdminLoginPage />} />

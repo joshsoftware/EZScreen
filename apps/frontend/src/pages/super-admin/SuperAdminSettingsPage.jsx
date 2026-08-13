@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
 import { useAuth } from '../../features/auth/AuthContext'
 import {
   getPlatformSettings,
   updatePlatformSettings,
 } from '../../features/super-admin/api'
 import { ApiError } from '../../lib/api/client'
+import { Alert } from '../../components/ui/Alert'
+import { Button } from '../../components/ui/Button'
+import { Input, Select } from '../../components/ui/Input'
+import { PageHeader, Panel } from '../../components/ui/PageHeader'
+import { PageSkeleton } from '../../components/ui/Skeleton'
 
 const empty = {
   platform_name: 'EZScreen',
@@ -22,7 +27,6 @@ export function SuperAdminSettingsPage() {
   const { token } = useAuth()
   const [form, setForm] = useState(empty)
   const [error, setError] = useState(null)
-  const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
@@ -44,94 +48,83 @@ export function SuperAdminSettingsPage() {
     if (!token) return
     setSubmitting(true)
     setError(null)
-    setSaved(false)
     try {
       const updated = await updatePlatformSettings(token, form)
       setForm(updated)
-      setSaved(true)
+      toast.success('Settings saved')
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to save settings')
+      const message = err instanceof ApiError ? err.message : 'Failed to save settings'
+      setError(message)
+      toast.error(message)
     } finally {
       setSubmitting(false)
     }
   }
 
   if (loading) {
-    return <p className="text-body-sm text-on-surface-variant">Loading…</p>
+    return <PageSkeleton />
   }
 
   return (
     <div className="max-w-2xl">
-      <h1 className="font-headline-md text-headline-md mb-xs">Platform settings</h1>
-      <p className="text-body-sm text-on-surface-variant mb-xl">
-        Global defaults for tenants, email, and AI models. Org Admins manage their own branding.
-      </p>
+      <PageHeader
+        title="Platform settings"
+        description="Global defaults for tenants, email, and AI models. Org Admins manage their own branding."
+      />
 
-      <form onSubmit={onSubmit}>
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-lg">
-          <h2 className="font-headline-sm text-headline-sm mb-md">General</h2>
+      <form onSubmit={onSubmit} className="space-y-lg">
+        <Panel title="General">
           <div className="space-y-md">
-            <Field
+            <Input
+              id="platform_name"
               label="Platform name"
               value={form.platform_name}
-              onChange={(v) => setForm((f) => ({ ...f, platform_name: v }))}
+              onChange={(e) => setForm((f) => ({ ...f, platform_name: e.target.value }))}
             />
-            <Field
+            <Input
+              id="support_email"
               label="Default support email"
               type="email"
               value={form.support_email}
-              onChange={(v) => setForm((f) => ({ ...f, support_email: v }))}
+              onChange={(e) => setForm((f) => ({ ...f, support_email: e.target.value }))}
             />
-            <div>
-              <label className="block font-label-md text-label-md mb-xs">
-                Default timezone
-              </label>
-              <select
-                className="w-full h-11 px-md border border-outline-variant rounded-DEFAULT text-body-sm bg-surface-container-lowest"
-                value={form.timezone}
-                onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))}
-              >
-                <option value="UTC">UTC</option>
-                <option value="Asia/Kolkata">Asia/Kolkata</option>
-                <option value="America/New_York">America/New_York</option>
-              </select>
-            </div>
+            <Select
+              id="timezone"
+              label="Default timezone"
+              value={form.timezone}
+              onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))}
+            >
+              <option value="UTC">UTC</option>
+              <option value="Asia/Kolkata">Asia/Kolkata</option>
+              <option value="America/New_York">America/New_York</option>
+            </Select>
           </div>
-        </div>
+        </Panel>
 
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-lg mt-lg">
-          <h2 className="font-headline-sm text-headline-sm mb-md">AI & pipelines</h2>
+        <Panel title="AI & pipelines">
           <div className="space-y-md">
-            <div>
-              <label className="block font-label-md text-label-md mb-xs">
-                Default extraction model
-              </label>
-              <select
-                className="w-full h-11 px-md border border-outline-variant rounded-DEFAULT text-body-sm bg-surface-container-lowest"
-                value={form.extraction_model}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, extraction_model: e.target.value }))
-                }
-              >
-                <option value="gemma-parse-v2">gemma-parse-v2</option>
-                <option value="gemma-parse-v1">gemma-parse-v1</option>
-              </select>
-            </div>
-            <div>
-              <label className="block font-label-md text-label-md mb-xs">
-                Screening evaluation model
-              </label>
-              <select
-                className="w-full h-11 px-md border border-outline-variant rounded-DEFAULT text-body-sm bg-surface-container-lowest"
-                value={form.screening_model}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, screening_model: e.target.value }))
-                }
-              >
-                <option value="gemma-screen-v3">gemma-screen-v3</option>
-                <option value="gemma-screen-v2">gemma-screen-v2</option>
-              </select>
-            </div>
+            <Select
+              id="extraction_model"
+              label="Default extraction model"
+              value={form.extraction_model}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, extraction_model: e.target.value }))
+              }
+            >
+              <option value="gemma-parse-v2">gemma-parse-v2</option>
+              <option value="gemma-parse-v1">gemma-parse-v1</option>
+            </Select>
+            <Select
+              id="screening_model"
+              label="Screening evaluation model"
+              value={form.screening_model}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, screening_model: e.target.value }))
+              }
+            >
+              <option value="gemma-screen-v3">gemma-screen-v3</option>
+              <option value="gemma-screen-v2">gemma-screen-v2</option>
+            </Select>
             <label className="flex items-center gap-sm text-body-sm">
               <input
                 type="checkbox"
@@ -143,10 +136,9 @@ export function SuperAdminSettingsPage() {
               Auto-retry failed parse / bot jobs (max 3)
             </label>
           </div>
-        </div>
+        </Panel>
 
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-lg mt-lg">
-          <h2 className="font-headline-sm text-headline-sm mb-md">Security</h2>
+        <Panel title="Security">
           <div className="space-y-md">
             <label className="flex items-center gap-sm text-body-sm">
               <input
@@ -161,64 +153,32 @@ export function SuperAdminSettingsPage() {
               />
               Require MFA for Super Admin accounts
             </label>
-            <div>
-              <label className="block font-label-md text-label-md mb-xs">
-                Invite link expiry (days)
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={90}
-                className="w-full h-11 px-md border border-outline-variant rounded-DEFAULT text-body-sm"
-                value={form.invite_expiry_days}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    invite_expiry_days: Number(e.target.value) || 7,
-                  }))
-                }
-              />
-            </div>
-            {error ? (
-              <p className="text-body-sm text-error" role="alert">
-                {error}
-              </p>
-            ) : null}
-            {saved ? (
-              <p className="text-body-sm text-[#065F46]">Settings saved.</p>
-            ) : null}
+            <Input
+              id="invite_expiry_days"
+              label="Invite link expiry (days)"
+              type="number"
+              min={1}
+              max={90}
+              value={form.invite_expiry_days}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  invite_expiry_days: Number(e.target.value) || 7,
+                }))
+              }
+            />
+            {error ? <Alert>{error}</Alert> : null}
             <div className="flex gap-sm pt-md">
-              <Link
-                to="/super-admin/orgs"
-                className="inline-flex items-center justify-center h-10 px-md border border-outline-variant text-on-surface rounded-DEFAULT font-label-md text-label-md hover:bg-surface-container-low transition-colors"
-              >
+              <Button to="/super-admin/orgs" variant="secondary">
                 Cancel
-              </Link>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="h-10 px-md bg-primary text-on-primary rounded-DEFAULT font-label-md text-label-md disabled:opacity-60"
-              >
+              </Button>
+              <Button type="submit" loading={submitting}>
                 {submitting ? 'Saving…' : 'Save settings'}
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </Panel>
       </form>
-    </div>
-  )
-}
-
-function Field({ label, value, onChange, type = 'text' }) {
-  return (
-    <div>
-      <label className="block font-label-md text-label-md mb-xs">{label}</label>
-      <input
-        type={type}
-        className="w-full h-11 px-md border border-outline-variant rounded-DEFAULT text-body-sm"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
     </div>
   )
 }

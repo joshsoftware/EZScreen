@@ -1,6 +1,11 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
 import { LogoMark } from '../../components/brand/LogoMark'
+import { Alert } from '../../components/ui/Alert'
+import { Button } from '../../components/ui/Button'
+import { Input } from '../../components/ui/Input'
+import { FadeIn, FadeSlide } from '../../components/motion/Motion'
 import { useAuth } from '../../features/auth/AuthContext'
 import { ApiError } from '../../lib/api/client'
 
@@ -27,6 +32,7 @@ export function SuperAdminLoginPage() {
         setError('Not a platform admin. Use Org / HR login instead.')
         return
       }
+      toast.success('Signed in')
       navigate('/super-admin/orgs', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {
@@ -41,12 +47,18 @@ export function SuperAdminLoginPage() {
 
   return (
     <div className="h-full min-h-screen bg-surface text-on-surface antialiased flex flex-col md:flex-row">
-      <main className="flex-1 flex flex-col justify-center px-margin-mobile md:px-margin-desktop lg:px-[120px] relative z-10 w-full md:max-w-[50%] lg:max-w-[45%] min-h-screen bg-surface-container-lowest">
+      <FadeSlide
+        from="left"
+        className="flex-1 flex flex-col justify-center px-margin-mobile md:px-margin-desktop lg:px-[120px] relative z-10 w-full md:max-w-[50%] lg:max-w-[45%] min-h-screen bg-surface-container-lowest"
+      >
         <header className="absolute top-0 left-0 w-full py-lg px-margin-mobile md:px-margin-desktop">
           <LogoMark />
         </header>
 
-        <div className="w-full max-w-[400px] mx-auto mt-2xl md:mt-0">
+        <FadeIn
+          delay={0.08}
+          className="w-full max-w-[400px] mx-auto mt-2xl md:mt-0"
+        >
           <div className="mb-xl">
             <h1 className="font-display-lg text-display-lg-mobile md:text-display-lg text-on-surface mb-sm">
               Platform access
@@ -57,59 +69,34 @@ export function SuperAdminLoginPage() {
           </div>
 
           <form className="flex flex-col gap-md" onSubmit={onSubmit} noValidate>
-            <div>
-              <label
-                className="block font-label-md text-label-md text-on-surface mb-xs"
-                htmlFor="email"
-              >
-                Admin email
-              </label>
-              <input
-                className="w-full h-12 px-md border border-outline-variant rounded-DEFAULT font-body-sm bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-secondary/40"
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="username"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label
-                className="block font-label-md text-label-md text-on-surface mb-xs"
-                htmlFor="password"
-              >
-                Password
-              </label>
-              <input
-                className="w-full h-12 px-md border border-outline-variant rounded-DEFAULT font-body-sm bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-secondary/40"
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
+            <Input
+              id="email"
+              label="Admin email"
+              name="email"
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="h-12"
+              required
+            />
+            <Input
+              id="password"
+              label="Password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="h-12"
+              required
+            />
 
-            {error ? (
-              <p
-                className="text-body-sm text-error bg-error-container/60 border border-error-container rounded-DEFAULT px-md py-sm"
-                role="alert"
-              >
-                {error}
-              </p>
-            ) : null}
+            {error ? <Alert>{error}</Alert> : null}
 
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full h-12 bg-primary text-on-primary rounded-DEFAULT font-label-md text-label-md hover:bg-on-primary-fixed-variant disabled:opacity-60 transition-colors"
-            >
+            <Button type="submit" size="lg" className="w-full" loading={submitting}>
               {submitting ? 'Signing in…' : 'Sign in as Super Admin'}
-            </button>
+            </Button>
           </form>
 
           <p className="mt-lg text-body-sm text-on-surface-variant">
@@ -118,7 +105,7 @@ export function SuperAdminLoginPage() {
               Org / HR login
             </Link>
           </p>
-        </div>
+        </FadeIn>
 
         <footer className="absolute bottom-0 left-0 w-full py-lg px-margin-mobile md:px-margin-desktop">
           <div className="flex flex-wrap gap-lg">
@@ -136,17 +123,21 @@ export function SuperAdminLoginPage() {
             </Link>
           </div>
         </footer>
-      </main>
+      </FadeSlide>
 
-      <aside className="hidden md:flex flex-1 relative overflow-hidden bg-primary text-on-primary flex-col justify-end p-2xl">
+      <FadeSlide
+        from="right"
+        delay={0.1}
+        className="hidden md:flex flex-1 relative overflow-hidden bg-primary text-on-primary flex-col justify-end p-2xl"
+      >
         <div
-          className="absolute inset-0 opacity-40"
+          className="absolute inset-0 opacity-45"
           style={{
             backgroundImage:
-              'radial-gradient(circle at 20% 20%,#ffffff 0,transparent 40%),radial-gradient(circle at 80% 60%,#a8d0fa 0,transparent 35%)',
+              'radial-gradient(circle at 20% 20%,#ffffff 0,transparent 42%),radial-gradient(circle at 80% 60%,#4a9cf5 0,transparent 38%)',
           }}
         />
-        <div className="relative z-10 max-w-md">
+        <FadeIn delay={0.25} className="relative z-10 max-w-md">
           <p className="font-label-md text-label-md uppercase tracking-wider text-on-primary/90 mb-sm">
             EZScreen Platform
           </p>
@@ -157,8 +148,8 @@ export function SuperAdminLoginPage() {
             Create tenants, provision organization admins, and monitor AI processing health
             across the platform.
           </p>
-        </div>
-      </aside>
+        </FadeIn>
+      </FadeSlide>
     </div>
   )
 }

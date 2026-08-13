@@ -3,6 +3,14 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../../features/auth/AuthContext'
 import { ApiError } from '../../lib/api/client'
 import { listOrganizations } from '../../features/super-admin/api'
+import { Alert } from '../../components/ui/Alert'
+import { Badge } from '../../components/ui/Badge'
+import { Button } from '../../components/ui/Button'
+import { EmptyState } from '../../components/ui/EmptyState'
+import { Input, Select } from '../../components/ui/Input'
+import { PageHeader, Panel } from '../../components/ui/PageHeader'
+import { TableSkeleton } from '../../components/ui/Skeleton'
+import { Stagger, StaggerItem } from '../../components/motion/Motion'
 
 export function SuperAdminOrgsPage() {
   const { token } = useAuth()
@@ -40,52 +48,44 @@ export function SuperAdminOrgsPage() {
 
   return (
     <>
-      <div className="flex flex-wrap items-start justify-between gap-md mb-xl">
-        <div>
-          <h1 className="font-headline-md text-headline-md">Organizations</h1>
-          <p className="text-body-sm text-on-surface-variant mt-xs">
-            Platform home · all tenants on EZScreen.
-          </p>
-        </div>
-        <Link
-          to="/super-admin/orgs/new"
-          className="inline-flex items-center justify-center h-10 px-md bg-primary text-on-primary rounded-DEFAULT font-label-md text-label-md hover:bg-on-primary-fixed-variant transition-colors"
-        >
-          Create Organization
-        </Link>
-      </div>
+      <PageHeader
+        title="Organizations"
+        description="Platform home · all tenants on EZScreen."
+        actions={
+          <Button to="/super-admin/orgs/new">Create Organization</Button>
+        }
+      />
 
-      <form className="flex flex-wrap gap-sm mb-md" onSubmit={onSearch}>
-        <input
-          className="h-10 px-md border border-outline-variant rounded-DEFAULT text-body-sm min-w-[240px] bg-surface-container-lowest"
-          placeholder="Search organizations…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <select
-          className="h-10 px-md border border-outline-variant rounded-DEFAULT text-body-sm bg-surface-container-lowest"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="all">All statuses</option>
-          <option value="active">Active</option>
-          <option value="suspended">Suspended</option>
-        </select>
-        <button
-          type="submit"
-          className="h-10 px-md border border-outline-variant rounded-DEFAULT font-label-md text-label-md hover:bg-surface-container-low"
-        >
+      <form className="flex flex-wrap items-end gap-sm mb-md" onSubmit={onSearch}>
+        <div className="min-w-[240px] flex-1">
+          <Input
+            id="org-search"
+            placeholder="Search organizations…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="h-10"
+          />
+        </div>
+        <div className="w-[160px]">
+          <Select
+            id="org-status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="h-10"
+          >
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="suspended">Suspended</option>
+          </Select>
+        </div>
+        <Button type="submit" variant="secondary">
           Search
-        </button>
+        </Button>
       </form>
 
-      {error ? (
-        <p className="mb-md text-body-sm text-error" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Alert className="mb-md">{error}</Alert> : null}
 
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-lg">
+      <Panel bodyClassName="p-0">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
@@ -107,28 +107,39 @@ export function SuperAdminOrgsPage() {
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant">
-              {loading ? (
+            {loading ? (
+              <tbody>
                 <tr>
-                  <td colSpan={5} className="py-xl px-md text-center text-body-sm text-on-surface-variant">
-                    Loading…
+                  <td colSpan={5} className="p-0">
+                    <TableSkeleton rows={5} cols={5} />
                   </td>
                 </tr>
-              ) : orgs.length === 0 ? (
+              </tbody>
+            ) : orgs.length === 0 ? (
+              <tbody>
                 <tr>
-                  <td colSpan={5} className="py-xl px-md text-center text-body-sm text-on-surface-variant">
-                    No organizations yet.{' '}
-                    <Link className="text-secondary" to="/super-admin/orgs/new">
-                      Create one
-                    </Link>
+                  <td colSpan={5}>
+                    <EmptyState
+                      icon="domain"
+                      title="No organizations yet"
+                      description="Create the first tenant to start provisioning org admins."
+                      actionLabel="Create organization"
+                      actionTo="/super-admin/orgs/new"
+                    />
                   </td>
                 </tr>
-              ) : (
-                orgs.map((org) => (
-                  <tr key={org.id} className="hover:bg-surface-container-low">
+              </tbody>
+            ) : (
+              <Stagger as="tbody" className="divide-y divide-outline-variant">
+                {orgs.map((org) => (
+                  <StaggerItem
+                    as="tr"
+                    key={org.id}
+                    className="hover:bg-surface-container-low transition-colors"
+                  >
                     <td className="py-md px-md">
                       <Link
-                        className="text-body-sm font-medium text-secondary"
+                        className="text-body-sm font-medium text-secondary hover:underline"
                         to={`/super-admin/orgs/${org.id}`}
                       >
                         {org.name}
@@ -140,23 +151,17 @@ export function SuperAdminOrgsPage() {
                     <td className="py-md px-md text-body-sm">{org.user_count}</td>
                     <td className="py-md px-md text-body-sm">{org.job_count}</td>
                     <td className="py-md px-md">
-                      {org.is_active ? (
-                        <span className="text-label-md px-sm py-xs rounded-full bg-[#D1FAE5] text-[#065F46]">
-                          Active
-                        </span>
-                      ) : (
-                        <span className="text-label-md px-sm py-xs rounded-full bg-error-container text-on-error-container">
-                          Suspended
-                        </span>
-                      )}
+                      <Badge tone={org.is_active ? 'success' : 'danger'}>
+                        {org.is_active ? 'Active' : 'Suspended'}
+                      </Badge>
                     </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
+                  </StaggerItem>
+                ))}
+              </Stagger>
+            )}
           </table>
         </div>
-      </div>
+      </Panel>
     </>
   )
 }

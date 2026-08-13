@@ -4,15 +4,18 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: '#4a9cf5',
+        // Primary CTA / brand action — strong cobalt
+        primary: '#2b7fd4',
         'on-primary': '#ffffff',
         'primary-container': '#d9ebfc',
         'on-primary-container': '#0b3d74',
         'primary-fixed': '#d9ebfc',
         'primary-fixed-dim': '#a8d0fa',
         'on-primary-fixed': '#0b3d74',
-        'on-primary-fixed-variant': '#2b7fd4',
+        // Hover / pressed primary
+        'on-primary-fixed-variant': '#1a5fad',
         'inverse-primary': '#a8d0fa',
+        // Links, focus, nav accent — same family as primary
         secondary: '#2b7fd4',
         'on-secondary': '#ffffff',
         'secondary-container': '#b8d9fa',
@@ -21,10 +24,12 @@ export default {
         'secondary-fixed-dim': '#a8d0fa',
         'on-secondary-fixed': '#0b3d74',
         'on-secondary-fixed-variant': '#1a5fad',
-        tertiary: '#5ba3e8',
+        // Soft sky accent (decorative / light fills)
+        tertiary: '#4a9cf5',
         'on-tertiary': '#ffffff',
         'tertiary-container': '#e3f1fc',
         'on-tertiary-container': '#0b3d74',
+        // Cool white / ice-blue surfaces
         surface: '#f4f9ff',
         'surface-bright': '#fafcfe',
         'surface-dim': '#d6e6f5',
@@ -34,15 +39,23 @@ export default {
         'surface-container-high': '#dceaf8',
         'surface-container-highest': '#d0e3f5',
         'surface-variant': '#dceaf8',
+        // Deep navy text
         'on-surface': '#0f2740',
         'on-surface-variant': '#4a647a',
         'on-background': '#0f2740',
         background: '#f4f9ff',
         outline: '#8aa7bf',
         'outline-variant': '#c5d8ea',
-        'surface-tint': '#4a9cf5',
+        'surface-tint': '#2b7fd4',
         'inverse-surface': '#16304a',
         'inverse-on-surface': '#eef5fc',
+        // Status (badges / alerts only)
+        success: '#065F46',
+        'success-container': '#D1FAE5',
+        'on-success-container': '#065F46',
+        warning: '#92400E',
+        'warning-container': '#FEF3C7',
+        'on-warning-container': '#92400E',
         error: '#ba1a1a',
         'on-error': '#ffffff',
         'error-container': '#ffdad6',
