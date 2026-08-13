@@ -87,6 +87,7 @@ services:
       - MINIO_ACCESS_KEY=minio_admin
       - MINIO_SECRET_KEY=minio_password
       - MINIO_SECURE=False
+      - MINIO_BUCKET_NAME=ezscreen-uploads
     depends_on:
       db:
         condition: service_healthy
