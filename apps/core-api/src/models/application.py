@@ -59,7 +59,7 @@ class Application(Base):
     parsed_resume: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     candidate_yoe: Mapped[float | None] = mapped_column(Float, nullable=True)
     resume_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
-    matching_result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    job_fit_analysis: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[ApplicationStatus] = mapped_column(
         Enum(
             ApplicationStatus,

@@ -85,7 +85,7 @@ def upgrade() -> None:
     sa.Column('parsed_resume', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('candidate_yoe', sa.Float(), nullable=True),
     sa.Column('resume_score', sa.Numeric(precision=5, scale=2), nullable=True),
-    sa.Column('matching_result', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('job_fit_analysis', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('status', sa.Enum('applied', 'interview_scheduled', 'interview_completed', 'shortlist_for_l1', 'rejected', name='application_status'), server_default='applied', nullable=False),
     sa.Column('applied_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
