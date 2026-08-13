@@ -13,8 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy pyproject.toml
+# Copy pyproject.toml and README
 COPY pyproject.toml .
+COPY README.md .
 
 # Install dependencies using uv
 RUN uv pip install --system .

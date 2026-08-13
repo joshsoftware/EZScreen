@@ -104,10 +104,10 @@ services:
       - "5173:5173"
     environment:
       - VITE_CORE_API_URL=http://localhost:8000
-      - VITE_AI_SCREENING_URL=ws://localhost:8001
+      - VITE_AI_SCREENING_URL=ws://localhost:8002
     depends_on:
       - core-api
-      - ai-screening
+      - ai-core-services
 
 volumes:
   pgdata:

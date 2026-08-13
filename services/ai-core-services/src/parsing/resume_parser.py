@@ -22,14 +22,14 @@ class ResumeParser:
             current_date = datetime.datetime.now().strftime("%Y-%m-%d")
             prompt = self._build_prompt(markdown_text, current_date)
             
-            # 4. Call LLM
+            # 4. Call LLM (using the OpenAI chat endpoint to strictly enforce JSON)
             logger.info("Sending resume extraction prompt to LLM")
-            response = await self.llm_client.generate(prompt=prompt, temperature=0.1, timeout=120.0)
+            response = await self.llm_client.openai_chat_generate(prompt=prompt, temperature=0.1, timeout=120.0)
             
             # 5. Parse JSON Response
+            raw_json = response.response.strip()
             try:
                 # Basic cleanup in case LLM wraps it in markdown blocks
-                raw_json = response.response.strip()
                 if raw_json.startswith("```json"):
                     raw_json = raw_json[7:]
                 if raw_json.startswith("```"):
@@ -37,7 +37,10 @@ class ResumeParser:
                 if raw_json.endswith("```"):
                     raw_json = raw_json[:-3]
                     
-                return json.loads(raw_json.strip())
+                parsed_data = json.loads(raw_json.strip())
+                if "parsed_resume" in parsed_data:
+                    parsed_data = parsed_data["parsed_resume"]
+                return parsed_data
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse LLM JSON output: {e}\nRaw Output: {response.response}")
                 raise ValueError("LLM returned invalid JSON")
