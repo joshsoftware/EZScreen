@@ -109,7 +109,7 @@ export function SuperAdminOrgDetailPage() {
               {org.is_active ? 'Suspend' : 'Reactivate'}
             </Button>
             <Button to={`/super-admin/orgs/${org.id}/provision`}>
-              Provision org admin
+              Provision user
             </Button>
           </>
         }

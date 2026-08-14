@@ -15,13 +15,14 @@ export class ApiError extends Error {
 
 const NO_REFRESH_PATHS = new Set([
   '/api/v1/auth/login',
+  '/api/v1/auth/org/login',
   '/api/v1/auth/refresh',
   '/api/v1/auth/logout',
 ])
 
 let refreshPromise = null
 
-async function silentRefresh() {
+export async function refreshSession() {
   if (refreshPromise) {
     return refreshPromise
   }
@@ -37,7 +38,7 @@ async function silentRefresh() {
       }
       const data = await response.json()
       setAccessToken(data.access_token)
-      return data.access_token
+      return data
     } catch {
       return null
     } finally {
@@ -46,6 +47,11 @@ async function silentRefresh() {
   })()
 
   return refreshPromise
+}
+
+async function silentRefresh() {
+  const result = await refreshSession()
+  return result?.access_token ?? null
 }
 
 export async function apiRequest(path, options = {}) {
