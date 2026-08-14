@@ -1,3 +1,4 @@
+import asyncio
 import json
 import datetime
 from src.core.storage import storage_client
@@ -11,11 +12,11 @@ class ResumeParser:
 
     async def parse_s3_file(self, s3_key: str) -> dict:
         """Downloads from S3, extracts markdown, and parses using LLM."""
-        # 1. Download file
-        tmp_path = storage_client.download_to_tempfile(s3_key)
+        # 1. Download file (Non-blocking)
+        tmp_path = await asyncio.to_thread(storage_client.download_to_tempfile, s3_key)
         
         try:
-            # 2. Extract Text
+            # 2. Extract Text (Sequential to prevent PyTorch thread deadlocks)
             markdown_text = docling_wrapper.extract_markdown(tmp_path)
             
             # 3. Build Prompt
