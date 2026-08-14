@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.core.config import settings
 from src.api.v1 import parsing
+from src.api.v1 import matching
 
 app = FastAPI(
     title="EZScreen Service",
@@ -28,3 +29,4 @@ def health_check():
 
 # Register API Routers
 app.include_router(parsing.router, prefix="/internal/v1/parse")
+app.include_router(matching.router, prefix="/internal/v1/match")
