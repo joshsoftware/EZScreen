@@ -101,7 +101,7 @@ export function SuperAdminLoginPage() {
 
           <p className="mt-lg text-body-sm text-on-surface-variant">
             Not platform ops?{' '}
-            <Link className="text-secondary hover:underline" to="/org-admin/login">
+            <Link className="text-secondary hover:underline" to="/login">
               Org / HR login
             </Link>
           </p>

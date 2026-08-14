@@ -72,11 +72,11 @@ export function SuperAdminProvisionPage() {
             <Link to={`/super-admin/orgs/${orgId}`} className="hover:underline">
               {org?.name ?? 'Organization'}
             </Link>{' '}
-            / Provision user
+            / Provision admin
           </p>
         }
-        title="Provision organization user"
-        description={`Creates an organization_admin or HR user for ${org?.name ?? 'this tenant'}.`}
+        title="Provision organization admin"
+        description={`Creates an organization user for ${org?.name ?? 'this tenant'}.`}
       />
 
       <Panel>

@@ -1,4 +1,4 @@
-import { apiRequest, refreshSession } from '../../lib/api/client'
+import { apiRequest } from '../../lib/api/client'
 import { setAccessToken } from '../../lib/auth/session'
 
 export function loginRequest(email, password) {
@@ -12,22 +12,12 @@ export function loginRequest(email, password) {
   })
 }
 
-export function orgLoginRequest(email, password) {
-  return apiRequest('/api/v1/auth/org/login', {
+export function refreshRequest() {
+  return apiRequest('/api/v1/auth/refresh', {
     method: 'POST',
-    body: { email, password },
     skipAuthRetry: true,
   }).then((result) => {
     setAccessToken(result.access_token)
-    return result
-  })
-}
-
-export function refreshRequest() {
-  return refreshSession().then((result) => {
-    if (!result) {
-      throw new Error('Refresh failed')
-    }
     return result
   })
 }

@@ -4,9 +4,7 @@ import { Toaster } from 'sonner'
 import { AuthProvider } from './features/auth/AuthContext'
 import { RequireRole } from './features/auth/RequireRole'
 import { SuperAdminShell } from './components/layout/SuperAdminShell'
-import { OrgAdminShell } from './components/layout/OrgAdminShell'
 import { SuperAdminLoginPage } from './pages/super-admin/SuperAdminLoginPage'
-import { OrgAdminLoginPage } from './pages/org-admin/OrgAdminLoginPage'
 import { PageSkeleton } from './components/ui/Skeleton'
 
 const SuperAdminOrgsPage = lazy(() =>
@@ -39,21 +37,6 @@ const SuperAdminSettingsPage = lazy(() =>
     default: m.SuperAdminSettingsPage,
   })),
 )
-const OrgAdminHomePage = lazy(() =>
-  import('./pages/org-admin/OrgAdminHomePage').then((m) => ({
-    default: m.OrgAdminHomePage,
-  })),
-)
-const OrgAdminTeamPage = lazy(() =>
-  import('./pages/org-admin/OrgAdminTeamPage').then((m) => ({
-    default: m.OrgAdminTeamPage,
-  })),
-)
-const OrgAdminProvisionHrPage = lazy(() =>
-  import('./pages/org-admin/OrgAdminProvisionHrPage').then((m) => ({
-    default: m.OrgAdminProvisionHrPage,
-  })),
-)
 
 function Lazy({ children }) {
   return <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
@@ -77,8 +60,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/super-admin/login" replace />} />
           <Route path="/super-admin/login" element={<SuperAdminLoginPage />} />
-          <Route path="/org-admin/login" element={<OrgAdminLoginPage />} />
-          <Route path="/login" element={<Navigate to="/org-admin/login" replace />} />
+          <Route path="/login" element={<Navigate to="/super-admin/login" replace />} />
 
           <Route
             path="/super-admin"
@@ -135,48 +117,6 @@ export default function App() {
                 <Lazy>
                   <SuperAdminSettingsPage />
                 </Lazy>
-              }
-            />
-          </Route>
-
-          <Route
-            path="/org-admin"
-            element={
-              <RequireRole
-                roles={['organization_admin', 'hr']}
-                loginPath="/org-admin/login"
-              >
-                <OrgAdminShell />
-              </RequireRole>
-            }
-          >
-            <Route
-              index
-              element={
-                <Lazy>
-                  <OrgAdminHomePage />
-                </Lazy>
-              }
-            />
-            <Route
-              path="team"
-              element={
-                <Lazy>
-                  <OrgAdminTeamPage />
-                </Lazy>
-              }
-            />
-            <Route
-              path="team/invite"
-              element={
-                <RequireRole
-                  roles={['organization_admin']}
-                  loginPath="/org-admin/team"
-                >
-                  <Lazy>
-                    <OrgAdminProvisionHrPage />
-                  </Lazy>
-                </RequireRole>
               }
             />
           </Route>
