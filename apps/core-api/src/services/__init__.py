@@ -9,7 +9,7 @@ from src.services.auth_service import (
     refresh_access_token,
     revoke_refresh_token,
 )
-from src.services import organization_service, platform_service, user_service
+from src.services import job_service, organization_service, platform_service, user_service
 
 __all__ = [
     "OrgAuthError",
@@ -21,6 +21,7 @@ __all__ = [
     "issue_token_pair",
     "refresh_access_token",
     "revoke_refresh_token",
+    "job_service",
     "organization_service",
     "platform_service",
     "user_service",

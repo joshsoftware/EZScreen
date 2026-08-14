@@ -15,7 +15,7 @@
 | :--- | :--- | :--- |
 | **`super_admin`** | Platform Scope (`organization_id NULL`) | Platform owner. Creates Organizations (`organizations`); provisions `organization_admin` and `hr` users. |
 | **`organization_admin`** | Organization Scope (`organization_id NOT NULL`) | Organization Administrator. Bound strictly to one organization. Provisions secondary `organization_admin` and `hr` users within their organization. |
-| **`hr`** | Organization Scope (`organization_id NOT NULL`) | Operational HR user. Bound strictly to one organization. Parses & publishes JDs, views applicant scores, schedules AI interview sessions, dispatches meeting bots, and reviews screening reports. |
+| **`hr`** | Organization Scope (`organization_id NOT NULL`) | Operational HR user. Bound strictly to one organization. Creates & publishes jobs via form, views applicant scores, schedules AI interview sessions, dispatches meeting bots, and reviews screening reports. |
 | **`candidate`** | Candidate Scope (`organization_id NULL`) | Guest / Candidate applicant. Browses published jobs via organization subdomain (`{org}.ezscreen.io`) and submits resume applications. |
 
 ---
@@ -462,49 +462,13 @@ Response 201:
 
 ---
 
-### C. Job Description Endpoints (Direct Parsing & Unified Update)
+### C. Job Description Endpoints (Form Create & Unified Update)
 
-#### POST /api/v1/jobs/parse
-**Tag**: `Job Descriptions`  
-**Summary**: Direct in-memory parsing of raw JD file or text  
-**Operation ID**: `parseJobDescription`  
-**Roles**: `hr`, `organization_admin`, `super_admin`  
-
-```json
-Request:
-{
-  "headers": {
-    "Authorization": "Bearer <hr_jwt>",
-    "Content-Type": "application/json"
-  },
-  "body": {
-    "raw_text": "Senior Java Developer with 3-5 years experience in Spring Boot, PostgreSQL, and Docker."
-  }
-}
-
-Response 200:
-{
-  "title": "Senior Java Developer",
-  "job_type": "full_time",
-  "work_type": "hybrid",
-  "location": "Bangalore",
-  "experience_min": 3,
-  "experience_max": 5,
-  "skills": "Java, Spring Boot, PostgreSQL, Docker",
-  "parsed_jd": {
-    "role": "Senior Java Developer",
-    "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
-    "preferred_skills": ["Docker", "AWS"],
-    "experience": {"min": 3, "max": 5},
-    "education": "Bachelor Degree",
-    "responsibilities": ["Develop REST APIs", "Optimize DB queries"]
-  }
-}
-```
+HR creates jobs by filling the form. There is no JD PDF upload and no `POST /api/v1/jobs/parse`.
 
 #### POST /api/v1/jobs
 **Tag**: `Job Descriptions`  
-**Summary**: Save & publish job description record  
+**Summary**: Create a job from form fields  
 **Operation ID**: `createJobDescription`  
 **Roles**: `hr`, `organization_admin`, `super_admin`  
 
@@ -524,14 +488,6 @@ Request:
     "experience_min": 3,
     "experience_max": 5,
     "skills": "Java, Spring Boot, PostgreSQL, Docker",
-    "parsed_jd": {
-      "role": "Senior Java Developer",
-      "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
-      "preferred_skills": ["Docker", "AWS"],
-      "experience": {"min": 3, "max": 5},
-      "education": "Bachelor Degree",
-      "responsibilities": ["Develop REST APIs", "Optimize DB queries"]
-    },
     "status": "published"
   }
 }
@@ -549,15 +505,7 @@ Response 201:
   "experience_min": 3,
   "experience_max": 5,
   "skills": "Java, Spring Boot, PostgreSQL, Docker",
-  "status": "published",
-  "parsed_jd": {
-    "role": "Senior Java Developer",
-    "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
-    "preferred_skills": ["Docker", "AWS"],
-    "experience": {"min": 3, "max": 5},
-    "education": "Bachelor Degree",
-    "responsibilities": ["Develop REST APIs", "Optimize DB queries"]
-  }
+  "status": "published"
 }
 ```
 
@@ -630,21 +578,13 @@ Response 200:
   "experience_min": 3,
   "experience_max": 5,
   "skills": "Java, Spring Boot, PostgreSQL, Docker",
-  "status": "published",
-  "parsed_jd": {
-    "role": "Senior Java Developer",
-    "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
-    "preferred_skills": ["Docker", "AWS"],
-    "experience": {"min": 3, "max": 5},
-    "education": "Bachelor Degree",
-    "responsibilities": ["Develop REST APIs", "Optimize DB queries"]
-  }
+  "status": "published"
 }
 ```
 
 #### PUT /api/v1/jobs/{id}
 **Tag**: `Job Descriptions`  
-**Summary**: Unified endpoint to update job description fields, parsed_jd requirements, and/or status  
+**Summary**: Update job form fields and/or status  
 **Operation ID**: `updateJob`  
 **Roles**: `hr`, `organization_admin`, `super_admin`  
 
