@@ -48,3 +48,26 @@ class ParsedResumeResponse(BaseModel):
     status: str
     parsed_resume: Optional[ParsedResumeData] = None
     error_message: Optional[str] = None
+
+# --- Job Description (JD) Schemas ---
+
+class ParseJDRequest(BaseModel):
+    job_id: str = Field(..., description="Unique identifier for the job description")
+    jd_text: str = Field(..., description="Raw text of the job description")
+
+class ParseJDBulkRequest(BaseModel):
+    jds: List[ParseJDRequest] = Field(..., description="List of JDs to parse")
+
+class ParsedJDData(BaseModel):
+    job_title: Optional[str] = None
+    must_have_skills: List[str] = Field(default_factory=list)
+    good_to_have_skills: List[str] = Field(default_factory=list)
+    min_experience_years: Optional[float] = None
+    max_experience_years: Optional[float] = None
+    educational_requirements: List[str] = Field(default_factory=list)
+
+class ParsedJDResponse(BaseModel):
+    job_id: str
+    status: str
+    parsed_jd: Optional[ParsedJDData] = None
+    error_message: Optional[str] = None
