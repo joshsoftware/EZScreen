@@ -8,6 +8,7 @@ from enum import Enum
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from src.core.jwt import (
@@ -125,35 +126,41 @@ def issue_token_pair(db: Session, user: User) -> tuple[str, int, str]:
     return access_token, expires_in, refresh_token
 
 
-def _is_refresh_revoked(db: Session, jti: str) -> bool:
-    return db.get(RefreshTokenRevocation, jti) is not None
+def _revocation_expires_at(payload: dict) -> datetime:
+    exp = payload.get("exp")
+    if isinstance(exp, (int, float)):
+        return datetime.fromtimestamp(exp, tz=timezone.utc)
+    return datetime.now(timezone.utc)
+
+
+def _insert_refresh_revocation(
+    db: Session, jti: str, user_id: UUID, expires_at: datetime
+) -> bool:
+    """Insert revocation row. Returns True if newly revoked, False if already revoked."""
+    stmt = (
+        insert(RefreshTokenRevocation)
+        .values(jti=jti, user_id=user_id, expires_at=expires_at)
+        .on_conflict_do_nothing(index_elements=["jti"])
+        .returning(RefreshTokenRevocation.jti)
+    )
+    inserted = db.scalar(stmt)
+    db.commit()
+    return inserted is not None
 
 
 def revoke_refresh_token(db: Session, refresh_token: str) -> None:
-    """Revoke a refresh token by JTI (logout)."""
+    """Revoke a refresh token by JTI (logout). Idempotent."""
     try:
         payload = decode_refresh_token(refresh_token)
     except TokenError:
         return
 
-    jti = payload["jti"]
-    if _is_refresh_revoked(db, jti):
-        return
-
-    exp = payload.get("exp")
-    if isinstance(exp, (int, float)):
-        expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
-    else:
-        expires_at = datetime.now(timezone.utc)
-
-    db.add(
-        RefreshTokenRevocation(
-            jti=jti,
-            user_id=UUID(payload["sub"]),
-            expires_at=expires_at,
-        )
+    _insert_refresh_revocation(
+        db,
+        payload["jti"],
+        UUID(payload["sub"]),
+        _revocation_expires_at(payload),
     )
-    db.commit()
 
 
 def refresh_access_token(
@@ -164,14 +171,14 @@ def refresh_access_token(
     jti = payload["jti"]
     user_id = UUID(payload["sub"])
 
-    if _is_refresh_revoked(db, jti):
-        raise TokenError("Refresh token revoked")
-
     user = get_user_by_id(db, user_id)
     if user is None or user.status != UserStatus.active:
         raise TokenError("User not found or inactive")
 
-    revoke_refresh_token(db, refresh_token)
+    if not _insert_refresh_revocation(
+        db, jti, user_id, _revocation_expires_at(payload)
+    ):
+        raise TokenError("Refresh token revoked")
 
     access_token, expires_in = create_access_token(
         user_id=user.id,

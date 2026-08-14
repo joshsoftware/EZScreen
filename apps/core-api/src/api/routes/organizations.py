@@ -25,6 +25,14 @@ SuperAdmin = Annotated[User, Depends(require_roles(UserRole.super_admin))]
 SuperOrOrgAdmin = Annotated[
     User, Depends(require_roles(UserRole.super_admin, UserRole.organization_admin))
 ]
+OrgWorkspaceUser = Annotated[
+    User,
+    Depends(
+        require_roles(
+            UserRole.super_admin, UserRole.organization_admin, UserRole.hr
+        )
+    ),
+]
 
 
 def _to_org_response(
@@ -116,7 +124,7 @@ def create_organization(
 def get_organization(
     organization_id: UUID,
     db: DbSession,
-    current_user: SuperOrOrgAdmin,
+    current_user: OrgWorkspaceUser,
 ) -> OrganizationResponse:
     _assert_org_access(current_user, organization_id)
     org = organization_service.get_organization(db, organization_id)
@@ -214,13 +222,6 @@ def provision_org_user(
     current_user: SuperOrOrgAdmin,
 ) -> OrgUserResponse:
     _assert_org_access(current_user, organization_id)
-    # Org admin cannot create another super path — only org admin and hr already validated
-    if (
-        current_user.role == UserRole.organization_admin
-        and body.role == UserRole.organization_admin
-        and current_user.organization_id != organization_id
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     org = organization_service.get_organization(db, organization_id)
     if org is None:

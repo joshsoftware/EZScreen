@@ -10,6 +10,7 @@ import {
   getMeRequest,
   loginRequest,
   logoutRequest,
+  orgLoginRequest,
   refreshRequest,
 } from './api'
 import { ApiError } from '../../lib/api/client'
@@ -77,6 +78,13 @@ export function AuthProvider({ children }) {
     return result.user
   }, [])
 
+  const loginOrg = useCallback(async (email, password) => {
+    const result = await orgLoginRequest(email, password)
+    setAccessToken(result.access_token)
+    setUser(result.user)
+    return result.user
+  }, [])
+
   const logout = useCallback(async () => {
     const currentToken = getAccessToken()
     clearAccessToken()
@@ -94,8 +102,8 @@ export function AuthProvider({ children }) {
   const isRole = useCallback((role) => user?.role === role, [user])
 
   const value = useMemo(
-    () => ({ user, token, isBootstrapping, login, logout, isRole }),
-    [user, token, isBootstrapping, login, logout, isRole],
+    () => ({ user, token, isBootstrapping, login, loginOrg, logout, isRole }),
+    [user, token, isBootstrapping, login, loginOrg, logout, isRole],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

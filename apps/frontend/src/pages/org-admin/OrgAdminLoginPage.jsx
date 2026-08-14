@@ -9,16 +9,18 @@ import { FadeIn, FadeSlide } from '../../components/motion/Motion'
 import { useAuth } from '../../features/auth/AuthContext'
 import { ApiError } from '../../lib/api/client'
 
-export function SuperAdminLoginPage() {
-  const { login, logout, user, isBootstrapping } = useAuth()
+const ORG_WORKSPACE_ROLES = new Set(['organization_admin', 'hr'])
+
+export function OrgAdminLoginPage() {
+  const { loginOrg, logout, user, isBootstrapping } = useAuth()
   const navigate = useNavigate()
-  const [email, setEmail] = useState('admin@ezscreen.io')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
-  if (!isBootstrapping && user?.role === 'super_admin') {
-    return <Navigate to="/super-admin/orgs" replace />
+  if (!isBootstrapping && ORG_WORKSPACE_ROLES.has(user?.role)) {
+    return <Navigate to="/org-admin" replace />
   }
 
   async function onSubmit(event) {
@@ -26,14 +28,14 @@ export function SuperAdminLoginPage() {
     setError(null)
     setSubmitting(true)
     try {
-      const loggedIn = await login(email.trim(), password)
-      if (loggedIn.role !== 'super_admin') {
+      const loggedIn = await loginOrg(email.trim(), password)
+      if (!ORG_WORKSPACE_ROLES.has(loggedIn.role)) {
         await logout()
-        setError('Not a platform admin. Use Org / HR login instead.')
+        setError('Use platform Super Admin login for this account.')
         return
       }
       toast.success('Signed in')
-      navigate('/super-admin/orgs', { replace: true })
+      navigate('/org-admin', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message)
@@ -52,7 +54,7 @@ export function SuperAdminLoginPage() {
         className="flex-1 flex flex-col justify-center px-margin-mobile md:px-margin-desktop lg:px-[120px] relative z-10 w-full md:max-w-[50%] lg:max-w-[45%] min-h-screen bg-surface-container-lowest"
       >
         <header className="absolute top-0 left-0 w-full py-lg px-margin-mobile md:px-margin-desktop">
-          <LogoMark />
+          <LogoMark subtitle="Organization" />
         </header>
 
         <FadeIn
@@ -61,17 +63,17 @@ export function SuperAdminLoginPage() {
         >
           <div className="mb-xl">
             <h1 className="font-display-lg text-display-lg-mobile md:text-display-lg text-on-surface mb-sm">
-              Platform access
+              Workspace access
             </h1>
             <p className="font-body-md text-body-md text-on-surface-variant">
-              Sign in as Super Admin to manage organizations and platform health.
+              Sign in as Organization Admin or HR to manage your hiring workspace.
             </p>
           </div>
 
           <form className="flex flex-col gap-md" onSubmit={onSubmit} noValidate>
             <Input
-              id="email"
-              label="Admin email"
+              id="org-email"
+              label="Work email"
               name="email"
               type="email"
               autoComplete="username"
@@ -81,7 +83,7 @@ export function SuperAdminLoginPage() {
               required
             />
             <Input
-              id="password"
+              id="org-password"
               label="Password"
               name="password"
               type="password"
@@ -95,14 +97,14 @@ export function SuperAdminLoginPage() {
             {error ? <Alert>{error}</Alert> : null}
 
             <Button type="submit" size="lg" className="w-full" loading={submitting}>
-              {submitting ? 'Signing in…' : 'Sign in as Super Admin'}
+              {submitting ? 'Signing in…' : 'Sign in to workspace'}
             </Button>
           </form>
 
           <p className="mt-lg text-body-sm text-on-surface-variant">
-            Not platform ops?{' '}
-            <Link className="text-secondary hover:underline" to="/org-admin/login">
-              Org / HR login
+            Platform operator?{' '}
+            <Link className="text-secondary hover:underline" to="/super-admin/login">
+              Super Admin login
             </Link>
           </p>
         </FadeIn>
@@ -139,14 +141,14 @@ export function SuperAdminLoginPage() {
         />
         <FadeIn delay={0.25} className="relative z-10 max-w-md">
           <p className="font-label-md text-label-md uppercase tracking-wider text-on-primary/90 mb-sm">
-            EZScreen Platform
+            Organization workspace
           </p>
           <h2 className="font-headline-md text-headline-md text-on-primary mb-md">
-            Functional precision for recruitment intelligence.
+            Hire with clarity inside your tenant.
           </h2>
           <p className="font-body-sm text-body-sm text-on-primary/90">
-            Create tenants, provision organization admins, and monitor AI processing health
-            across the platform.
+            Manage your organization profile, invite HR teammates, and prepare for
+            job screening workflows.
           </p>
         </FadeIn>
       </FadeSlide>

@@ -305,7 +305,7 @@ Response 200:
 **Tag**: `Organizations & User Provisioning`  
 **Summary**: View organization details  
 **Operation ID**: `getOrganization`  
-**Roles**: `super_admin`, `organization_admin` (own org)  
+**Roles**: `super_admin`, `organization_admin` (own org), `hr` (own org)  
 
 ```json
 Request:
