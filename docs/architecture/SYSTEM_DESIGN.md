@@ -102,10 +102,24 @@ The platform is designed as a **Modular Monolith inside a Monorepo**. This guara
    * Pure document parsing and matching engine. Extracts structured `parsed_jd` requirements, parses candidate resumes (`parsed_resume`), and computes candidate-JD matching scores (`matching_result`).
    * *Standalone Capability*: Can be packaged and deployed independently as a "Resume & JD Parsing API".
 
-3. **AI Screening Microservice (`services/ai-screening`)**:
-   * Handles static interview question generation (`generated_questions`), STT-LLM (`gemma4:31b`)-TTS conversation pipeline, Attendee bot coordination, and transcript Q&A evaluation (`interview_analysis`).
-   * *Standalone Capability*: Can be deployed independently on GPU infrastructure for AI video/voice interview execution.
+3. **AI Screening Microservice (`services/ai-core-services`)**:
+   * Pure Read-Only Stateless AI Inference Engine running on Port 8002. Handles static interview question generation (`generated_questions`), STT-LLM (`gemma4:31b`)-TTS conversation pipeline, Attendee bot coordination, and transcript Q&A evaluation (`interview_analysis`).
+   * Performs zero direct database writes. Evaluates screening data and returns structured JSON payloads back to Core Backend.
+
 ---
+
+### Database Architecture & Ownership Rules
+
+| Rule Component | Core Backend (`apps/core-api`) | AI Microservice (`services/ai-core-services`) |
+| :--- | :--- | :--- |
+| **Database Instance** | Shared PostgreSQL 15+ (`ezscreen_db`) | Shared PostgreSQL 15+ (`ezscreen_db`) |
+| **DDL Migrations** | **100% Single Owner** (`alembic upgrade head`) | None (Schema Consumer) |
+| **Database Read Scope** | **100% Full READ Access (`SELECT`)** | **100% Full READ Access (`SELECT`)** |
+| **Database Write Scope** | **100% SOLE WRITE OWNER FOR ALL TABLES** (`organizations`, `users`, `job_descriptions`, `applications`, `application_timeline`, `interview_session`, `interview_analysis`) | **ZERO Direct Database Writes** (`INSERT`, `UPDATE`, `DELETE` strictly revoked) |
+| **Data Persistence Flow** | Writes all entity records directly to PostgreSQL | Returns evaluation & extraction JSON payloads to `core-api` via HTTP responses |
+
+---
+
 
 ## 3. Technology Stack
 
