@@ -1046,7 +1046,7 @@ Response 200:
 
 #### POST /internal/v1/parse/jd
 **Tag**: `Internal Service`  
-**Summary**: Internal JD parsing engine (services/parsing-matching)  
+**Summary**: Internal JD parsing engine (services/ai-core-services)  
 **Operation ID**: `internalParseJD`  
 
 ```json
@@ -1056,20 +1056,44 @@ Request:
     "Content-Type": "application/json"
   },
   "body": {
-    "raw_text": "Senior Java Developer..."
+    "title": "Senior Java Developer",
+    "description": "We are hiring...",
+    "job_type": "full_time",
+    "work_type": "hybrid",
+    "location": "Bangalore",
+    "experience_min": 3,
+    "experience_max": 6,
+    "skills": "Java, Spring Boot, PostgreSQL, Docker, AWS, Kafka",
+    "status": "published"
   }
 }
 
 Response 200:
 {
-  "title": "Senior Java Developer",
-  "parsed_jd": {}
+  "status": "success",
+  "parsed_jd": {
+    "title": "Senior Java Developer",
+    "company": null,
+    "company_description": null,
+    "experience_required": {
+      "min_years": 3,
+      "max_years": 6
+    },
+    "skills": {
+      "must_have": ["Java"],
+      "good_to_have": ["Docker"]
+    },
+    "qualifications": [],
+    "responsibilities": [],
+    "location": "Bangalore",
+    "employment_type": "full_time"
+  }
 }
 ```
 
 #### POST /internal/v1/parse/resume
 **Tag**: `Internal Service`  
-**Summary**: Internal resume parsing engine (services/parsing-matching)  
+**Summary**: Internal resume parsing engine (services/ai-core-services)  
 **Operation ID**: `internalParseResume`  
 
 ```json
@@ -1079,20 +1103,35 @@ Request:
     "Content-Type": "application/json"
   },
   "body": {
-    "resume_base64": "<base64>",
-    "file_name": "resume.pdf"
+    "resumes": [
+      {
+        "application_id": "app_123",
+        "resume_path": "applications/123/resumes/resume.pdf"
+      }
+    ]
   }
 }
 
 Response 200:
-{
-  "parsed_resume": {}
-}
+[
+  {
+    "application_id": "app_123",
+    "status": "success",
+    "parsed_resume": {
+      "personal_info": {},
+      "primary_skills": [],
+      "secondary_skills": [],
+      "domain_expertise": [],
+      "experience": {},
+      "education_certificates": []
+    }
+  }
+]
 ```
 
 #### POST /internal/v1/match/resume-jd
 **Tag**: `Internal Service`  
-**Summary**: Internal candidate-JD matching score calculation (services/parsing-matching)  
+**Summary**: Internal candidate-JD matching score calculation (services/ai-core-services)  
 **Operation ID**: `internalMatchResumeJD`  
 
 ```json
@@ -1102,16 +1141,56 @@ Request:
     "Content-Type": "application/json"
   },
   "body": {
-    "parsed_jd": {},
-    "parsed_resume": {}
+    "matches": [
+      {
+        "application_id": "app_123",
+        "job_id": "job_999",
+        "parsed_resume": {},
+        "parsed_jd": {}
+      }
+    ]
   }
 }
 
 Response 200:
-{
-  "resume_score": 85.0,
-  "matching_result": {}
-}
+[
+  {
+    "application_id": "app_123",
+    "job_id": "job_999",
+    "status": "success",
+    "job_fit_analysis": {
+      "score_breakdown": {
+        "must_have_skills_score": 40.0,
+        "experience_score": 30.0,
+        "good_to_have_skills_score": 20.0,
+        "qualifications_score": 10.0
+      },
+      "match_score": 100.0,
+      "reasoning": [
+        "Candidate meets all must-have skills..."
+      ],
+      "matched_skills": {
+        "must_have": ["Java"],
+        "good_to_have": []
+      },
+      "missing_skills": {
+        "must_have": [],
+        "good_to_have": ["Docker"]
+      },
+      "must_have_experience": [
+        {
+          "skill": "Java",
+          "required_years": 3.0,
+          "candidate_years": 4.0,
+          "skill_experience_ratio": 1.0,
+          "meets_requirement": true
+        }
+      ],
+      "qualification_match": true,
+      "experience_match": true
+    }
+  }
+]
 ```
 
 ---

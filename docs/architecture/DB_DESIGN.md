@@ -225,7 +225,7 @@ erDiagram
         jsonb parsed_resume "candidate_name, email, phone, summary, skills, experience_years, education, certifications, projects"
         float candidate_yoe "nullable - denormalised"
         decimal resume_score "nullable - AI match score 0-100"
-        jsonb matching_result "score_breakdown, matched_skills, missing_skills, experience_match, education_match, reasoning"
+        jsonb matching_result "score_breakdown, match_score, matched_skills, missing_skills, must_have_experience, reasoning"
         varchar status "enum: applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected"
         timestamp applied_at "nullable"
         timestamp created_at
@@ -405,30 +405,39 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
 ### Application `matching_result`
 
 ```json
-{{
-  "score_breakdown": {{
+{
+  "score_breakdown": {
     "must_have_skills_score": 32.0,
-    "experience_score": 30.0,
+    "experience_score": 24.5,
     "good_to_have_skills_score": 15.0,
     "qualifications_score": 10.0
-  }},
-  "match_score": 8.7,
+  },
+  "match_score": 8.15,
   "reasoning": [
     "point 1",
     "point 2",
     "point 3"
   ],
-  "matched_skills": {{
+  "matched_skills": {
     "must_have": ["..."],
     "good_to_have": ["..."]
-  }},
-  "missing_skills": {{
+  },
+  "missing_skills": {
     "must_have": ["..."],
     "good_to_have": ["..."]
-  }},
+  },
+  "must_have_experience": [
+    {
+      "skill": "Java",
+      "required_years": 3.0,
+      "candidate_years": 4.0,
+      "skill_experience_ratio": 1.0,
+      "meets_requirement": true
+    }
+  ],
   "qualification_match": true,
-  "experience_match": true
-}}
+  "experience_match": false
+}
 ```
 ---
 
@@ -436,8 +445,8 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
 
 | Column | Type | Source | Purpose |
 |--------|------|--------|---------|
-| `resume_score` | decimal (0–100) | `matching_result.score_breakdown.overall_score` | Fast `ORDER BY` sorting |
-| `candidate_yoe` | float | `parsed_resume.experience_years` | Fast filter/sort by experience |
+| `resume_score` | decimal (0–100) | `matching_result.match_score` (multiplied by 10) | Fast `ORDER BY` sorting |
+| `candidate_yoe` | float | `parsed_resume.experience.total_years` | Fast filter/sort by experience |
 
 ---
 
