@@ -51,12 +51,10 @@ class ParsedResumeResponse(BaseModel):
 
 # --- Job Description (JD) Schemas ---
 
-class ParseJDRequest(BaseModel):
-    job_id: str = Field(..., description="Unique identifier for the job description")
-    jd_text: str = Field(..., description="Raw text of the job description")
+class RawJDRequest(BaseModel):
+    # Accept any extra fields
+    model_config = {"extra": "allow"}
 
-class ParseJDBulkRequest(BaseModel):
-    jds: List[ParseJDRequest] = Field(..., description="List of JDs to parse")
 
 class ExperienceRequired(BaseModel):
     min_years: Optional[float] = None
@@ -78,7 +76,6 @@ class ParsedJDData(BaseModel):
     employment_type: Optional[str] = None
 
 class ParsedJDResponse(BaseModel):
-    job_id: str
     status: str
     parsed_jd: Optional[ParsedJDData] = None
     error_message: Optional[str] = None

@@ -1,7 +1,8 @@
 import asyncio
 from fastapi import APIRouter, HTTPException
-from src.parsing.schemas import ParseResumeRequest, ParseResumeBulkRequest, ParsedResumeResponse
+from src.parsing.schemas import ParseResumeRequest, ParseResumeBulkRequest, ParsedResumeResponse, RawJDRequest, ParsedJDResponse
 from src.parsing.resume_parser import resume_parser
+from src.parsing.jd_parser import jd_parser
 from src.core.logger import logger
 
 router = APIRouter(tags=["Parsing"])
@@ -36,3 +37,27 @@ async def parse_resume_endpoint(request: ParseResumeBulkRequest):
     tasks = [process_single(req) for req in request.resumes]
     results = await asyncio.gather(*tasks)
     return results
+
+@router.post("/jd", response_model=ParsedJDResponse)
+async def parse_jd_endpoint(request: RawJDRequest):
+    """
+    Parses a single JD from a raw JSON payload.
+    """
+    logger.info(f"Received parse request for JD.")
+    import json
+    
+    try:
+        # Convert the incoming JSON object into a string for the LLM
+        jd_text = json.dumps(request.model_dump(), indent=2)
+        parsed_json = await jd_parser.parse_jd_text(jd_text)
+        
+        return {
+            "status": "success",
+            "parsed_jd": parsed_json
+        }
+    except Exception as e:
+        logger.error(f"Error parsing JD: {e}")
+        return {
+            "status": "error",
+            "error_message": str(e)
+        }
