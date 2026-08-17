@@ -8,9 +8,6 @@ class MatchRequest(BaseModel):
     parsed_resume: ParsedResumeData
     parsed_jd: ParsedJDData
 
-class MatchBulkRequest(BaseModel):
-    matches: List[MatchRequest] = Field(..., description="List of resumes and JDs to match")
-
 class ScoreBreakdown(BaseModel):
     must_have_skills_score: float
     experience_score: float

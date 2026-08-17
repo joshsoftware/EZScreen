@@ -1103,30 +1103,24 @@ Request:
     "Content-Type": "application/json"
   },
   "body": {
-    "resumes": [
-      {
-        "application_id": "app_123",
-        "resume_path": "applications/123/resumes/resume.pdf"
-      }
-    ]
+    "resume_name": "resume.pdf",
+    "resume_path": "applications/123/resumes/resume.pdf"
   }
 }
 
 Response 200:
-[
-  {
-    "application_id": "app_123",
-    "status": "success",
-    "parsed_resume": {
-      "personal_info": {},
-      "primary_skills": [],
-      "secondary_skills": [],
-      "domain_expertise": [],
-      "experience": {},
-      "education_certificates": []
-    }
+{
+  "resume_name": "resume.pdf",
+  "status": "success",
+  "parsed_resume": {
+    "personal_info": {},
+    "primary_skills": [],
+    "secondary_skills": [],
+    "domain_expertise": [],
+    "experience": {},
+    "education_certificates": []
   }
-]
+}
 ```
 
 #### POST /internal/v1/match/resume-jd
@@ -1141,23 +1135,18 @@ Request:
     "Content-Type": "application/json"
   },
   "body": {
-    "matches": [
-      {
-        "application_id": "app_123",
-        "job_id": "job_999",
-        "parsed_resume": {},
-        "parsed_jd": {}
-      }
-    ]
+    "application_id": "app_123",
+    "job_id": "job_999",
+    "parsed_resume": {},
+    "parsed_jd": {}
   }
 }
 
 Response 200:
-[
-  {
-    "application_id": "app_123",
-    "job_id": "job_999",
-    "status": "success",
+{
+  "application_id": "app_123",
+  "job_id": "job_999",
+  "status": "success",
     "job_fit_analysis": {
       "score_breakdown": {
         "must_have_skills_score": 40.0,
@@ -1189,8 +1178,7 @@ Response 200:
       "qualification_match": true,
       "experience_match": true
     }
-  }
-]
+}
 ```
 
 ---

@@ -2,11 +2,8 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 
 class ParseResumeRequest(BaseModel):
-    application_id: str = Field(..., description="Unique identifier for the application")
+    resume_name: str = Field(..., description="Name of the resume file")
     resume_path: str = Field(..., description="Path to the resume PDF in the storage bucket")
-
-class ParseResumeBulkRequest(BaseModel):
-    resumes: List[ParseResumeRequest] = Field(..., description="List of resumes to parse")
 
 class PersonalInfo(BaseModel):
     first_name: Optional[str] = None
@@ -44,7 +41,7 @@ class ParsedResumeData(BaseModel):
     education_certificates: List[EducationCertificate] = Field(default_factory=list)
 
 class ParsedResumeResponse(BaseModel):
-    application_id: str
+    resume_name: str
     status: str
     parsed_resume: Optional[ParsedResumeData] = None
     error_message: Optional[str] = None

@@ -975,9 +975,9 @@ paths:
             schema:
               type: object
               properties:
-                resume_base64:
+                resume_name:
                   type: string
-                file_name:
+                resume_path:
                   type: string
       responses:
         '200':
@@ -999,28 +999,21 @@ paths:
             schema:
               type: object
               properties:
-                matches:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      application_id:
-                        type: string
-                      job_id:
-                        type: string
-                      parsed_jd:
-                        type: object
-                      parsed_resume:
-                        type: object
+                application_id:
+                  type: string
+                job_id:
+                  type: string
+                parsed_jd:
+                  type: object
+                parsed_resume:
+                  type: object
       responses:
         '200':
           description: Job fit analysis matching result & score
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: object
+                type: object
 
   /internal/v1/screening/questions/generate:
     post:
