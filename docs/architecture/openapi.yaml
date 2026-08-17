@@ -11,10 +11,9 @@ servers:
     description: Production Core API Gateway
   - url: http://localhost:8000/api/v1
     description: Local Development Core API
-  - url: http://parsing-matching:8001/internal/v1
-    description: Internal Parsing & Matching Microservice
-  - url: http://ai-screening:8002/internal/v1
-    description: Internal AI Screening Microservice
+  - url: http://ai-core-services:8002/internal/v1
+    description: Internal AI Core Microservice (Pure Read-Only Stateless Engine)
+
 
 tags:
   - name: Authentication
@@ -923,58 +922,13 @@ paths:
                 $ref: '#/components/schemas/InterviewAnalysisResponse'
 
   # ---------------------------------------------------------------------------
-  # 7. INTERNAL SERVICE APIS
+  # 7. INTERNAL SERVICE APIS (services/ai-core-services)
+  # Pure Read-Only Stateless Engine - Zero Direct Database Writes
   # ---------------------------------------------------------------------------
-  /internal/v1/parse/jd:
-    post:
-      tags: [Internal Service]
-      summary: Internal JD parsing engine (services/parsing-matching)
-      operationId: internalParseJD
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                raw_text:
-                  type: string
-      responses:
-        '200':
-          description: Parsed JD requirements JSON
-          content:
-            application/json:
-              schema:
-                type: object
-
-  /internal/v1/parse/resume:
-    post:
-      tags: [Internal Service]
-      summary: Internal resume parsing engine (services/parsing-matching)
-      operationId: internalParseResume
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                resume_base64:
-                  type: string
-                file_name:
-                  type: string
-      responses:
-        '200':
-          description: Parsed candidate resume JSON
-          content:
-            application/json:
-              schema:
-                type: object
-
   /internal/v1/match/resume-jd:
     post:
       tags: [Internal Service]
-      summary: Internal candidate-JD matching score calculation (services/parsing-matching)
+      summary: Candidate-JD matching score calculation (services/ai-core-services)
       operationId: internalMatchResumeJD
       requestBody:
         required: true
@@ -989,7 +943,7 @@ paths:
                   type: object
       responses:
         '200':
-          description: Param.ai matching result & score
+          description: Matching result matrix & resume score
           content:
             application/json:
               schema:
@@ -1003,7 +957,7 @@ paths:
   /internal/v1/screening/questions/generate:
     post:
       tags: [Internal Service]
-      summary: Internal session question generation (services/ai-screening)
+      summary: Interview session static question generation (services/ai-core-services)
       operationId: internalGenerateQuestions
       requestBody:
         required: true
@@ -1029,10 +983,45 @@ paths:
                     items:
                       type: object
 
+  /internal/v1/bot/dispatch:
+    post:
+      tags: [Internal Service]
+      summary: Dispatch Attendee.dev meeting bot to Google Meet (services/ai-core-services)
+      operationId: internalDispatchMeetingBot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, meeting_url]
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                meeting_url:
+                  type: string
+                bot_name:
+                  type: string
+      responses:
+        '200':
+          description: Meeting bot dispatch response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bot_id:
+                    type: string
+                  status:
+                    type: string
+                  meeting_url:
+                    type: string
+
   /internal/v1/screening/analysis/evaluate:
     post:
       tags: [Internal Service]
-      summary: Internal transcript screening evaluation (services/ai-screening)
+      summary: Transcript screening report evaluation via LLM (services/ai-core-services)
       operationId: internalEvaluateTranscript
       requestBody:
         required: true
@@ -1051,7 +1040,7 @@ paths:
                     type: object
       responses:
         '200':
-          description: Screening analysis result & Q&A evaluation
+          description: Screening analysis result payload (returned to apps/core-api for DB write)
           content:
             application/json:
               schema:

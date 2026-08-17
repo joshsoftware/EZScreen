@@ -3,7 +3,7 @@
 > **Version**: 1.0.0  
 > **Production Gateway Base URL**: `https://api.ezscreen.io/api/v1`  
 > **Local Dev Gateway Base URL**: `http://localhost:8000/api/v1`  
-> **Internal Service Base URLs**: `http://parsing-matching:8001/internal/v1`, `http://ai-screening:8002/internal/v1`  
+> **Internal AI Microservice Base URL**: `http://ai-core-services:8002/internal/v1`  
 > **Format**: JSON (`Content-Type: application/json`)  
 > **Auth**: Bearer Token (`Authorization: Bearer <jwt>`)
 
@@ -26,19 +26,19 @@
  ┌────────────────────────────────────────────────────────────────────────┐
  │                      React SPA (apps/web-frontend)                     │
  └───────────────────────────────────┬────────────────────────────────────┘
-                                     │ External REST / Webhook
+                                     │ External REST / Webhooks
                                      ▼
  ┌────────────────────────────────────────────────────────────────────────┐
- │                   Core API Service (apps/core-api)                     │
- └─────────────────┬──────────────────────────────────────┬───────────────┘
-                   │                                      │
-  Internal REST    │                                      │ Internal REST
-  POST /parse/jd   │                                      │ POST /questions/generate
-  POST /match      ▼                                      ▼ POST /bot/dispatch & /evaluate
- ┌────────────────────────────────────┐  ┌────────────────────────────────────┐
- │    Parsing & Matching Service      │  │        AI Screening Service        │
- │    (services/parsing-matching)     │  │        (services/ai-screening)      │
- └────────────────────────────────────┘  └────────────────────────────────────┘
+ │                   Core API Gateway (apps/core-api)                     │
+ │          ★ 100% Sole Write Owner for PostgreSQL Database               │
+ └───────────────────────────────────┬────────────────────────────────────┘
+                                     │ Internal REST (/internal/v1/*)
+                                     │ Stateless / Read-Only Inference
+                                     ▼
+ ┌────────────────────────────────────────────────────────────────────────┐
+ │            Unified AI Core Microservice (services/ai-core-services)    │
+ │       ★ Pure Read-Only Inference Engine (Parsing, Match, Bot, Analysis)│
+ └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -1039,60 +1039,16 @@ Response 200:
 
 ---
 
-## 4. Internal Service APIs (`Internal Service`)
+## 4. Internal AI Core Microservice APIs (`services/ai-core-services`)
 
-### A. Parsing & Matching Microservice (`services/parsing-matching`)
-* **Base URL**: `http://parsing-matching:8001/internal/v1`
+> **Base URL**: `http://ai-core-services:8002/internal/v1`  
+> **Policy**: **Pure Read-Only Stateless Engine**. Performs zero direct database writes (`INSERT`, `UPDATE`, `DELETE`). Inter-service communication only.
 
-#### POST /internal/v1/parse/jd
-**Tag**: `Internal Service`  
-**Summary**: Internal JD parsing engine (services/parsing-matching)  
-**Operation ID**: `internalParseJD`  
-
-```json
-Request:
-{
-  "headers": {
-    "Content-Type": "application/json"
-  },
-  "body": {
-    "raw_text": "Senior Java Developer..."
-  }
-}
-
-Response 200:
-{
-  "title": "Senior Java Developer",
-  "parsed_jd": {}
-}
-```
-
-#### POST /internal/v1/parse/resume
-**Tag**: `Internal Service`  
-**Summary**: Internal resume parsing engine (services/parsing-matching)  
-**Operation ID**: `internalParseResume`  
-
-```json
-Request:
-{
-  "headers": {
-    "Content-Type": "application/json"
-  },
-  "body": {
-    "resume_base64": "<base64>",
-    "file_name": "resume.pdf"
-  }
-}
-
-Response 200:
-{
-  "parsed_resume": {}
-}
-```
+### A. Job-Fit Matching Engine
 
 #### POST /internal/v1/match/resume-jd
 **Tag**: `Internal Service`  
-**Summary**: Internal candidate-JD matching score calculation (services/parsing-matching)  
+**Summary**: Candidate-JD matching score & matrix engine  
 **Operation ID**: `internalMatchResumeJD`  
 
 ```json
@@ -1116,12 +1072,11 @@ Response 200:
 
 ---
 
-### B. AI Screening Microservice (`services/ai-screening`)
-* **Base URL**: `http://ai-screening:8002/internal/v1`
+### B. Screening, Meeting Bot & Analysis Modules
 
 #### POST /internal/v1/screening/questions/generate
 **Tag**: `Internal Service`  
-**Summary**: Internal session question generation (services/ai-screening)  
+**Summary**: Interview session static question generator  
 **Operation ID**: `internalGenerateQuestions`  
 
 ```json
@@ -1142,9 +1097,85 @@ Response 200:
 }
 ```
 
+#### POST /internal/v1/bot/dispatch
+**Tag**: `Internal Service`  
+**Summary**: Dispatch Attendee.dev meeting bot to video call  
+**Operation ID**: `internalDispatchMeetingBot`  
+
+```json
+Request:
+{
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "session_id": "123e4567-e89b-12d3-a456-426614174000",
+    "meeting_url": "https://meet.google.com/abc-defg-hij",
+    "bot_name": "EZScreen Interview Assistant"
+  }
+}
+
+Response 200:
+{
+  "bot_id": "bot_987654321",
+  "status": "dispatching",
+  "meeting_url": "https://meet.google.com/abc-defg-hij"
+}
+```
+
+#### GET /internal/v1/bot/{bot_id}
+**Tag**: `Internal Service`  
+**Summary**: Fetch real-time status of dispatched meeting bot  
+**Operation ID**: `internalGetBotStatus`  
+
+```json
+Response 200:
+{
+  "bot_id": "bot_987654321",
+  "status": "in_call",
+  "created_at": "2026-08-17T12:00:00Z"
+}
+```
+
+#### POST /internal/v1/screening/audio/stt
+**Tag**: `Internal Service`  
+**Summary**: Real-time Speech-To-Text audio transcription pipeline  
+**Operation ID**: `internalSpeechToText`  
+
+```json
+Request:
+{
+  "audio_chunk_base64": "<base64_audio>",
+  "sample_rate": 16000
+}
+
+Response 200:
+{
+  "transcript_text": "Hello, I have 5 years of experience in Java."
+}
+```
+
+#### POST /internal/v1/screening/audio/tts
+**Tag**: `Internal Service`  
+**Summary**: Real-time Text-To-Speech voice synthesis pipeline  
+**Operation ID**: `internalTextToSpeech`  
+
+```json
+Request:
+{
+  "text": "Could you describe a challenging project you built using Python?",
+  "voice_id": "en_us_001"
+}
+
+Response 200:
+{
+  "audio_chunk_base64": "<base64_audio_output>"
+}
+```
+
 #### POST /internal/v1/screening/analysis/evaluate
 **Tag**: `Internal Service`  
-**Summary**: Internal transcript screening evaluation (services/ai-screening)  
+**Summary**: Transcript screening report evaluation via LLM (returns JSON payload for apps/core-api to write to DB)  
 **Operation ID**: `internalEvaluateTranscript`  
 
 ```json
@@ -1165,3 +1196,4 @@ Response 200:
   "question_answer": []
 }
 ```
+
