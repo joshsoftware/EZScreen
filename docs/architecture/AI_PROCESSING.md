@@ -213,19 +213,21 @@ __JD_JSON__
 2. Relevant Experience (30 Points):
    - Calculate Relevant Experience ONLY by comparing the candidate's professional experience with the JD's MUST-HAVE skills and their required years.
    - For each JD must-have skill, identify the candidate's experience with that skill using experience.roles[].highlights and the corresponding role dates/years.
-   - A skill counts as professional experience only when the role's highlights explicitly show that the candidate used or worked with that skill.
-   - Do not use primary_skills or secondary_skills alone to determine years of experience.
-   - Do not infer experience from a job title.
+   - A skill counts as professional experience if the role's title or highlights show that the candidate used it, or if it can be strongly inferred that they applied this skill during that role.
+   - Do not use primary_skills or secondary_skills alone to determine years of experience without matching it to a specific role.
    - If the same must-have skill appears in multiple roles, combine the relevant experience periods without double-counting overlapping periods.
    - If the candidate has no role-specific evidence for a required must-have skill, candidate_years = 0.0.
-   - If required_years is specified for a must-have skill:
-     skill_experience_ratio = min(candidate_years / required_years, 1.0)
-   - If required_years is not specified:
-     skill_experience_ratio = 1.0 if meaningful professional experience exists, otherwise 0.0.
-   - Calculate relevant_experience_percentage as the average of all must-have skill experience ratios.
-   - Calculate experience_score = relevant_experience_percentage × 30.
+   - Calculate the skill_experience_ratio for each JD must-have skill using these rules:
+     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate HAS experience: give ratio as 1.0
+     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate has NO experience: give ratio as 0.0
+     * If the required experience IS mentioned in the JD for a particular skill and the candidate has LESS experience than required: give ratio as candidate_years / required_years
+     * If the required experience IS mentioned in the JD for a particular skill and the candidate has MORE or EQUAL experience than required: give ratio as 1.0
+   - Calculate experience_score strictly using this exact formula:
+     experience_score = (Sum of all skill_experience_ratios / total number of must-have skills) * 30
    - Round experience_score to 2 decimal places.
-   - Do not use the candidate's total_years alone to award experience points. The score must reflect experience with the JD's must-have skills.
+   - For each skill in must_have_experience, set `meets_requirement` to `true` ONLY IF `skill_experience_ratio` >= 1.0, otherwise `false`.
+   - Set `experience_match` to `true` if at least 75% of the must-have skills have `meets_requirement` set to `true`. Otherwise, set it to `false`.
+   - Do not use the candidate's total_years alone to award experience points. The score must reflect experience specifically with the JD's must-have skills.
 
 3. Good-to-Have Skills (20 Points):
    - Calculate the percentage of JD good-to-have skills found.
