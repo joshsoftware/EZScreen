@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     # Database & Storage Connection Credentials
     database_url: str
 
+    # Real-time WebSocket Audio Stream Endpoint
+    websocket_url: str
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),
