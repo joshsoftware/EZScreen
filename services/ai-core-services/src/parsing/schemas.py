@@ -58,13 +58,24 @@ class ParseJDRequest(BaseModel):
 class ParseJDBulkRequest(BaseModel):
     jds: List[ParseJDRequest] = Field(..., description="List of JDs to parse")
 
+class ExperienceRequired(BaseModel):
+    min_years: Optional[float] = None
+    max_years: Optional[float] = None
+
+class JDSkills(BaseModel):
+    must_have: List[str] = Field(default_factory=list)
+    good_to_have: List[str] = Field(default_factory=list)
+
 class ParsedJDData(BaseModel):
-    job_title: Optional[str] = None
-    must_have_skills: List[str] = Field(default_factory=list)
-    good_to_have_skills: List[str] = Field(default_factory=list)
-    min_experience_years: Optional[float] = None
-    max_experience_years: Optional[float] = None
-    educational_requirements: List[str] = Field(default_factory=list)
+    title: Optional[str] = None
+    company: Optional[str] = None
+    company_description: Optional[str] = None
+    experience_required: ExperienceRequired = Field(default_factory=ExperienceRequired)
+    skills: JDSkills = Field(default_factory=JDSkills)
+    qualifications: List[str] = Field(default_factory=list)
+    responsibilities: List[str] = Field(default_factory=list)
+    location: Optional[str] = None
+    employment_type: Optional[str] = None
 
 class ParsedJDResponse(BaseModel):
     job_id: str
