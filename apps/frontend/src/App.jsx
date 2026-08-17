@@ -54,6 +54,21 @@ const OrgAdminProvisionHrPage = lazy(() =>
     default: m.OrgAdminProvisionHrPage,
   })),
 )
+const OrgAdminJobsPage = lazy(() =>
+  import('./pages/org-admin/OrgAdminJobsPage').then((m) => ({
+    default: m.OrgAdminJobsPage,
+  })),
+)
+const OrgAdminJobCreatePage = lazy(() =>
+  import('./pages/org-admin/OrgAdminJobCreatePage').then((m) => ({
+    default: m.OrgAdminJobCreatePage,
+  })),
+)
+const OrgAdminJobDetailPage = lazy(() =>
+  import('./pages/org-admin/OrgAdminJobDetailPage').then((m) => ({
+    default: m.OrgAdminJobDetailPage,
+  })),
+)
 
 function Lazy({ children }) {
   return <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
@@ -159,11 +174,40 @@ export default function App() {
               }
             />
             <Route
-              path="team"
+              path="jobs"
               element={
                 <Lazy>
-                  <OrgAdminTeamPage />
+                  <OrgAdminJobsPage />
                 </Lazy>
+              }
+            />
+            <Route
+              path="jobs/new"
+              element={
+                <Lazy>
+                  <OrgAdminJobCreatePage />
+                </Lazy>
+              }
+            />
+            <Route
+              path="jobs/:jobId"
+              element={
+                <Lazy>
+                  <OrgAdminJobDetailPage />
+                </Lazy>
+              }
+            />
+            <Route
+              path="team"
+              element={
+                <RequireRole
+                  roles={['organization_admin']}
+                  loginPath="/org-admin"
+                >
+                  <Lazy>
+                    <OrgAdminTeamPage />
+                  </Lazy>
+                </RequireRole>
               }
             />
             <Route

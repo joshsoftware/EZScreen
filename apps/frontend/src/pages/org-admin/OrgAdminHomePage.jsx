@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../../features/auth/AuthContext'
 import { getOrganizationRequest } from '../../features/org-admin/api'
 import { PageHeader, Panel, StatCard } from '../../components/ui/PageHeader'
 import { Alert } from '../../components/ui/Alert'
 import { Badge } from '../../components/ui/Badge'
+import { Button } from '../../components/ui/Button'
 import { Skeleton } from '../../components/ui/Skeleton'
 import { ApiError } from '../../lib/api/client'
 
@@ -54,6 +56,12 @@ export function OrgAdminHomePage() {
       <PageHeader
         title="Workspace home"
         description="You are signed into your organization tenant."
+        actions={
+          <Button to="/org-admin/jobs/new">
+            <span className="material-symbols-outlined text-[18px]">add</span>
+            Create job
+          </Button>
+        }
       />
 
       {error ? (
@@ -69,16 +77,8 @@ export function OrgAdminHomePage() {
           value={loading ? '…' : org?.name || '—'}
         />
         <StatCard
-          label="Status"
-          value={
-            loading
-              ? '…'
-              : org
-                ? org.is_active
-                  ? 'Active'
-                  : 'Suspended'
-                : '—'
-          }
+          label="Jobs"
+          value={loading ? '…' : org?.job_count ?? '—'}
         />
       </div>
 
@@ -110,12 +110,28 @@ export function OrgAdminHomePage() {
               <dt className="text-on-surface-variant mb-xs">Domain</dt>
               <dd className="text-on-surface">{org?.domain || '—'}</dd>
             </div>
+            <div>
+              <dt className="text-on-surface-variant mb-xs">Organization status</dt>
+              <dd>
+                {org ? (
+                  <Badge tone={org.is_active ? 'success' : 'danger'}>
+                    {org.is_active ? 'Active' : 'Suspended'}
+                  </Badge>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
           </dl>
         )}
       </Panel>
 
       <p className="mt-lg text-body-sm text-on-surface-variant">
-        Jobs, applicants, and interview tools will land here next.
+        Open{' '}
+        <Link to="/org-admin/jobs" className="text-secondary hover:underline">
+          Jobs
+        </Link>{' '}
+        to list, create, or update openings. Applicants and interviews come next.
       </p>
     </div>
   )

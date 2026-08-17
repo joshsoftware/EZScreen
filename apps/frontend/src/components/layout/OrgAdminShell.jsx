@@ -23,6 +23,7 @@ export function OrgAdminShell() {
     'Organization user'
   const roleLabel =
     user?.role === 'hr' ? 'HR' : user?.role === 'organization_admin' ? 'Org Admin' : user?.role
+  const isOrgAdmin = user?.role === 'organization_admin'
   const initial = (user?.first_name?.[0] || user?.email?.[0] || 'O').toUpperCase()
 
   const asideProps = reduceMotion
@@ -47,10 +48,16 @@ export function OrgAdminShell() {
             <span className="material-symbols-outlined text-[20px]">home</span>
             <span>Home</span>
           </NavLink>
-          <NavLink to="/org-admin/team" className={navClass}>
-            <span className="material-symbols-outlined text-[20px]">groups</span>
-            <span>Team</span>
+          <NavLink to="/org-admin/jobs" className={navClass}>
+            <span className="material-symbols-outlined text-[20px]">work</span>
+            <span>Jobs</span>
           </NavLink>
+          {isOrgAdmin ? (
+            <NavLink to="/org-admin/team" className={navClass}>
+              <span className="material-symbols-outlined text-[20px]">groups</span>
+              <span>Team</span>
+            </NavLink>
+          ) : null}
         </nav>
         <div className="p-md border-t border-outline-variant">
           <div className="flex items-center gap-sm">
