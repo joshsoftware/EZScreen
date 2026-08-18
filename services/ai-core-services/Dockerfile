@@ -17,8 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml .
 COPY README.md .
 
-# Install dependencies using uv
-RUN uv pip install --system .
+# Install dependencies using pip. Use CPU-only PyTorch index to prevent 4GB NVIDIA CUDA downloads.
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu .
 
 COPY . .
 

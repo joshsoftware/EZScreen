@@ -111,12 +111,13 @@ WORK EXPERIENCE:
 * If start month/year is available and the role is ongoing, calculate from the first day of that month through CURRENT DATE.
 * If an end month/year is available, calculate through the end of that month.
 * If an exact day is available, use the exact day.
-* Calculate years as elapsed days / 365.25 when exact or month-level dates are available, and round to 2 decimal places.
-* For year-only ranges, use the year difference directly and round to 2 decimal places.
+* Calculate years as elapsed days / 365.25 when exact or month-level dates are available, and round to 1 decimal place.
+* For year-only ranges, use the year difference directly and round to 1 decimal place.
 * Do not return years as null merely because only a year or month/year is available.
 * Return years as null only when the available dates are genuinely insufficient to calculate a reliable duration.
 * total_years must represent unique professional experience across all extracted roles. Overlapping employment periods must not be double-counted.
-* Use the same date-calculation rules consistently for total_years.
+* CRITICAL: First calculate the individual role `years`. Then, calculate `total_years` as the exact mathematical sum of all individual role `years`, subtracting any overlapping durations so time is not double-counted. Always double-check your addition.
+* `total_years` and individual role `years` should be rounded and formatted to only 1 decimal place (e.g., 3.45 becomes 3.4).
 
 ROLE HIGHLIGHTS:
 
