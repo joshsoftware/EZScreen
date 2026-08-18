@@ -127,27 +127,33 @@ sequenceDiagram
 
 ### Workflow Sequence
 
+Public apply and HR bulk share the same per-resume AI chain. HR bulk has no form fields (email comes from parse).
+
 ```mermaid
 sequenceDiagram
-    actor C as Candidate
-    participant F as Subdomain Portal
-    participant B as Core API Gateway
+    actor HR as HR
+    participant F as Frontend
+    participant B as Core API
     participant P as Parsing & Matching Engine
 
-    C->>F: Apply via {org}.ezscreen.io
-    F->>B: POST /api/v1/public/jobs/{id}/apply
-    B->>P: POST /internal/v1/parse/resume
-    P-->>B: Return parsed_resume JSON
-    B->>P: POST /internal/v1/match/resume-jd
-    P-->>B: Return job_fit_analysis & resume_score
-    Note over B: Create Application record (status = applied)
-    B-->>F: 201 Application Submitted
+    HR->>F: Upload resumes to S3 via presigned URLs
+    F->>B: POST /api/v1/jobs/{id}/applications/bulk
+    B-->>F: 202 { job_id, queued }
+
+    par each resume independently
+        B->>P: POST /internal/v1/parse/resume
+        P-->>B: parsed_resume
+        Note over B: Create candidate + application
+        B->>P: POST /internal/v1/match/resume-jd
+        P-->>B: job_fit_analysis & resume_score
+    end
 ```
 
 ### Functional Specifications
 * **FR-201 (Candidate Portal Application)**: Candidates apply via `POST /api/v1/public/jobs/{id}/apply` with `first_name`, `last_name`, `email`, `phone`, and `resume` file binary.
-* **FR-202 (Resume Extraction)**: `services/parsing-matching` extracts `candidate_name`, `email`, `phone`, `experience_years`, `skills`, `education`, and `summary` into `parsed_resume` JSONB.
-* **FR-203 (Matching Algorithm)**: Evaluates `parsed_resume` against `parsed_jd` and calculates `resume_score` (0.0 to 100.0) based on weighted formula:
+* **FR-201b (HR Bulk Upload)**: HR uploads via `POST /api/v1/jobs/{id}/applications/upload-urls` then `POST /api/v1/jobs/{id}/applications/bulk`. No batch poll API. Results appear on `GET /api/v1/jobs/{id}/applicants`.
+* **FR-202 (Resume Extraction)**: `services/parsing-matching` extracts `candidate_name`, `email`, `phone`, `experience_years`, `skills`, `education`, and `summary` into `parsed_resume` JSONB. Core-api creates the candidate user only after email is extracted.
+* **FR-203 (Matching Algorithm)**: Evaluates `parsed_resume` against stored `parsed_jd` and calculates `resume_score` (0.0 to 100.0) based on weighted formula:
   $$\text{resume\_score} = (\text{skills\_score} \times 0.40 + \text{experience\_score} \times 0.35 + \text{education\_score} \times 0.25) \times 100$$
 * **FR-204 (Denormalised Sorting Columns)**: Stores `resume_score` and `candidate_yoe` directly as typed columns on `applications` table for instant sorting without JSON parsing.
 

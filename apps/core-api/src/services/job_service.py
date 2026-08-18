@@ -1,18 +1,31 @@
-"""Job description CRUD (form-created jobs; no JD file/text parse)."""
+"""Job description CRUD. Form fields are sent to AI parse/jd; parsed_jd is stored on the job."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.config.settings import settings
 from src.models.enums import JobStatus, UserRole
 from src.models.job_description import JobDescription
 from src.models.organization import Organization
 from src.models.user import User
 from src.schemas.job import JobCreate, JobUpdate
+
+_JD_PARSE_FIELDS = (
+    "title",
+    "description",
+    "job_type",
+    "work_type",
+    "location",
+    "experience_min",
+    "experience_max",
+    "skills",
+)
 
 __all__ = [
     "list_jobs",
@@ -88,9 +101,11 @@ def create_job(
 ) -> JobDescription:
     _assert_org_active(db, organization_id)
     payload = data.model_dump(exclude={"organization_id"})
+    parsed_jd = _call_parse_jd(data)
     job = JobDescription(
         organization_id=organization_id,
         created_by=created_by,
+        parsed_jd=parsed_jd,
         **payload,
     )
     _apply_status_timestamps(job, job.status)
@@ -107,7 +122,47 @@ def update_job(db: Session, job: JobDescription, data: JobUpdate) -> JobDescript
         setattr(job, key, value)
     if new_status is not None:
         _apply_status_timestamps(job, new_status)
+    if any(field in payload for field in _JD_PARSE_FIELDS):
+        job.parsed_jd = _call_parse_jd(job)
     db.add(job)
     db.commit()
     db.refresh(job)
     return job
+
+
+def _enum_value(value: object) -> object:
+    return value.value if hasattr(value, "value") else value
+
+
+def _jd_parse_body(source: JobCreate | JobDescription) -> dict:
+    return {
+        "title": source.title,
+        "description": source.description,
+        "job_type": _enum_value(source.job_type),
+        "work_type": _enum_value(source.work_type),
+        "location": source.location,
+        "experience_min": source.experience_min,
+        "experience_max": source.experience_max,
+        "skills": source.skills,
+        "status": _enum_value(source.status),
+    }
+
+
+def _call_parse_jd(source: JobCreate | JobDescription) -> dict:
+    url = f"{settings.parsing_service_url.rstrip('/')}/parse/jd"
+    try:
+        with httpx.Client(timeout=120.0) as client:
+            response = client.post(url, json=_jd_parse_body(source))
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise ValueError(f"JD parsing service unavailable: {exc}") from exc
+
+    data = response.json()
+    if not isinstance(data, dict):
+        raise ValueError("Invalid response from JD parsing service")
+    if data.get("status") != "success":
+        raise ValueError(data.get("error_message") or "JD parsing did not succeed")
+    parsed_jd = data.get("parsed_jd")
+    if not isinstance(parsed_jd, dict):
+        raise ValueError("JD parse response missing parsed_jd")
+    return parsed_jd

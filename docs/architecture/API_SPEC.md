@@ -33,7 +33,7 @@
  └─────────────────┬──────────────────────────────────────┬───────────────┘
                    │                                      │
   Internal REST    │                                      │ Internal REST
-  POST /parse/jd   │                                      │ POST /questions/generate
+  POST /parse/resume (S3 → parsed_resume)                │ POST /questions/generate
   POST /match      ▼                                      ▼ POST /bot/dispatch & /evaluate
  ┌────────────────────────────────────┐  ┌────────────────────────────────────┐
  │    Parsing & Matching Service      │  │        AI Screening Service        │
@@ -464,7 +464,7 @@ Response 201:
 
 ### C. Job Description Endpoints (Form Create & Unified Update)
 
-HR creates jobs by filling the form. There is no JD PDF upload and no `POST /api/v1/jobs/parse`.
+HR creates jobs by filling the form. There is no JD PDF upload and no `POST /api/v1/jobs/parse`. On create (and on update of JD form fields), core-api calls `POST /internal/v1/parse/jd` and stores `parsed_jd` on `job_descriptions`.
 
 #### POST /api/v1/jobs
 **Tag**: `Job Descriptions`  
@@ -832,6 +832,96 @@ Response 200:
 }
 ```
 
+#### POST /api/v1/jobs/{id}/applications/upload-urls
+**Tag**: `Candidate Applications`  
+**Summary**: Issue pre-signed S3 PUT URLs for HR bulk resume upload  
+**Operation ID**: `createApplicationUploadUrls`  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
+
+Job must be `published`. Resumes are uploaded directly to S3 (bucket `resumes`). **Core API does not parse files.**
+
+Object key: `orgs/{organization_id}/jobs/{job_id}/resumes/{uuid}-{file_name}`.
+
+Bulk flow: upload-urls → direct S3 PUT → `POST /api/v1/jobs/{id}/applications/bulk` → per-resume parse → candidate/application create → job-fit → `GET /api/v1/jobs/{id}/applicants`.
+
+```json
+Request:
+{
+  "headers": {
+    "Authorization": "Bearer <hr_jwt>",
+    "Content-Type": "application/json"
+  },
+  "path": {
+    "id": "444e4567-e89b-12d3-a456-426614174000"
+  },
+  "body": {
+    "files": [
+      {
+        "file_name": "john-doe.pdf",
+        "content_type": "application/pdf"
+      },
+      {
+        "file_name": "jane-smith.docx",
+        "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      }
+    ]
+  }
+}
+
+Response 200:
+{
+  "uploads": [
+    {
+      "file_name": "john-doe.pdf",
+      "s3_key": "orgs/987e6543-e89b-12d3-a456-426614174000/jobs/444e4567-e89b-12d3-a456-426614174000/resumes/a1b2c3d4-john-doe.pdf",
+      "upload_url": "https://s3.amazonaws.com/...",
+      "expires_at": "2026-08-17T15:00:00Z"
+    }
+  ]
+}
+```
+
+#### POST /api/v1/jobs/{id}/applications/bulk
+**Tag**: `Candidate Applications`  
+**Summary**: Register S3-uploaded resumes; process each independently (parse → candidate → application → job-fit)  
+**Operation ID**: `bulkCreateApplications`  
+**Roles**: `hr`, `organization_admin`, `super_admin`  
+
+Returns **202** immediately. There is **no batch_id** and **no bulk-status poll API**. Each resume is a separate async chain:
+
+1. `POST /internal/v1/parse/resume` — extract email, name, phone, skills, experience  
+2. Core-api creates/finds candidate user, then creates the application (`parsed_resume` stored)  
+3. `POST /internal/v1/match/resume-jd` — compare stored `parsed_jd` vs `parsed_resume`; write `resume_score` + `job_fit_analysis`  
+
+HR sees progress via `GET /api/v1/jobs/{id}/applicants`. Core API never extracts resume text itself.
+
+```json
+Request:
+{
+  "headers": {
+    "Authorization": "Bearer <hr_jwt>",
+    "Content-Type": "application/json"
+  },
+  "path": {
+    "id": "444e4567-e89b-12d3-a456-426614174000"
+  },
+  "body": {
+    "resumes": [
+      {
+        "s3_key": "orgs/987e6543-e89b-12d3-a456-426614174000/jobs/444e4567-e89b-12d3-a456-426614174000/resumes/a1b2c3d4-john-doe.pdf",
+        "file_name": "john-doe.pdf"
+      }
+    ]
+  }
+}
+
+Response 202:
+{
+  "job_id": "444e4567-e89b-12d3-a456-426614174000",
+  "queued": 1
+}
+```
+
 ---
 
 ### F. Interview Sessions, Attendee Bot Dispatch & Analysis Endpoints
@@ -1041,11 +1131,15 @@ Response 200:
 ### A. Parsing & Matching Microservice (`services/parsing-matching`)
 * **Base URL**: `http://parsing-matching:8001/internal/v1`
 
+**Ownership**: All resume text extraction and structured field parsing (email, name, phone, skills, experience, education) lives in this service. Core API stores files on S3, calls parse with `resume_name` + `resume_path`, creates candidate + application from `parsed_resume`, then calls match with stored `parsed_jd` — it does **not** embed parsing or scoring logic.
+
 #### POST /internal/v1/parse/jd
 **Tag**: `Internal Service`  
 **Summary**: Internal JD parsing engine (services/parsing-matching)  
 **Operation ID**: `internalParseJD`  
 
+**Called by**: Core API on `POST /api/v1/jobs` (and when JD form fields are updated).
+
 ```json
 Request:
 {
@@ -1053,21 +1147,42 @@ Request:
     "Content-Type": "application/json"
   },
   "body": {
-    "raw_text": "Senior Java Developer..."
+    "title": "Senior Java Developer",
+    "description": "We are hiring a Senior Java Developer...",
+    "job_type": "full_time",
+    "work_type": "hybrid",
+    "location": "Bangalore",
+    "experience_min": 3,
+    "experience_max": 6,
+    "skills": "Java, Spring Boot, PostgreSQL, Docker, AWS, Kafka",
+    "status": "published"
   }
 }
 
 Response 200:
 {
-  "title": "Senior Java Developer",
-  "parsed_jd": {}
+  "status": "success",
+  "parsed_jd": {
+    "title": "Senior Java Developer",
+    "skills": {
+      "must_have": ["Java", "Spring Boot", "PostgreSQL"],
+      "good_to_have": ["Docker", "AWS", "Kafka"]
+    },
+    "experience_required": { "min_years": 3.0, "max_years": 6.0 }
+  },
+  "error_message": null
 }
 ```
+
+Core-api persists `parsed_jd` on the job. If `status` is not `success`, job create/update fails.
 
 #### POST /internal/v1/parse/resume
 **Tag**: `Internal Service`  
-**Summary**: Internal resume parsing engine (services/parsing-matching)  
+**Summary**: Download resume from S3 and extract structured candidate details  
 **Operation ID**: `internalParseResume`  
+**Called by**: Core API worker (after HR bulk upload or public apply)
+
+Flow: download file from `resume_path` (S3 object key) → text extraction → structured `parsed_resume`.
 
 ```json
 Request:
@@ -1076,21 +1191,55 @@ Request:
     "Content-Type": "application/json"
   },
   "body": {
-    "resume_base64": "<base64>",
-    "file_name": "resume.pdf"
+    "resume_name": "john-doe.pdf",
+    "resume_path": "orgs/987e6543-e89b-12d3-a456-426614174000/jobs/444e4567-e89b-12d3-a456-426614174000/resumes/a1b2c3d4-john-doe.pdf"
   }
 }
 
 Response 200:
 {
-  "parsed_resume": {}
+  "parsed_resume": {
+    "candidate_name": "John Doe",
+    "email": "john.doe@example.com",
+    "phone": "+1-555-0188",
+    "summary": "Senior backend engineer with 5 years in Java…",
+    "primary_skills": ["Java", "Spring Boot", "PostgreSQL"],
+    "secondary_skills": ["Docker", "AWS"],
+    "domain_expertise": ["FinTech"],
+    "relevant_experience": {
+      "total_years": 5.0,
+      "roles": [
+        {
+          "title": "Senior Java Developer",
+          "company": "Acme Corp",
+          "start_date": "2021-01",
+          "end_date": null,
+          "years": 3.5,
+          "highlights": ["Built REST APIs", "Owned PostgreSQL schema"]
+        }
+      ]
+    },
+    "education_certificates": [
+      {
+        "name": "B.Tech Computer Science",
+        "issuer": "Example University",
+        "year": "2019",
+        "type": "degree"
+      }
+    ]
+  }
 }
 ```
 
+`resume_path` is the MinIO/S3 object key (same value core-api stored as `s3_key`). `resume_base64` is not used in bulk upload.
+
 #### POST /internal/v1/match/resume-jd
 **Tag**: `Internal Service`  
-**Summary**: Internal candidate-JD matching score calculation (services/parsing-matching)  
+**Summary**: Score parsed resume against job requirements  
 **Operation ID**: `internalMatchResumeJD`  
+**Called by**: Core API worker (after parse succeeds and the application row exists)
+
+Compares stored `parsed_jd` (from the job) against this resume's `parsed_resume`. Does not re-read the PDF.
 
 ```json
 Request:
@@ -1099,14 +1248,17 @@ Request:
     "Content-Type": "application/json"
   },
   "body": {
-    "parsed_jd": {},
-    "parsed_resume": {}
+    "application_id": "555e4567-e89b-12d3-a456-426614174000",
+    "job_id": "444e4567-e89b-12d3-a456-426614174000",
+    "parsed_resume": {},
+    "parsed_jd": {}
   }
 }
 
 Response 200:
 {
   "resume_score": 85.0,
+  "candidate_yoe": 5.0,
   "job_fit_analysis": {}
 }
 ```

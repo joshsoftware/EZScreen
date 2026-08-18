@@ -11,8 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy pyproject.toml
-COPY pyproject.toml .
+# Copy project metadata and source needed for hatchling build
+COPY pyproject.toml README.md ./
+COPY src ./src
 
 # Install dependencies using uv
 RUN uv pip install --system .
