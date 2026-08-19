@@ -1225,7 +1225,7 @@ components:
           example: 85.0
         parsed_resume:
           type: object
-        matching_result:
+        job_fit_analysis:
           type: object
 
     InterviewSessionResponse:

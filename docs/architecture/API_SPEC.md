@@ -800,7 +800,7 @@ Response 200:
     "email": "john.doe@example.com",
     "skills": ["Java", "Spring Boot", "PostgreSQL"]
   },
-  "matching_result": {
+  "job_fit_analysis": {
     "overall_score": 85,
     "matched_skills": ["Java", "Spring Boot"]
   }

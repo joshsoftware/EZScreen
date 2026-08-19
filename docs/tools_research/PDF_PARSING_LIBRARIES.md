@@ -72,18 +72,6 @@
 
 ---
 
-## Library Score Summary
-
-| Library | Graphical CV | Formal CV (Tables) | Two-Column CV | Simple CV | Compact CV | JD | **Total / 30** |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Docling** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | **27** |
-| **PyMuPDF4LLM** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | **20** |
-| **LlamaParse** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | **19** |
-| **OpenDataLoader** | ⭐⭐ | ⭐⭐ | ⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | **17** |
-| **MarkItDown** | ⭐ | ⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | **13** |
-
----
-
 ## Decision: Why Docling
 
 - **Consistent across all layout types** — the only library that scored 4+ stars on every resume format.
