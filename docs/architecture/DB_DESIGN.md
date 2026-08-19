@@ -354,7 +354,10 @@ erDiagram
     "max_years": null
   }},
   "skills": {{
-    "must_have": ["skill1", "skill2"],
+    "must_have": [
+      {{"skill": "skill1", "required_years": null}},
+      {{"skill": "skill2", "required_years": 3.0}}
+    ],
     "good_to_have": ["skill1", "skill2"]
   }},
   "qualifications": ["degree1", "degree2"],

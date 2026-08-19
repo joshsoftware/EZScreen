@@ -298,12 +298,10 @@ __JD_JSON__
    - If the same must-have skill appears in multiple roles, combine the relevant experience periods without double-counting overlapping periods.
    - If the candidate has no role-specific evidence for a required must-have skill, candidate_years = 0.0.
    - Calculate the skill_experience_ratio for each JD must-have skill using these rules:
-     * CRITICAL: First, check if the JD JSON explicitly assigns a `required_years` to the specific skill object. If so, use that.
-     * If the skill object has `required_years: null`, you MUST apply the global `experience_required.min_years` as the required years for that skill instead.
-     * If NO global `min_years` is provided AND the specific skill object has `required_years: null`, and the candidate HAS experience: give ratio as 1.0
-     * If NO global `min_years` is provided AND the specific skill object has `required_years: null`, and the candidate has NO experience: give ratio as 0.0
-     * If a `required_years` IS determined (either from the specific skill object or inherited from global min_years) and the candidate has LESS experience than required: give ratio as candidate_years / required_years
-     * If a `required_years` IS determined and the candidate has MORE or EQUAL experience than required: give ratio as 1.0
+     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate HAS experience: give ratio as 1.0
+     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate has NO experience: give ratio as 0.0
+     * If the required experience IS mentioned in the JD for a particular skill and the candidate has LESS experience than required: give ratio as candidate_years / required_years
+     * If the required experience IS mentioned in the JD for a particular skill and the candidate has MORE or EQUAL experience than required: give ratio as 1.0
    - Calculate experience_score strictly using this exact formula:
      experience_score = (Sum of all skill_experience_ratios / total number of must-have skills) * 30
    - Round experience_score to 2 decimal places.
