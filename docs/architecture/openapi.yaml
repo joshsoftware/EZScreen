@@ -997,7 +997,7 @@ paths:
                 properties:
                   resume_score:
                     type: number
-                  matching_result:
+                  job_fit_analysis:
                     type: object
 
   /internal/v1/screening/questions/generate:
@@ -1196,7 +1196,7 @@ components:
           example: 85.0
         parsed_resume:
           type: object
-        matching_result:
+        job_fit_analysis:
           type: object
 
     InterviewSessionResponse:

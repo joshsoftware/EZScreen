@@ -13,6 +13,7 @@
 2. [AI Prompt Engineering](#2-ai-prompt-engineering)
 3. [Matching Score Formula](#3-matching-score-formula)
 4. [Document Parsing](#4-document-parsing)
+5. [AI Interview Screening Pipeline](#5-ai-interview-screening-pipeline)
 
 > **Related**: For full prompt evaluation results, JD/Resume test profiles, and all 8 parsed JSON match outputs, see [PROMPT_EVALUATION_REPORT.md](../PROMPT_EVALUATION_REPORT.md).
 
@@ -333,3 +334,219 @@ Supported input formats: **PDF, DOCX**. Files are validated by MIME type and mag
 
 ---
 
+## 5. AI Interview Screening Pipeline
+
+This section outlines the flow, prompts, and scoring formulas used for the automated video screening interviews.
+
+### 5.1 End-to-End Pipeline Sequence Diagram
+This diagram visualizes the flow of data through the AI models and the Attendee.dev voice platform.
+
+```mermaid
+sequenceDiagram
+    participant DB as PostgreSQL DB
+    participant LLM as AI Model
+    participant AttendeeDev as Attendee.dev Platform
+    participant Candidate as Candidate
+
+    %% Step 1: Generation
+    rect rgb(220, 240, 220)
+    Note over DB, LLM: Step 1: Question Generation
+    DB->>LLM: Supply Parsed JD, Parsed Resume & match_result JSON
+    LLM-->>DB: Generate Categorized Questions
+    Note right of DB: Saved to interview_session.generated_questions (JSON)
+    end
+
+    %% Step 2: Interview Loop
+    rect rgb(250, 230, 200)
+    Note over DB, AttendeeDev: Step 2: The Interview Loop (Repeats per Question)
+    DB->>AttendeeDev: Send Question Text
+    AttendeeDev->>Candidate: Speak Question (Audio)
+    Candidate->>AttendeeDev: Speak Answer (Audio)
+    AttendeeDev-->>DB: Return Transcribed Text
+    end
+
+    %% Step 3: Evaluation
+    rect rgb(240, 210, 240)
+    Note over DB, LLM: Step 3: Hybrid Evaluation
+    DB->>LLM: Send Transcribed Answer
+    LLM-->>DB: Evaluate (Score, Keywords, Decision)
+    Note right of DB: Save Q&A to question_answer array
+    Note right of DB: Append evaluation to analysis_result array
+    end
+    
+    %% Step 4: Follow-Up Loop
+    rect rgb(255, 220, 220)
+        Note over DB, AttendeeDev: Step 4: Follow-Up Loop (If Decision == ASK_FOLLOW_UP)
+        LLM->>DB: Suggest Follow-up Question
+        DB->>AttendeeDev: Send Follow-up Text
+        AttendeeDev->>Candidate: Speak Follow-up (Audio)
+        Candidate->>AttendeeDev: Speak Follow-up Answer (Audio)
+        AttendeeDev-->>DB: Return Transcribed Text
+        DB->>LLM: Evaluate Follow-up Answer
+        Note right of DB: Append follow_up to analysis_result array
+    end
+
+    %% Step 5: Finalization
+    rect rgb(210, 240, 240)
+    Note over DB, DB: Step 5: Final Summary & Storage
+    DB->>DB: Calculate final_summary (60% Pass Threshold)
+    Note right of DB: Append final_summary to analysis_result
+    end
+```
+
+### 5.2 Question Generation Logic & Prompts
+
+**Question Category Distribution:**
+The pipeline currently generates a baseline of **15 questions** per candidate, though this total number may vary based on system configuration. For a standard 15-question session, the distribution is strictly allocated as follows:
+
+| Category | Description | Question Count |
+| :--- | :--- | :--- |
+| `must_have_matched` | Verifies depth on skills the candidate claims to possess. | 7 - 8 |
+| `lacking_skill` | Basic awareness checks for required skills missing from the resume. | 3 - 4 |
+| `good_to_have` | Checks for bonus skills requested by the JD. | 2 - 3 |
+| `experience_domain` | Practical, scenario-based questions based on responsibilities. | ~ 2 |
+
+**Question Generation Prompt:**
+*(Note: The prompt below assumes a 15-question limit. The total number and category distribution are dynamically injected based on the interview time limit).*
+```text
+You are an expert technical AI preparing questions for an AUTOMATED VIDEO SCREENING interview. The candidate will be recording 1-2 minute video answers. The goal of this round is only to verify whether the candidate genuinely knows the required skills — not to run a full-depth technical L1/L2 interview.
+
+═══ JOB CONTEXT ═══
+Role: {title} at {company}
+JD Required Experience: {experience_required}
+JD Must-Have Skills: {must_have_skills}
+JD Good-to-Have Skills: {good_to_have_skills}
+JD Responsibilities: {responsibilities}
+
+═══ CANDIDATE CONTEXT ═══
+Years of Experience: {years}
+Candidate Domain Expertise: {domain}
+
+═══ FULL MATCH ANALYSIS JSON — use this to decide question focus ═══
+{match_json}
+
+How to use the match analysis above:
+- matched_skills.must_have      → candidate HAS these → generate depth-verification questions
+- missing_skills.must_have      → candidate MISSING these → generate basic awareness questions
+- score_breakdown.must_have_skills_score  → if low (< 20/40), add more "lacking_skill" questions
+- score_breakdown.good_to_have_skills_score → if 0, ask only basic "what is X" awareness
+- reasoning                     → use the gap analysis directly to frame targeted questions
+- experience_match: false       → frame experience_domain questions as awareness checks
+- qualification_match: false    → do not expect academic-level depth in answers
+
+═══ SCREENING DIFFICULTY RULES ═══
+Apply the following difficulty guidance based on the JD requiring {min_y} years of experience:
+- If 0-2 years (EASY): Ask basic knowledge-verification questions only.
+- If 3-5 years (MEDIUM): Ask single-concept questions that verify genuine hands-on knowledge.
+- If 5+ years (HARD): Ask high-level "when to use what" questions. 
+
+Generate EXACTLY 15 questions in total across the following categories:
+1. CATEGORY "must_have_matched" — from matched_skills.must_have (7–8 questions)
+2. CATEGORY "lacking_skill" — from missing_skills.must_have (3–4 questions)
+3. CATEGORY "good_to_have" — from JD good-to-have skills (2–3 questions)
+4. CATEGORY "experience_domain" — from JD responsibilities (~2 purely technical questions)
+
+═══ ANSWER DEPTH LEVELS ═══
+Each question must include an `answer_depth` level ("aware", "partial_depth", or "full_depth") based on how strictly the answer should be evaluated:
+- "aware" → awareness only: any reasonable attempt at a response is acceptable.
+- "partial_depth" → partial coverage: the answer must touch some of the expected keywords with a basic explanation.
+- "full_depth" → full depth: the answer must cover most expected keywords with a clear, accurate explanation.
+
+Assign depth dynamically based on the candidate's {years} years of experience AND the question category:
+- Use "aware" for "lacking_skill" and "good_to_have" categories, OR if the candidate has < 2 years experience (awareness check only).
+- Use "partial_depth" for "must_have_matched" questions when the candidate has 2-4 years experience, OR if experience_match is false.
+- Use "full_depth" for "must_have_matched" and "experience_domain" questions only when the candidate has 5+ years experience and clearly possesses the skill.
+
+═══ OUTPUT FORMAT ═══
+Return a JSON array only. No markdown, no commentary.
+[
+  {
+    "id": 1,
+    "category": "must_have_matched | lacking_skill | good_to_have | experience_domain",
+    "skill_focus": "the specific skill or topic",
+    "question": "the interview question",
+    "expected_keywords": ["3 to 5 keywords a correct answer must touch"],
+    "answer_depth": "aware | partial_depth | full_depth"
+  }
+]
+```
+
+### 5.3 Answer Evaluation Prompts
+
+**Standard Answer Evaluation Prompt:**
+```text
+You are evaluating a candidate's answer in a FIRST SCREENING interview.
+
+QUESTION: {question}
+CANDIDATE ANSWER: {answer}
+EXPECTED KEYWORDS (answer should address most of these): {keywords}
+EVALUATION STRICTNESS LEVEL: {depth}
+
+STRICTNESS DEFINITIONS:
+- "aware": Accept the answer as-is. Any reasonable attempt at a response is sufficient. Do not penalize for missing keywords.
+- "partial_depth": Accept if the answer covers some of the expected keywords with a basic explanation. Partial understanding is acceptable.
+- "full_depth": Accept only if the answer covers most of the expected keywords with a clear and accurate explanation. Vague or incomplete answers are not sufficient.
+
+SCORING RULES:
+- Score 0–10. Your score MUST reflect BOTH keyword coverage AND the EVALUATION STRICTNESS LEVEL above.
+- If STRICTNESS LEVEL is "aware": Score generously (7-10) if they show basic understanding, even if missing keywords.
+- If STRICTNESS LEVEL is "partial_depth": Score 7-10 only if they hit some keywords and explain the basic concept.
+- If STRICTNESS LEVEL is "full_depth": Score strictly. Score 7-10 ONLY if they hit most keywords with a clear, accurate explanation.
+- Score 5–6: Candidate fell short of the required strictness level or missed key concepts.
+- Score 0–4: Wrong, confused, or vague with no real understanding shown.
+- Do NOT penalize for informal phrasing if the technical concept is correct.
+
+DECISION:
+- "NEXT_QUESTION" if score >= 6 AND coverage_percent >= 50 (candidate understood it well enough for screening).
+- "ASK_FOLLOW_UP" if score < 6 OR coverage_percent < 50 (answer was too shallow or missed key concepts).
+
+Return STRICT JSON only. No markdown:
+{
+  "score": <0-10>,
+  "coverage_percent": <0-100>,
+  "keywords_found": ["..."],
+  "keywords_missing": ["..."],
+  "is_sufficient": <true|false>,
+  "decision": "NEXT_QUESTION | ASK_FOLLOW_UP",
+  "feedback": "2-3 sentences: what was good, what was missing, pass/fail on this topic for screening",
+  "suggested_follow_up": "If decision is ASK_FOLLOW_UP and this is NOT a follow-up evaluation itself, write a specific, conversational follow-up question here to probe what they missed based on the missing keywords. Otherwise omit this field entirely."
+}
+```
+
+> **Note on Evaluation Output Calculation:** 
+> * The **`score` (0-10)** is determined subjectively by the LLM based on conceptual understanding and the phrasing of the candidate's answer.
+> * The **`coverage_percent`** is strictly and mathematically calculated by the Python backend using the array output: `( len(keywords_found) / len(expected_keywords) ) * 100`. The LLM's generated `coverage_percent` acts merely as a fallback.
+
+**Follow-up Answer Evaluation Prompt:**
+The prompt is **identical** to the standard Answer Evaluation Prompt above, except this exact string is injected at the very top of the context:
+```text
+NOTE: This is a FOLLOW-UP evaluation. The candidate had an insufficient primary answer.
+```
+*(The LLM uses this to understand that the candidate is attempting to recover from a previously missed keyword).*
+
+### 5.4 Final Summary Calculation Engine
+
+Once all generated questions (and any necessary follow-up loops) are complete, the pipeline's Python layer calculates the final summary.
+
+**Topic Score Resolution:**
+If a question resulted in a follow-up loop, the final score for that topic is the **average** of the primary score and the follow-up score:
+```python
+if "follow_up_score" in eval_obj:
+    topic_score = (primary_score + follow_up_score) / 2
+else:
+    topic_score = primary_score
+```
+
+**Aggregate Scoring:**
+*   **Total Score:** The sum of all resolved `topic_score` values.
+*   **Max Possible Score:** `{total_questions} * 10` points (e.g., 150 for a 15-question set).
+*   **Overall Score:** `(total_score / max_possible_score) * 10`
+
+**Recommendation Threshold:**
+The system enforces a strict, deterministic pass/fail threshold at **6.0 / 10**:
+```python
+if overall_score >= 6.0:
+    final_recommendation = "shortlist_for_l1"
+else:
+    final_recommendation = "reject"
+```

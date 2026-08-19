@@ -31,7 +31,7 @@ This document specifies the requirements for the **automated AI assessment and i
 
 1. **Direct JD Parsing & Publishing**: HR uploads a JD file (PDF/DOCX) or pastes text. The system parses it in-memory via `POST /api/v1/jobs/parse`, displays extracted requirements directly on the UI form for HR verification/editing, and saves it to PostgreSQL via `POST /api/v1/jobs`.
 
-2. **Resume Parsing & Candidate Matching**: A candidate applies to a job via the subdomain portal (`{org}.ezscreen.io`) with their resume. The system extracts structured resume data (`parsed_resume`), evaluates it against `parsed_jd` using the matching algorithm, and saves `matching_result` JSONB + `resume_score` (0–100).
+2. **Resume Parsing & Candidate Matching**: A candidate applies to a job via the subdomain portal (`{org}.ezscreen.io`) with their resume. The system extracts structured resume data (`parsed_resume`), evaluates it against `parsed_jd` using the matching algorithm, and saves `job_fit_analysis` JSONB + `resume_score` (0–100).
 
 3. **Automated AI Interview Sessions & Screening Analysis**: HR schedules an AI screening interview (`interview_session`). The system auto-generates static questions (`generated_questions`). At call time, the Attendee.dev meeting bot is dispatched (`POST /api/v1/interview-sessions/{id}/dispatch-bot`) to join Google Meet. After call completion, the transcript is evaluated via `gemma4:31b` to populate `interview_analysis` (`analysis_result` + `question_answer` transcript scoring + `recording_url`).
 
@@ -82,7 +82,7 @@ flowchart TD
 * **US-101**: As an HR user, I want to upload or paste a JD document so the system parses requirements in-memory and populates the UI form directly without requiring pre-signed storage URLs.
 * **US-102**: As an HR user, I want to review and edit AI-extracted JD fields before publishing so I maintain full control over requirement criteria.
 * **US-103**: As an HR user, I want a single unified update endpoint (`PUT /api/v1/jobs/{id}`) to modify job details and change job status (`draft`, `published`, `closed`).
-* **US-104**: As an HR user, I want to see candidate applications ranked by `resume_score` DESC with detailed score breakdowns (`matching_result`).
+* **US-104**: As an HR user, I want to see candidate applications ranked by `resume_score` DESC with detailed score breakdowns (`job_fit_analysis`).
 * **US-105**: As an HR user, I want to schedule an AI screening interview session that automatically generates candidate-specific static questions (`generated_questions`).
 * **US-106**: As an HR user, I want to dispatch an Attendee.dev meeting bot to Google Meet to conduct the interview, record dual-channel audio, and generate transcript analysis (`interview_analysis`).
 
@@ -139,7 +139,7 @@ sequenceDiagram
     B->>P: POST /internal/v1/parse/resume
     P-->>B: Return parsed_resume JSON
     B->>P: POST /internal/v1/match/resume-jd
-    P-->>B: Return matching_result & resume_score
+    P-->>B: Return job_fit_analysis & resume_score
     Note over B: Create Application record (status = applied)
     B-->>F: 201 Application Submitted
 ```
@@ -157,7 +157,7 @@ sequenceDiagram
 
 ### Functional Specifications
 * **FR-301 (Ranked Applicant List)**: `GET /api/v1/jobs/{id}/applicants` returns all candidate applications for a posting sorted by `resume_score` DESC by default.
-* **FR-302 (Match Matrix Breakdown)**: `GET /api/v1/applications/{id}` provides full candidate details, including `parsed_resume` and `matching_result` (matched skills, missing skills, score breakdown, and fit reasoning).
+* **FR-302 (Match Matrix Breakdown)**: `GET /api/v1/applications/{id}` provides full candidate details, including `parsed_resume` and `job_fit_analysis` (matched skills, missing skills, score breakdown, and fit reasoning).
 * **FR-303 (Application Status Lifecycle)**: HR updates candidate application status via `PATCH /api/v1/applications/{id}/status` (`applied` $\rightarrow$ `interview_scheduled` $\rightarrow$ `interview_completed` $\rightarrow$ `shortlist_for_l1` / `rejected`).
 
 ---
@@ -221,7 +221,7 @@ sequenceDiagram
 | **Organizations** | `organizations` | Multi-tenant organization records (`id`, `name`, `domain`, `logo_url`, `is_active`). |
 | **Users** | `users` | All user accounts (`super_admin`, `organization_admin`, `hr`, `candidate`). |
 | **Job Descriptions** | `job_descriptions` | JD records with `parsed_jd` JSONB for AI-extracted requirement criteria. |
-| **Applications** | `applications` | Applications with `parsed_resume` JSONB & `matching_result` JSONB. |
+| **Applications** | `applications` | Applications with `parsed_resume` JSONB & `job_fit_analysis` JSONB. |
 | **Interview Sessions** | `interview_session` | Session scheduling metadata & static question set (`generated_questions` JSONB). |
 | **Interview Analysis** | `interview_analysis` | AI screening evaluation (`analysis_result` JSONB, `question_answer` JSONB, `recording_url`). |
 
@@ -250,7 +250,7 @@ interview_status: scheduled | rescheduled | completed | no_show | cancelled | fa
 ### AC-002: Candidate Application & Scoring
 * **Given** a published job posting on `{org}.ezscreen.io`,
 * **When** a candidate submits their resume,
-* **Then** an `applications` record is created, `parsed_resume` & `matching_result` JSONB are populated, and `resume_score` (0–100) is stored for instant sorting.
+* **Then** an `applications` record is created, `parsed_resume` & `job_fit_analysis` JSONB are populated, and `resume_score` (0–100) is stored for instant sorting.
 
 ### AC-003: AI Interview Bot Scheduling & Analysis
 * **Given** a candidate application with `status = interview_scheduled`,

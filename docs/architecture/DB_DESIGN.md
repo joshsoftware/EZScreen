@@ -20,7 +20,7 @@
 
 ## 1. Design Principles
 
-1. **JSONB for AI-Extracted Data**: `parsed_jd` (job_descriptions), `parsed_resume` (applications), `matching_result` (applications), `analysis_result` & `question_answer` (interview_analysis) use PostgreSQL JSONB — allows schema evolution without migrations and efficient querying.
+1. **JSONB for AI-Extracted Data**: `parsed_jd` (job_descriptions), `parsed_resume` (applications), `job_fit_analysis` (applications), `analysis_result` & `question_answer` (interview_analysis) use PostgreSQL JSONB — allows schema evolution without migrations and efficient querying.
 
 2. **Status-Driven Workflows**: State machines for JD lifecycle (`draft → published → closed`) and application lifecycle (`applied → interview_scheduled → shortlist_for_l1 / rejected`). All status transitions are validated at the application layer.
 
@@ -117,7 +117,7 @@
 | `parsed_resume` | jsonb | nullable | See [parsed_resume Schema](#application-parsed_resume) |
 | `candidate_yoe` | float | nullable | Denormalised years of experience |
 | `resume_score` | decimal | nullable | AI match score (0–100) |
-| `matching_result` | jsonb | nullable | See [matching_result Schema](#application-matching_result) |
+| `job_fit_analysis` | jsonb | nullable | See [job_fit_analysis Schema](#application-job_fit_analysis) |
 | `status` | application_status | | See [Application Status Enum](#application-status) |
 | `applied_at` | timestamp | nullable | |
 | `created_at` | timestamp | | |
@@ -138,7 +138,7 @@
 | `status` | interview_status | | See [Interview Status Enum](#interview-status) |
 | `interview_metadata` | jsonb | nullable | Flexible metadata (links, tokens, etc.) |
 | `comment` | varchar | nullable | Internal notes |
-| `generated_questions` | jsonb | nullable | AI-generated question set for the session |
+| `generated_questions` | jsonb | nullable | See [generated_questions Schema](#interview-session-generated_questions) |
 | `scheduled_at` | timestamp | nullable | Confirmed session time |
 | `completed_at` | timestamp | nullable | |
 | `created_at` | timestamp | | |
@@ -152,8 +152,8 @@
 | `id` | uuid | PK | |
 | `interview_session_id` | uuid | FK → interview_session, NOT NULL, UNIQUE | One-to-one with session |
 | `application_id` | uuid | FK → applications, NOT NULL | |
-| `analysis_result` | jsonb | nullable | See [analysis_result Schema](#interview_analysis-analysis_result) |
-| `question_answer` | jsonb | nullable | Array of `{question, answer, score, analysis}` |
+| `analysis_result` | jsonb | nullable | See [analysis_result Schema](#interview-analysis-analysis_result) |
+| `question_answer` | jsonb | nullable | See [question_answer Schema](#interview-analysis-question_answer) |
 | `recording_url` | text | nullable | URL / S3 path for session recording |
 | `interview_type` | interview_type | | |
 | `created_at` | timestamp | | |
@@ -225,7 +225,7 @@ erDiagram
         jsonb parsed_resume "candidate_name, email, phone, summary, skills, experience_years, education, certifications, projects"
         float candidate_yoe "nullable - denormalised"
         decimal resume_score "nullable - AI match score 0-100"
-        jsonb matching_result "score_breakdown, matched_skills, missing_skills, experience_match, education_match, reasoning"
+        jsonb job_fit_analysis "score_breakdown, matched_skills, missing_skills, experience_match, education_match, reasoning"
         varchar status "enum: applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected"
         timestamp applied_at "nullable"
         timestamp created_at
@@ -331,12 +331,12 @@ erDiagram
 
 | Status | Description |
 |--------|-------------|
-| `scheduled` | Session confirmed and upcoming |
-| `rescheduled` | Session rescheduled |
-| `completed` | Session successfully completed |
+| `scheduled` | Interview confirmed and upcoming |
+| `rescheduled` | Interview rescheduled |
+| `completed` | Interview completed |
 | `no_show` | Candidate did not join |
-| `cancelled` | Session cancelled |
-| `failed` | Session failed due to a technical error |
+| `cancelled` | Interview cancelled |
+| `failed` | Interview failed due to a technical error |
 
 ---
 
@@ -345,23 +345,23 @@ erDiagram
 ### JD `parsed_jd`
 
 ```json
-{{
+{
   "title": null,
   "company": null,
   "company_description": null,
-  "experience_required": {{
+  "experience_required": {
     "min_years": null,
     "max_years": null
-  }},
-  "skills": {{
+  },
+  "skills": {
     "must_have": ["skill1", "skill2"],
     "good_to_have": ["skill1", "skill2"]
-  }},
+  },
   "qualifications": ["degree1", "degree2"],
   "responsibilities": ["resp1", "resp2"],
   "location": null,
   "employment_type": "Full-time"
-}}
+}
 
 ```
 
@@ -372,71 +372,171 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
 ### Application `parsed_resume`
 
 ```json
-{{
+{
   "primary_skills": ["string"],
   "secondary_skills": ["string"],
   "domain_expertise": ["string"],
-  "relevant_experience": {{
+  "relevant_experience": {
     "total_years": "number or null",
     "roles": [
-      {{
+      {
         "title": "string or null",
         "company": "string or null",
         "start_date": "string or null",
         "end_date": "string or null",
         "years": "number or null",
         "highlights": ["string"]
-      }}
+      }
     ]
-  }},
+  },
   "education_certificates": [
-    {{
+    {
       "name": "string",
       "issuer": "string or null",
       "year": "string or null",
       "type": "degree or certification"
-    }}
+    }
   ]
-}}
+}
 ```
 
 ---
 
-### Application `matching_result`
+### Application `job_fit_analysis`
 
 ```json
-{{
-  "score_breakdown": {{
+{
+  "score_breakdown": {
     "must_have_skills_score": 32.0,
     "experience_score": 30.0,
     "good_to_have_skills_score": 15.0,
     "qualifications_score": 10.0
-  }},
+  },
   "match_score": 8.7,
   "reasoning": [
     "point 1",
     "point 2",
     "point 3"
   ],
-  "matched_skills": {{
+  "matched_skills": {
     "must_have": ["..."],
     "good_to_have": ["..."]
-  }},
-  "missing_skills": {{
+  },
+  "missing_skills": {
     "must_have": ["..."],
     "good_to_have": ["..."]
-  }},
+  },
   "qualification_match": true,
   "experience_match": true
-}}
+}
 ```
+---
+
+### Interview Session `generated_questions`
+
+```json
+[
+  {
+    "id": 1,
+    "category": "must_have_matched",
+    "skill_focus": "Core Java",
+    "question": "Can you explain the difference between checked and unchecked exceptions?",
+    "expected_keywords": ["RuntimeException", "compile-time", "try-catch", "throws"],
+    "answer_depth": "partial_depth"
+  }
+]
+```
+This dynamic list of questions is tailored to the candidate and generated by the LLM based on the interview time limit.
+
+---
+
+### Interview Analysis `question_answer`
+
+```json
+[
+  {
+    "question_id": 1,
+    "question": "Can you explain the difference between a HashMap and a ConcurrentHashMap?",
+    "candidate_answer": "So, a HashMap isn't thread-safe, while a ConcurrentHashMap is designed for multi-threaded environments.",
+    "follow_ups": [
+      {
+        "follow_up_question": "You mentioned that ConcurrentHashMap handles synchronization for you; can you explain how it does that differently?",
+        "follow_up_answer": "Right, so instead of locking the entire map, ConcurrentHashMap uses a technique called lock stripping."
+      }
+    ]
+  },
+  {
+    "question_id": 2,
+    "question": "When would you use a JOIN versus a Subquery to retrieve data?",
+    "candidate_answer": "I generally use joins when I need to combine columns from multiple tables, while subqueries are better for filtering."
+  }
+]
+```
+This stores the raw Q&A combinations generated during the session BEFORE the final LLM evaluation.
+
+---
+
+### Interview Analysis `analysis_result`
+
+```json
+{
+  "evaluations": [
+    {
+      "question_id": 1,
+      "question": "Can you explain the difference between checked and unchecked exceptions?",
+      "candidate_answer": "Checked exceptions are checked at compile time, and you have to use a try catch block. Unchecked exceptions extend RuntimeException.",
+      "score": 8,
+      "coverage_percent": 75.0,
+      "keywords_found": ["compile-time", "try-catch", "RuntimeException"],
+      "keywords_missing": ["throws"],
+      "is_sufficient": true,
+      "decision": "NEXT_QUESTION",
+      "feedback": "The candidate provided a solid and accurate definition of the exceptions."
+     
+    },
+    {
+      "question_id": 2,
+      "question": "Can you explain the difference between a HashMap and a ConcurrentHashMap?",
+      "candidate_answer": "A HashMap isn't thread-safe, while a ConcurrentHashMap is designed for multi-threaded environments.",
+      "score": 5,
+      "coverage_percent": 66.6,
+      "keywords_found": ["thread-safety", "multi-threading"],
+      "keywords_missing": ["segment locking"],
+      "is_sufficient": false,
+      "decision": "ASK_FOLLOW_UP",
+      "feedback": "The candidate correctly identified the basic difference regarding thread-safety, but failed to explain *how* it achieves this.",
+      "follow_ups": [
+        {
+          "follow_up_question": "You mentioned it handles synchronization; can you explain how it does that differently than a global lock to maintain performance?",
+          "follow_up_answer": "It uses a technique called lock stripping or bucket-level locking to allow multiple threads.",
+          "score": 9,
+          "coverage_percent": 100.0,
+          "keywords_found": ["segment locking", "thread-safety", "multi-threading"],
+          "keywords_missing": [],
+          "is_sufficient": true,
+          "decision": "NEXT_QUESTION",
+          "feedback": "The candidate correctly identified lock stripping/bucket-level locking as the mechanism to reduce contention."
+        }
+      ]
+    }
+  ],
+  "final_summary": {
+    "total_score": 114.0,
+    "max_possible_score": 150,
+    "overall_score": 7.6,
+    "final_recommendation": "shortlist_for_l1"
+  }
+}
+```
+*(Note: The `max_possible_score` and `overall_score` are mathematically calculated based on the dynamic number of questions. The `follow_ups` array is entirely omitted from an evaluation block when `decision` is `NEXT_QUESTION`, and initialized and populated when `decision` is `ASK_FOLLOW_UP`.)*
+
 ---
 
 ### Denormalised Columns on `applications`
 
 | Column | Type | Source | Purpose |
 |--------|------|--------|---------|
-| `resume_score` | decimal (0–100) | `matching_result.score_breakdown.overall_score` | Fast `ORDER BY` sorting |
+| `resume_score` | decimal (0–100) | `job_fit_analysis.score_breakdown.overall_score` | Fast `ORDER BY` sorting |
 | `candidate_yoe` | float | `parsed_resume.experience_years` | Fast filter/sort by experience |
 
 ---
@@ -468,7 +568,7 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
 
 - **N+1 queries** — always eager-load associated records in a single query
 - **Full table scans on large tables** — all `WHERE` clauses on `applications` and `job_descriptions` must use indexed columns
-- **Sorting unindexed JSONB fields** — sort on the denormalised `resume_score` decimal column, not on `matching_result->>'overall_score'`
+- **Sorting unindexed JSONB fields** — sort on the denormalised `resume_score` decimal column, not on `job_fit_analysis->>'overall_score'`
 - **Unbounded queries** — all list endpoints must enforce a `LIMIT` and use cursor or offset pagination
 
 ---
@@ -479,7 +579,7 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
 
 | Record Type | Retention Period |
 |-------------|-----------------|
-| Rejected applications | 180 days |
+| Rejected applications | 6 month |
 | Shortlisted / hired candidate records | 7 years |
 | Closed job descriptions | 5 years |
 | Interview session recordings | 2 years (or until deletion requested) |
