@@ -57,8 +57,12 @@ class ExperienceRequired(BaseModel):
     min_years: Optional[float] = None
     max_years: Optional[float] = None
 
+class SkillRequirement(BaseModel):
+    skill: str
+    required_years: Optional[float] = None
+
 class JDSkills(BaseModel):
-    must_have: List[str] = Field(default_factory=list)
+    must_have: List[SkillRequirement] = Field(default_factory=list)
     good_to_have: List[str] = Field(default_factory=list)
 
 class ParsedJDData(BaseModel):

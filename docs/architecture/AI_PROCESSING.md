@@ -243,7 +243,10 @@ Return ONLY a JSON object in this format:
     "max_years": null
   },
   "skills": {
-    "must_have": ["skill1", "skill2"],
+    "must_have": [
+      {"skill": "skill1", "required_years": null},
+      {"skill": "skill2", "required_years": 3.0}
+    ],
     "good_to_have": ["skill1", "skill2"]
   },
   "qualifications": ["degree1", "degree2"],
@@ -251,6 +254,9 @@ Return ONLY a JSON object in this format:
   "location": null,
   "employment_type": "Full-time"
 }
+### Extraction Rules:
+- For `must_have` skills, if the JD explicitly states a number of years of experience required for that specific skill (e.g., "3 years of Java"), set `required_years` to that number.
+- If no specific years are mentioned for that individual skill, set `required_years` to `null`. Do not automatically assume the global `min_years` applies unless explicitly stated.
 
 ### Job Description Text:
 __JD_TEXT__
@@ -292,10 +298,12 @@ __JD_JSON__
    - If the same must-have skill appears in multiple roles, combine the relevant experience periods without double-counting overlapping periods.
    - If the candidate has no role-specific evidence for a required must-have skill, candidate_years = 0.0.
    - Calculate the skill_experience_ratio for each JD must-have skill using these rules:
-     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate HAS experience: give ratio as 1.0
-     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate has NO experience: give ratio as 0.0
-     * If the required experience IS mentioned in the JD for a particular skill and the candidate has LESS experience than required: give ratio as candidate_years / required_years
-     * If the required experience IS mentioned in the JD for a particular skill and the candidate has MORE or EQUAL experience than required: give ratio as 1.0
+     * CRITICAL: First, check if the JD JSON explicitly assigns a `required_years` to the specific skill object. If so, use that.
+     * If the skill object has `required_years: null`, you MUST apply the global `experience_required.min_years` as the required years for that skill instead.
+     * If NO global `min_years` is provided AND the specific skill object has `required_years: null`, and the candidate HAS experience: give ratio as 1.0
+     * If NO global `min_years` is provided AND the specific skill object has `required_years: null`, and the candidate has NO experience: give ratio as 0.0
+     * If a `required_years` IS determined (either from the specific skill object or inherited from global min_years) and the candidate has LESS experience than required: give ratio as candidate_years / required_years
+     * If a `required_years` IS determined and the candidate has MORE or EQUAL experience than required: give ratio as 1.0
    - Calculate experience_score strictly using this exact formula:
      experience_score = (Sum of all skill_experience_ratios / total number of must-have skills) * 30
    - Round experience_score to 2 decimal places.
