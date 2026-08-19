@@ -435,12 +435,25 @@ Response 200:
   "experience_max": 5,
   "skills": "Java, Spring Boot, PostgreSQL, Docker",
   "parsed_jd": {
-    "role": "Senior Java Developer",
-    "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
-    "preferred_skills": ["Docker", "AWS"],
-    "experience": {"min": 3, "max": 5},
-    "education": "Bachelor Degree",
-    "responsibilities": ["Develop REST APIs", "Optimize DB queries"]
+    "title": "Senior Java Developer",
+    "company": null,
+    "company_description": null,
+    "experience_required": {
+      "min_years": 3,
+      "max_years": 5
+    },
+    "skills": {
+      "must_have": [
+        {"skill": "Java", "required_years": 3.0},
+        {"skill": "Spring Boot", "required_years": null},
+        {"skill": "PostgreSQL", "required_years": null}
+      ],
+      "good_to_have": ["Docker", "AWS"]
+    },
+    "qualifications": ["Bachelor Degree"],
+    "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
+    "location": "Bangalore",
+    "employment_type": "full_time"
   }
 }
 ```
@@ -468,12 +481,25 @@ Request:
     "experience_max": 5,
     "skills": "Java, Spring Boot, PostgreSQL, Docker",
     "parsed_jd": {
-      "role": "Senior Java Developer",
-      "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
-      "preferred_skills": ["Docker", "AWS"],
-      "experience": {"min": 3, "max": 5},
-      "education": "Bachelor Degree",
-      "responsibilities": ["Develop REST APIs", "Optimize DB queries"]
+      "title": "Senior Java Developer",
+      "company": null,
+      "company_description": null,
+      "experience_required": {
+        "min_years": 3,
+        "max_years": 5
+      },
+      "skills": {
+        "must_have": [
+          {"skill": "Java", "required_years": 3.0},
+          {"skill": "Spring Boot", "required_years": null},
+          {"skill": "PostgreSQL", "required_years": null}
+        ],
+        "good_to_have": ["Docker", "AWS"]
+      },
+      "qualifications": ["Bachelor Degree"],
+      "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
+      "location": "Bangalore",
+      "employment_type": "full_time"
     },
     "status": "published"
   }
@@ -494,12 +520,25 @@ Response 201:
   "skills": "Java, Spring Boot, PostgreSQL, Docker",
   "status": "published",
   "parsed_jd": {
-    "role": "Senior Java Developer",
-    "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
-    "preferred_skills": ["Docker", "AWS"],
-    "experience": {"min": 3, "max": 5},
-    "education": "Bachelor Degree",
-    "responsibilities": ["Develop REST APIs", "Optimize DB queries"]
+    "title": "Senior Java Developer",
+    "company": null,
+    "company_description": null,
+    "experience_required": {
+      "min_years": 3,
+      "max_years": 5
+    },
+    "skills": {
+      "must_have": [
+        {"skill": "Java", "required_years": 3.0},
+        {"skill": "Spring Boot", "required_years": null},
+        {"skill": "PostgreSQL", "required_years": null}
+      ],
+      "good_to_have": ["Docker", "AWS"]
+    },
+    "qualifications": ["Bachelor Degree"],
+    "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
+    "location": "Bangalore",
+    "employment_type": "full_time"
   }
 }
 ```
@@ -575,12 +614,25 @@ Response 200:
   "skills": "Java, Spring Boot, PostgreSQL, Docker",
   "status": "published",
   "parsed_jd": {
-    "role": "Senior Java Developer",
-    "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
-    "preferred_skills": ["Docker", "AWS"],
-    "experience": {"min": 3, "max": 5},
-    "education": "Bachelor Degree",
-    "responsibilities": ["Develop REST APIs", "Optimize DB queries"]
+    "title": "Senior Java Developer",
+    "company": null,
+    "company_description": null,
+    "experience_required": {
+      "min_years": 3,
+      "max_years": 5
+    },
+    "skills": {
+      "must_have": [
+        {"skill": "Java", "required_years": 3.0},
+        {"skill": "Spring Boot", "required_years": null},
+        {"skill": "PostgreSQL", "required_years": null}
+      ],
+      "good_to_have": ["Docker", "AWS"]
+    },
+    "qualifications": ["Bachelor Degree"],
+    "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
+    "location": "Bangalore",
+    "employment_type": "full_time"
   }
 }
 ```
@@ -1080,7 +1132,9 @@ Response 200:
       "max_years": 6
     },
     "skills": {
-      "must_have": ["Java"],
+      "must_have": [
+        {"skill": "Java", "required_years": 3.0}
+      ],
       "good_to_have": ["Docker"]
     },
     "qualifications": [],
