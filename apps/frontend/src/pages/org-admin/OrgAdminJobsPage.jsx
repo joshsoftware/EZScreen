@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { listJobsRequest } from '../../features/jobs/api'
 import {
+  formatDate,
   formatExperience,
   formatJobStatus,
   formatJobType,
@@ -19,6 +20,7 @@ import { TableSkeleton } from '../../components/ui/Skeleton'
 import { Stagger, StaggerItem } from '../../components/motion/Motion'
 
 export function OrgAdminJobsPage() {
+  const navigate = useNavigate()
   const [jobs, setJobs] = useState([])
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(true)
@@ -96,22 +98,29 @@ export function OrgAdminJobsPage() {
                   Experience
                 </th>
                 <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
+                  Applicants
+                </th>
+                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
                   Status
                 </th>
+                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
+                  Created
+                </th>
+
               </tr>
             </thead>
             {loading ? (
               <tbody>
                 <tr>
-                  <td colSpan={6} className="p-0">
-                    <TableSkeleton rows={5} cols={6} />
+                  <td colSpan={9} className="p-0">
+                    <TableSkeleton rows={5} cols={8} />
                   </td>
                 </tr>
               </tbody>
             ) : jobs.length === 0 ? (
               <tbody>
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={9}>
                     <EmptyState
                       icon="work"
                       title="No jobs yet"
@@ -128,15 +137,21 @@ export function OrgAdminJobsPage() {
                   <StaggerItem
                     as="tr"
                     key={job.id}
-                    className="hover:bg-surface-container-low transition-colors"
+                    className="hover:bg-surface-container-low transition-colors cursor-pointer"
+                    role="link"
+                    tabIndex={0}
+                    onClick={() => navigate(`/org-admin/jobs/${job.id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        navigate(`/org-admin/jobs/${job.id}`)
+                      }
+                    }}
                   >
                     <td className="py-md px-md">
-                      <Link
-                        className="text-body-sm font-medium text-secondary hover:underline"
-                        to={`/org-admin/jobs/${job.id}`}
-                      >
+                      <span className="text-body-sm font-medium text-secondary">
                         {job.title || 'Untitled job'}
-                      </Link>
+                      </span>
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
                       {formatJobType(job.job_type)}
@@ -150,10 +165,16 @@ export function OrgAdminJobsPage() {
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
                       {formatExperience(job.experience_min, job.experience_max)}
                     </td>
+                    <td className="py-md px-md text-body-sm text-on-surface-variant">
+                      {job.applicant_count ?? 0}
+                    </td>
                     <td className="py-md px-md">
                       <Badge tone={jobStatusTone(job.status)}>
                         {formatJobStatus(job.status)}
                       </Badge>
+                    </td>
+                    <td className="py-md px-md text-body-sm text-on-surface-variant">
+                      {formatDate(job.created_at)}
                     </td>
                   </StaggerItem>
                 ))}

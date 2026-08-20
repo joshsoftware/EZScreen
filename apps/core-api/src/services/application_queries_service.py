@@ -46,6 +46,7 @@ def list_applicants(
             last_name=application.candidate.last_name if application.candidate else None,
             email=application.candidate.email if application.candidate else None,
             phone=application.candidate.phone if application.candidate else None,
+            created_at=application.created_at,
         )
         for application in applications
     ]

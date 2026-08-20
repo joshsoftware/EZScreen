@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
 
 from src.config.settings import settings
 from src.models.enums import JobStatus, UserRole
@@ -60,6 +60,7 @@ def list_jobs(
     stmt = (
         select(JobDescription)
         .where(JobDescription.organization_id == organization_id)
+        .options(selectinload(JobDescription.applications))
         .order_by(JobDescription.created_at.desc())
     )
     if status is not None:

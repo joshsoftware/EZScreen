@@ -7,7 +7,7 @@ import threading
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -159,17 +159,16 @@ def _find_or_create_candidate(
     email: str,
     personal: dict,
 ) -> User:
-    existing = db.scalar(select(User).where(User.email == email))
+    normalized = _normalize_email(email)
+    if not normalized:
+        raise ValueError("Could not extract candidate email from parsed resume")
+
+    existing = _get_candidate_by_email(db, normalized)
     if existing is not None:
-        if existing.role != UserRole.candidate:
-            raise ValueError(f"Email {email} belongs to a non-candidate user")
-        _fill_candidate_profile(existing, personal)
-        db.add(existing)
-        db.flush()
-        return existing
+        return _use_existing_candidate(db, existing, personal)
 
     candidate = User(
-        email=email,
+        email=normalized,
         role=UserRole.candidate,
         organization_id=None,
         password_hash=None,
@@ -180,8 +179,30 @@ def _find_or_create_candidate(
         status=UserStatus.active,
     )
     db.add(candidate)
-    db.flush()
+    try:
+        with db.begin_nested():
+            db.flush()
+    except IntegrityError:
+        # Another worker created this candidate between our lookup and insert.
+        db.expunge(candidate)
+        existing = _get_candidate_by_email(db, normalized)
+        if existing is None:
+            raise ValueError(f"Could not resolve candidate for email {normalized}") from None
+        return _use_existing_candidate(db, existing, personal)
     return candidate
+
+
+def _get_candidate_by_email(db: Session, normalized_email: str) -> User | None:
+    return db.scalar(select(User).where(func.lower(User.email) == normalized_email))
+
+
+def _use_existing_candidate(db: Session, existing: User, personal: dict) -> User:
+    if existing.role != UserRole.candidate:
+        raise ValueError(f"Email {existing.email} belongs to a non-candidate user")
+    _fill_candidate_profile(existing, personal)
+    db.add(existing)
+    db.flush()
+    return existing
 
 
 def _fill_candidate_profile(user: User, personal: dict) -> None:
@@ -241,9 +262,16 @@ def _string_field(data: dict, key: str, *, max_len: int) -> str | None:
 
 def _extract_email(personal: dict) -> str:
     value = personal.get("email")
-    if isinstance(value, str) and "@" in value.strip():
-        return value.strip().lower()
+    if isinstance(value, str):
+        return _normalize_email(value)
     return ""
+
+
+def _normalize_email(value: str) -> str:
+    normalized = value.strip().lower()
+    if "@" not in normalized:
+        return ""
+    return normalized
 
 
 def _extract_yoe(parsed_resume: dict) -> float | None:

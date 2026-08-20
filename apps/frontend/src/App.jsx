@@ -69,6 +69,11 @@ const OrgAdminJobDetailPage = lazy(() =>
     default: m.OrgAdminJobDetailPage,
   })),
 )
+const OrgAdminApplicationDetailPage = lazy(() =>
+  import('./pages/org-admin/OrgAdminApplicationDetailPage').then((m) => ({
+    default: m.OrgAdminApplicationDetailPage,
+  })),
+)
 
 function Lazy({ children }) {
   return <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
@@ -194,6 +199,14 @@ export default function App() {
               element={
                 <Lazy>
                   <OrgAdminJobDetailPage />
+                </Lazy>
+              }
+            />
+            <Route
+              path="jobs/:jobId/applicants/:applicationId"
+              element={
+                <Lazy>
+                  <OrgAdminApplicationDetailPage />
                 </Lazy>
               }
             />

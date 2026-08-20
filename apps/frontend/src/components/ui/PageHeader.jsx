@@ -10,7 +10,11 @@ export function PageHeader({ title, description, actions, breadcrumb, className 
     >
       <div className="min-w-0">
         {breadcrumb ? <div className="mb-xs">{breadcrumb}</div> : null}
-        <h1 className="font-headline-md text-headline-md text-on-surface">{title}</h1>
+        {typeof title === 'string' ? (
+          <h1 className="font-headline-md text-headline-md text-on-surface">{title}</h1>
+        ) : (
+          title
+        )}
         {description ? (
           <p className="text-body-sm text-on-surface-variant mt-xs">{description}</p>
         ) : null}
@@ -38,13 +42,26 @@ export function Panel({ title, children, className, bodyClassName }) {
   )
 }
 
-export function StatCard({ label, value }) {
-  return (
-    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-lg">
+export function StatCard({ label, value, onClick, selected = false }) {
+  const className = cn(
+    'bg-surface-container-lowest border rounded-xl p-lg text-left',
+    selected ? 'border-secondary ring-2 ring-secondary/20' : 'border-outline-variant',
+    onClick ? 'cursor-pointer hover:border-secondary transition-colors' : '',
+  )
+  const content = (
+    <>
       <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-xs">
         {label}
       </p>
       <p className="font-headline-md text-headline-md text-on-surface">{value}</p>
-    </div>
+    </>
   )
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={className}>
+        {content}
+      </button>
+    )
+  }
+  return <div className={className}>{content}</div>
 }

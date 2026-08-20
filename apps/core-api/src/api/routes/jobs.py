@@ -75,7 +75,13 @@ def list_jobs(
         page=page,
         limit=limit,
     )
-    return [JobListItem.model_validate(job) for job in jobs]
+    return [
+        JobListItem(
+            **JobListItem.model_validate(job).model_dump(exclude={"applicant_count"}),
+            applicant_count=len(job.applications),
+        )
+        for job in jobs
+    ]
 
 
 @router.post(

@@ -34,9 +34,10 @@ class WorkType(str, enum.Enum):
 
 class ApplicationStatus(str, enum.Enum):
     applied = "applied"
+    scored = "scored"
     interview_scheduled = "interview_scheduled"
     interview_completed = "interview_completed"
-    shortlist_for_l1 = "shortlist_for_l1"
+    shortlisted_l2 = "shortlisted_l2"
     rejected = "rejected"
 
 

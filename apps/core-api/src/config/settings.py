@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # MinIO / S3 (local dev defaults match docker-compose)
-    minio_endpoint: str = "127.0.0.1:9000"
+    minio_endpoint: str = "172.60.1.147:9000"
     minio_access_key: str = "minio_admin"
     minio_secret_key: str = "minio_password"
     minio_secure: bool = False

@@ -86,6 +86,7 @@ class ApplicantListItem(BaseModel):
     last_name: str | None = None
     email: str | None = None
     phone: str | None = None
+    created_at: datetime | None = None
 
 
 class JobFitRunResponse(BaseModel):

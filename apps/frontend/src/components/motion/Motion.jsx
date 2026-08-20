@@ -98,17 +98,17 @@ export function Stagger({ children, className, as: Component = 'div' }) {
   )
 }
 
-export function StaggerItem({ children, className, as: Component = 'div' }) {
+export function StaggerItem({ children, className, as: Component = 'div', ...rest }) {
   const animate = useMotionSafe()
   const MotionComponent = motion[Component] ?? motion.div
 
   if (!animate) {
     const Tag = Component
-    return <Tag className={className}>{children}</Tag>
+    return <Tag className={className} {...rest}>{children}</Tag>
   }
 
   return (
-    <MotionComponent className={className} variants={staggerItem}>
+    <MotionComponent className={className} variants={staggerItem} {...rest}>
       {children}
     </MotionComponent>
   )

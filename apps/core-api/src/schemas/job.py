@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -62,6 +63,8 @@ class JobListItem(BaseModel):
     experience_max: int | None
     skills: str | None
     status: JobStatus
+    created_at: datetime | None = None
+    applicant_count: int = 0
 
 
 class JobResponse(BaseModel):
@@ -79,6 +82,7 @@ class JobResponse(BaseModel):
     experience_max: int | None
     skills: str | None
     status: JobStatus
+    parsed_jd: dict | None = None
 
 
 class JobUpdateResponse(BaseModel):

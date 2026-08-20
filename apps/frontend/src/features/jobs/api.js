@@ -29,3 +29,38 @@ export function updateJobRequest(jobId, body) {
     body,
   })
 }
+
+export function getJobApplicantsRequest(jobId, { page = 1, limit = 50 } = {}) {
+  const search = new URLSearchParams()
+  search.set('page', String(page))
+  search.set('limit', String(limit))
+  return apiRequest(`/api/v1/jobs/${jobId}/applicants?${search.toString()}`, {
+    method: 'GET',
+  })
+}
+
+export function getApplicationDetailRequest(applicationId) {
+  return apiRequest(`/api/v1/applications/${applicationId}`, {
+    method: 'GET',
+  })
+}
+
+export function getResumeUploadUrlsRequest(jobId, files) {
+  return apiRequest(`/api/v1/jobs/${jobId}/applications/upload-urls`, {
+    method: 'POST',
+    body: { files },
+  })
+}
+
+export function enqueueBulkResumesRequest(jobId, resumes) {
+  return apiRequest(`/api/v1/jobs/${jobId}/applications/bulk`, {
+    method: 'POST',
+    body: { resumes },
+  })
+}
+
+export function rerunJobFitRequest(jobId, applicationId) {
+  return apiRequest(`/api/v1/jobs/${jobId}/applications/${applicationId}/rerun-fit`, {
+    method: 'POST',
+  })
+}
