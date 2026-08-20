@@ -1,47 +1,87 @@
-import { useState } from 'react'
-import { toast } from 'sonner'
 import { Alert } from '../../components/ui/Alert'
 import { Badge } from '../../components/ui/Badge'
-import { Button } from '../../components/ui/Button'
 import { Panel, StatCard } from '../../components/ui/PageHeader'
 import { Skeleton } from '../../components/ui/Skeleton'
-import { rerunJobFitRequest } from './api'
+import { cn } from '../../lib/cn'
+import { useOrgSettings } from '../org-admin/OrgSettingsContext'
 import {
   candidateInitials,
   candidateName,
   fitLabel,
-  fitTone,
-  formatApplicationStatus,
   resolveMatchScore,
   scoreBreakdownCards,
 } from './applicationFields'
 
-function SkillRow({ matchedLabel, matchedItems, matchedTone, missingLabel, missingItems, missingTone }) {
+function skillLabel(item) {
+  if (typeof item === 'string') return item
+  if (item && typeof item === 'object' && typeof item.skill === 'string') return item.skill
+  return String(item ?? '')
+}
+
+function normalizeSkillList(items) {
+  return (Array.isArray(items) ? items : []).map(skillLabel).filter(Boolean)
+}
+
+function CoverageBar({ label, matched, total, tone }) {
+  const pct = total > 0 ? Math.round((matched / total) * 100) : 0
+  const fill =
+    tone === 'success'
+      ? 'bg-success'
+      : tone === 'warning'
+        ? 'bg-warning'
+        : 'bg-primary'
+
   return (
-    <div className="flex flex-col gap-sm">
-      <div className="flex flex-wrap items-start gap-md">
-        <div className="min-w-0 flex-1">
-          <p className="font-label-md text-label-md text-on-surface-variant mb-xs">{matchedLabel}</p>
-          {matchedItems.length > 0 ? (
+    <div className="min-w-0 flex-1">
+      <div className="flex items-baseline justify-between gap-sm mb-xs">
+        <p className="font-label-md text-label-md text-on-surface-variant tracking-wide">{label}</p>
+        <p className="text-body-sm font-medium text-on-surface">
+          {matched}/{total}
+          <span className="text-on-surface-variant font-normal"> · {pct}%</span>
+        </p>
+      </div>
+      <div className="h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+        <div className={cn('h-full rounded-full transition-all', fill)} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+function SkillGroup({ title, matched, missing }) {
+  return (
+    <div className="space-y-sm">
+      <p className="font-label-md text-label-md text-on-surface">{title}</p>
+      <div className="grid sm:grid-cols-2 gap-sm">
+        <div className="rounded-lg border border-success-container/60 bg-success-container/20 p-md">
+          <p className="font-label-md text-label-md text-on-success-container mb-sm">
+            Matched · {matched.length}
+          </p>
+          {matched.length > 0 ? (
             <div className="flex flex-wrap gap-xs">
-              {matchedItems.map((item) => (
-                <Badge key={item} tone={matchedTone}>{item}</Badge>
+              {matched.map((item) => (
+                <Badge key={item} tone="success">
+                  {item}
+                </Badge>
               ))}
             </div>
           ) : (
-            <p className="text-body-sm text-on-surface-variant">None</p>
+            <p className="text-body-sm text-on-surface-variant">None matched</p>
           )}
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="font-label-md text-label-md text-on-surface-variant mb-xs">{missingLabel}</p>
-          {missingItems.length > 0 ? (
+        <div className="rounded-lg border border-error-container/60 bg-error-container/20 p-md">
+          <p className="font-label-md text-label-md text-on-error-container mb-sm">
+            Missing · {missing.length}
+          </p>
+          {missing.length > 0 ? (
             <div className="flex flex-wrap gap-xs">
-              {missingItems.map((item) => (
-                <Badge key={item} tone={missingTone}>{item}</Badge>
+              {missing.map((item) => (
+                <Badge key={item} tone="danger">
+                  {item}
+                </Badge>
               ))}
             </div>
           ) : (
-            <p className="text-body-sm text-on-surface-variant">None</p>
+            <p className="text-body-sm text-on-surface-variant">None missing</p>
           )}
         </div>
       </div>
@@ -104,50 +144,27 @@ function ExperienceTimeline({ roles }) {
 }
 
 export function ApplicationDetailPanel({
-  jobId,
   detail,
   loading,
   error,
-  onRerunComplete,
-  showRaw = false,
-  onToggleRaw,
 }) {
-  const [rerunning, setRerunning] = useState(false)
-  const [localShowRaw, setLocalShowRaw] = useState(false)
-  const rawVisible = onToggleRaw ? showRaw : localShowRaw
-  const toggleRaw = onToggleRaw ?? (() => setLocalShowRaw((v) => !v))
-
+  const { fitLabels } = useOrgSettings()
   const score = resolveMatchScore(detail)
   const analysis = detail?.job_fit_analysis
   const parsed = detail?.parsed_resume
   const breakdownCards = scoreBreakdownCards(analysis)
-  const canRerun = Boolean(detail?.parsed_resume) && !rerunning
 
   const reasoning = Array.isArray(analysis?.reasoning) ? analysis.reasoning : []
-  const matchedMust = analysis?.matched_skills?.must_have ?? []
-  const matchedGood = analysis?.matched_skills?.good_to_have ?? []
-  const missingMust = analysis?.missing_skills?.must_have ?? []
-  const missingGood = analysis?.missing_skills?.good_to_have ?? []
-  const primarySkills = parsed?.primary_skills ?? []
-  const secondarySkills = parsed?.secondary_skills ?? []
+  const matchedMust = normalizeSkillList(analysis?.matched_skills?.must_have)
+  const matchedGood = normalizeSkillList(analysis?.matched_skills?.good_to_have)
+  const missingMust = normalizeSkillList(analysis?.missing_skills?.must_have)
+  const missingGood = normalizeSkillList(analysis?.missing_skills?.good_to_have)
+  const mustTotal = matchedMust.length + missingMust.length
+  const goodTotal = matchedGood.length + missingGood.length
+  const primarySkills = normalizeSkillList(parsed?.primary_skills)
+  const secondarySkills = normalizeSkillList(parsed?.secondary_skills)
   const roles = parsed?.experience?.roles ?? []
   const education = parsed?.education_certificates ?? []
-
-  async function onRerun() {
-    if (!detail || rerunning) return
-    setRerunning(true)
-    try {
-      await rerunJobFitRequest(jobId, detail.id)
-      toast.success('Job-fit recalculated')
-      if (onRerunComplete) {
-        await onRerunComplete()
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to rerun fit')
-    } finally {
-      setRerunning(false)
-    }
-  }
 
   if (loading) {
     return (
@@ -185,53 +202,75 @@ export function ApplicationDetailPanel({
       <div className="grid lg:grid-cols-3 gap-lg">
         <div className="lg:col-span-2 space-y-lg">
           <Panel>
-            <div className="flex items-center gap-xs mb-md">
-              <span className="material-symbols-outlined text-secondary text-[18px]">
-                auto_awesome
-              </span>
-              <span className="text-label-md text-secondary">AI Match Generated</span>
+            <div className="flex flex-wrap items-center justify-between gap-sm mb-md">
+              <div className="flex items-center gap-xs">
+                <span className="material-symbols-outlined text-secondary text-[18px]">
+                  auto_awesome
+                </span>
+                <span className="font-label-md text-label-md text-secondary tracking-wide">
+                  AI match
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-sm">
+                <span className="text-body-sm font-medium text-on-surface">
+                  {fitLabel(score, fitLabels)}
+                  {score != null ? ` · ${score.toFixed(1)}/10` : ''}
+                </span>
+                {analysis?.experience_match != null ? (
+                  <span className="text-body-sm text-on-surface-variant">
+                    Experience {analysis.experience_match ? 'match' : 'gap'}
+                  </span>
+                ) : null}
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-sm mb-md">
-              <Badge tone={fitTone(score)}>{fitLabel(score)}</Badge>
-              <Badge tone="info">{formatApplicationStatus(detail.status)}</Badge>
-              {analysis?.experience_match != null ? (
-                <Badge tone={analysis.experience_match ? 'success' : 'warning'}>
-                  Experience match: {analysis.experience_match ? 'Yes' : 'No'}
-                </Badge>
-              ) : null}
-            </div>
+
+            {(mustTotal > 0 || goodTotal > 0) ? (
+              <div className="flex flex-col sm:flex-row gap-md mb-md">
+                {mustTotal > 0 ? (
+                  <CoverageBar
+                    label="Must-have"
+                    matched={matchedMust.length}
+                    total={mustTotal}
+                    tone="success"
+                  />
+                ) : null}
+                {goodTotal > 0 ? (
+                  <CoverageBar
+                    label="Nice-to-have"
+                    matched={matchedGood.length}
+                    total={goodTotal}
+                    tone="info"
+                  />
+                ) : null}
+              </div>
+            ) : null}
+
             {reasoning.length > 0 ? (
-              <ul className="text-body-sm text-on-surface space-y-xs list-disc pl-md mb-md">
-                {reasoning.map((point) => (
-                  <li key={point}>{point}</li>
-                ))}
-              </ul>
+              <div className="mb-md">
+                <p className="font-label-md text-label-md text-on-surface-variant tracking-wide mb-sm">
+                  Summary
+                </p>
+                <ul className="text-body-sm text-on-surface space-y-xs list-disc pl-md">
+                  {reasoning.map((point) => (
+                    <li key={point} className="leading-relaxed">
+                      {point}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : (
               <p className="text-body-sm text-on-surface-variant mb-md">
                 AI match analysis is not available yet. Use rerun fit after the parsing service is
                 connected.
               </p>
             )}
-            <div className="space-y-md">
-              <hr className="border-outline-variant" />
-              <SkillRow
-                matchedLabel={`Matched must-have (${matchedMust.length})`}
-                matchedItems={matchedMust}
-                matchedTone="success"
-                missingLabel={`Missing must-have (${missingMust.length})`}
-                missingItems={missingMust}
-                missingTone="danger"
-              />
-              <hr className="border-outline-variant" />
-              <SkillRow
-                matchedLabel={`Matched nice-to-have (${matchedGood.length})`}
-                matchedItems={matchedGood}
-                matchedTone="info"
-                missingLabel={`Missing nice-to-have (${missingGood.length})`}
-                missingItems={missingGood}
-                missingTone="warning"
-              />
-            </div>
+
+            {(mustTotal > 0 || goodTotal > 0) ? (
+              <div className="space-y-md pt-md border-t border-outline-variant">
+                <SkillGroup title="Must-have" matched={matchedMust} missing={missingMust} />
+                <SkillGroup title="Nice-to-have" matched={matchedGood} missing={missingGood} />
+              </div>
+            ) : null}
           </Panel>
 
           <Panel title="Experience timeline">
@@ -282,29 +321,6 @@ export function ApplicationDetailPanel({
 
         </div>
       </div>
-
-      {rawVisible ? (
-        <Panel title="Raw AI data">
-          <div className="grid lg:grid-cols-2 gap-md">
-            <div>
-              <p className="font-label-md text-label-md text-on-surface-variant uppercase mb-xs">
-                Job fit analysis
-              </p>
-              <pre className="text-mono-sm whitespace-pre-wrap break-words rounded-DEFAULT border border-outline-variant bg-surface p-md max-h-80 overflow-auto">
-                {JSON.stringify(analysis, null, 2)}
-              </pre>
-            </div>
-            <div>
-              <p className="font-label-md text-label-md text-on-surface-variant uppercase mb-xs">
-                Parsed resume
-              </p>
-              <pre className="text-mono-sm whitespace-pre-wrap break-words rounded-DEFAULT border border-outline-variant bg-surface p-md max-h-80 overflow-auto">
-                {JSON.stringify(parsed, null, 2)}
-              </pre>
-            </div>
-          </div>
-        </Panel>
-      ) : null}
     </div>
   )
 }

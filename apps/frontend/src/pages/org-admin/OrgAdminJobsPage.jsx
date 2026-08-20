@@ -51,8 +51,7 @@ export function OrgAdminJobsPage() {
         title="Jobs"
         description="Create and manage openings for your organization."
         actions={
-          <Button to="/org-admin/jobs/new">
-            <span className="material-symbols-outlined text-[18px]">add</span>
+          <Button to="/org-admin/jobs/new" icon="add">
             Create job
           </Button>
         }
@@ -77,42 +76,25 @@ export function OrgAdminJobsPage() {
 
       {error ? <Alert className="mb-md">{error}</Alert> : null}
 
-      <Panel bodyClassName="p-0">
+      <Panel bodyClassName="p-0 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="bg-surface border-b border-outline-variant">
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Title
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Type
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Work mode
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Location
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Experience
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Applicants
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Status
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Created
-                </th>
-
+              <tr className="bg-surface-container-low/60 border-b border-outline-variant/80">
+                <th className="ez-table-head">Title</th>
+                <th className="ez-table-head">Type</th>
+                <th className="ez-table-head">Work mode</th>
+                <th className="ez-table-head">Location</th>
+                <th className="ez-table-head">Experience</th>
+                <th className="ez-table-head">Applicants</th>
+                <th className="ez-table-head">Status</th>
+                <th className="ez-table-head">Created</th>
               </tr>
             </thead>
             {loading ? (
               <tbody>
                 <tr>
-                  <td colSpan={9} className="p-0">
+                  <td colSpan={8} className="p-0">
                     <TableSkeleton rows={5} cols={8} />
                   </td>
                 </tr>
@@ -120,7 +102,7 @@ export function OrgAdminJobsPage() {
             ) : jobs.length === 0 ? (
               <tbody>
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={8}>
                     <EmptyState
                       icon="work"
                       title="No jobs yet"
@@ -132,12 +114,12 @@ export function OrgAdminJobsPage() {
                 </tr>
               </tbody>
             ) : (
-              <Stagger as="tbody" className="divide-y divide-outline-variant">
+              <Stagger as="tbody" className="divide-y divide-outline-variant/70">
                 {jobs.map((job) => (
                   <StaggerItem
                     as="tr"
                     key={job.id}
-                    className="hover:bg-surface-container-low transition-colors cursor-pointer"
+                    className="ez-table-row cursor-pointer"
                     role="link"
                     tabIndex={0}
                     onClick={() => navigate(`/org-admin/jobs/${job.id}`)}
@@ -149,7 +131,7 @@ export function OrgAdminJobsPage() {
                     }}
                   >
                     <td className="py-md px-md">
-                      <span className="text-body-sm font-medium text-secondary">
+                      <span className="text-body-sm font-medium text-on-surface group-hover:text-secondary">
                         {job.title || 'Untitled job'}
                       </span>
                     </td>
@@ -165,8 +147,10 @@ export function OrgAdminJobsPage() {
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
                       {formatExperience(job.experience_min, job.experience_max)}
                     </td>
-                    <td className="py-md px-md text-body-sm text-on-surface-variant">
-                      {job.applicant_count ?? 0}
+                    <td className="py-md px-md">
+                      <span className="inline-flex min-w-[1.75rem] justify-center rounded-full bg-primary-container/80 px-sm py-xs text-label-md text-on-primary-container">
+                        {job.applicant_count ?? 0}
+                      </span>
                     </td>
                     <td className="py-md px-md">
                       <Badge tone={jobStatusTone(job.status)}>

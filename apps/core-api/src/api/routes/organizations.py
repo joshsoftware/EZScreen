@@ -15,6 +15,7 @@ from src.schemas.organization import (
     OrganizationDeactivateResponse,
     OrganizationResponse,
     OrganizationUpdate,
+    fit_labels_from_settings,
 )
 from src.schemas.user import OrgUserResponse, ProvisionOrgUserRequest
 from src.services import organization_service, user_service
@@ -46,6 +47,7 @@ def _to_org_response(
         domain=org.domain,
         logo_url=org.logo_url,
         is_active=org.is_active,
+        fit_labels=fit_labels_from_settings(getattr(org, "settings", None)),
         created_at=org.created_at,
         user_count=stats.get("user_count", 0),
         job_count=stats.get("job_count", 0),
@@ -143,7 +145,7 @@ def update_organization(
     organization_id: UUID,
     body: OrganizationUpdate,
     db: DbSession,
-    current_user: SuperOrOrgAdmin,
+    current_user: OrgWorkspaceUser,
 ) -> OrganizationResponse:
     _assert_org_access(current_user, organization_id)
     # Org admin may not hard-suspend via this path unless super admin
@@ -156,6 +158,20 @@ def update_organization(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only super_admin can suspend organizations",
         )
+
+    # HR may only change fit rating labels; org/profile fields stay admin-only.
+    if current_user.role == UserRole.hr:
+        allowed = body.model_dump(exclude_unset=True)
+        if set(allowed.keys()) - {"fit_labels"}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="HR can only update fit rating labels",
+            )
+        if "fit_labels" not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="fit_labels is required",
+            )
 
     org = organization_service.get_organization(db, organization_id)
     if org is None:

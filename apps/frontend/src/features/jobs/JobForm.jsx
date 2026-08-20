@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Button } from '../../components/ui/Button'
 import { Alert } from '../../components/ui/Alert'
-import { Input, Select, TextArea } from '../../components/ui/Input'
+import { Input, Select } from '../../components/ui/Input'
+import { RichTextEditor } from '../../components/ui/RichTextEditor'
 import {
   EMPTY_JOB_FORM,
   JOB_STATUS_OPTIONS,
@@ -15,6 +16,7 @@ export function JobForm({
   onSubmit,
   submitting = false,
   submitLabel = 'Save job',
+  submittingLabel = 'Saving…',
   cancelTo = '/org-admin/jobs',
 }) {
   const [values, setValues] = useState(initialValues)
@@ -51,16 +53,16 @@ export function JobForm({
         onChange={(e) => setField('title', e.target.value)}
         maxLength={255}
       />
-      <TextArea
+      <RichTextEditor
         id="job-description"
         label="Description"
-        rows={8}
         value={values.description}
-        onChange={(e) => setField('description', e.target.value)}
-        placeholder="Role summary, responsibilities, and which skills are must-have vs nice-to-have…"
+        onChange={(html) => setField('description', html)}
+        placeholder="Role summary, responsibilities, must-have vs nice-to-have skills, and expected years per skill…"
       />
       <p className="text-label-md text-on-surface-variant -mt-sm">
-        In the description, specify which listed skills are must-have and which are nice-to-have.
+        Include must-have and nice-to-have skills in the description, with expected years of
+        experience where you know them. You can fine-tune years after parsing.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-md">
         <Select
@@ -116,14 +118,6 @@ export function JobForm({
           onChange={(e) => setField('experience_max', e.target.value)}
         />
       </div>
-      <TextArea
-        id="job-skills"
-        label="Skills"
-        rows={3}
-        value={values.skills}
-        onChange={(e) => setField('skills', e.target.value)}
-        placeholder="Java, Spring Boot, PostgreSQL, Docker"
-      />
       <Select
         id="job-status"
         label="Status"
@@ -142,7 +136,7 @@ export function JobForm({
           Cancel
         </Button>
         <Button type="submit" loading={submitting}>
-          {submitting ? 'Saving…' : submitLabel}
+          {submitting ? submittingLabel : submitLabel}
         </Button>
       </div>
     </form>

@@ -44,7 +44,7 @@ class JobDescription(Base):
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     experience_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     experience_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    skills: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skills: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[JobStatus] = mapped_column(
         Enum(
             JobStatus,

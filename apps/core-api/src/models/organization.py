@@ -1,11 +1,20 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Index, String, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
+
+DEFAULT_ORG_SETTINGS: dict[str, Any] = {
+    "fit_labels": [
+        {"id": "strong", "name": "Strong", "min_score": 8.0, "max_score": 10.0},
+        {"id": "moderate", "name": "Moderate", "min_score": 6.0, "max_score": 7.9},
+        {"id": "weak", "name": "Weak", "min_score": 0.0, "max_score": 5.9},
+    ],
+}
 
 
 class Organization(Base):
@@ -18,6 +27,18 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
     logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=lambda: dict(DEFAULT_ORG_SETTINGS),
+        server_default=text(
+            "'{\"fit_labels\": ["
+            "{\"id\": \"strong\", \"name\": \"Strong\", \"min_score\": 8, \"max_score\": 10}, "
+            "{\"id\": \"moderate\", \"name\": \"Moderate\", \"min_score\": 6, \"max_score\": 7.9}, "
+            "{\"id\": \"weak\", \"name\": \"Weak\", \"min_score\": 0, \"max_score\": 5.9}"
+            "]}'::jsonb"
+        ),
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )

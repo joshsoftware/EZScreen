@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from src.models.application import Application
 from src.models.job_description import JobDescription
-from src.models.organization import Organization
+from src.models.organization import DEFAULT_ORG_SETTINGS, Organization
 from src.models.user import User
 from src.schemas.organization import OrganizationCreate, OrganizationUpdate
 
@@ -106,6 +106,7 @@ def create_organization(db: Session, data: OrganizationCreate) -> Organization:
         name=data.name,
         domain=data.domain,
         logo_url=data.logo_url,
+        settings=dict(DEFAULT_ORG_SETTINGS),
         is_active=True,
     )
     db.add(org)
@@ -120,8 +121,15 @@ def update_organization(
     payload = data.model_dump(exclude_unset=True)
     if "domain" in payload and _domain_taken(db, payload["domain"], exclude_id=org.id):
         raise ValueError("Domain already in use")
+    fit_labels = payload.pop("fit_labels", None)
     for key, value in payload.items():
         setattr(org, key, value)
+    if fit_labels is not None:
+        merged = dict(org.settings or DEFAULT_ORG_SETTINGS)
+        merged["fit_labels"] = fit_labels
+        merged.pop("fit_thresholds", None)
+        # Reassign so SQLAlchemy detects JSONB mutation.
+        org.settings = merged
     db.add(org)
     db.commit()
     db.refresh(org)

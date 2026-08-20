@@ -4,7 +4,7 @@ export function Skeleton({ className }) {
   return (
     <div
       className={cn(
-        'animate-pulse rounded-DEFAULT bg-surface-container-high/80',
+        'animate-pulse rounded-lg bg-surface-container-high/80',
         className,
       )}
       aria-hidden

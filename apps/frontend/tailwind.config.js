@@ -62,10 +62,16 @@ export default {
         'on-error-container': '#93000a',
       },
       borderRadius: {
-        DEFAULT: '0.125rem',
-        lg: '0.25rem',
-        xl: '0.5rem',
-        full: '0.75rem',
+        DEFAULT: '0.5rem',
+        lg: '0.75rem',
+        xl: '1rem',
+        '2xl': '1.25rem',
+        full: '9999px',
+      },
+      boxShadow: {
+        soft: '0 1px 2px rgb(15 39 64 / 0.04), 0 4px 16px rgb(15 39 64 / 0.05)',
+        lift: '0 2px 8px rgb(15 39 64 / 0.08), 0 12px 28px rgb(15 39 64 / 0.06)',
+        focus: '0 0 0 3px rgb(43 127 212 / 0.22)',
       },
       spacing: {
         'margin-mobile': '16px',

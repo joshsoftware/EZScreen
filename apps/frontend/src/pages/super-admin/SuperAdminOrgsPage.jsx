@@ -52,7 +52,9 @@ export function SuperAdminOrgsPage() {
         title="Organizations"
         description="Platform home · all tenants on EZScreen."
         actions={
-          <Button to="/super-admin/orgs/new">Create Organization</Button>
+          <Button to="/super-admin/orgs/new" icon="add">
+            Create Organization
+          </Button>
         }
       />
 
@@ -85,26 +87,16 @@ export function SuperAdminOrgsPage() {
 
       {error ? <Alert className="mb-md">{error}</Alert> : null}
 
-      <Panel bodyClassName="p-0">
+      <Panel bodyClassName="p-0 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="bg-surface border-b border-outline-variant">
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Organization
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Domain
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Users
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Jobs
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Status
-                </th>
+              <tr className="bg-surface-container-low/60 border-b border-outline-variant/80">
+                <th className="ez-table-head">Organization</th>
+                <th className="ez-table-head">Domain</th>
+                <th className="ez-table-head">Users</th>
+                <th className="ez-table-head">Jobs</th>
+                <th className="ez-table-head">Status</th>
               </tr>
             </thead>
             {loading ? (

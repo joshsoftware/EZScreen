@@ -42,6 +42,34 @@ export function jdStringList(parsedJd, key) {
   return Array.isArray(items) ? items.map(normalizeString).filter(Boolean) : []
 }
 
+export function emptyJobSkills() {
+  return { must_have: [], good_to_have: [] }
+}
+
+export function normalizeJobSkills(source) {
+  const skills = source?.skills && typeof source.skills === 'object' ? source.skills : source
+  const { mustHave, goodToHave } = jdSkillLists(
+    skills?.must_have || skills?.good_to_have ? { skills } : source,
+  )
+  return {
+    must_have: mustHave.map((item) => ({
+      skill: item.skill,
+      required_years: item.years ?? null,
+    })),
+    good_to_have: goodToHave.map((item) => ({
+      skill: item.skill,
+      required_years: item.years ?? null,
+    })),
+  }
+}
+
+export function skillsFromJob(job) {
+  if (job?.skills && typeof job.skills === 'object') {
+    return normalizeJobSkills(job.skills)
+  }
+  return normalizeJobSkills(job?.parsed_jd)
+}
+
 export function jdExperienceRange(parsedJd) {
   const exp = parsedJd?.experience_required
   if (!exp || typeof exp !== 'object') return null

@@ -12,7 +12,7 @@ export function Alert({ tone = 'error', className, children, ...props }) {
     <div
       role="alert"
       className={cn(
-        'text-body-sm border rounded-DEFAULT px-md py-sm',
+        'text-body-sm border rounded-lg px-md py-sm shadow-soft',
         tones[tone],
         className,
       )}

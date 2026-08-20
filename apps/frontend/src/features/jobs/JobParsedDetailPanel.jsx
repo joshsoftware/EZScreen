@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { Alert } from '../../components/ui/Alert'
+import { HtmlContent } from '../../components/ui/HtmlContent'
 import { Badge } from '../../components/ui/Badge'
-import { Button } from '../../components/ui/Button'
 import { Panel } from '../../components/ui/PageHeader'
 import {
   formatExperience,
@@ -12,6 +12,7 @@ import {
   jdExperienceRange,
   jdSkillLists,
   jdStringList,
+  skillsFromJob,
 } from './jobParsedFields'
 
 function safe(value) {
@@ -55,17 +56,15 @@ function Row({ label, value }) {
 
 export function JobParsedDetailPanel({ job, loading, error }) {
   const [sections, setSections] = useState(DEFAULT_OPEN)
-  const [showRaw, setShowRaw] = useState(false)
 
   const toggle = useCallback((key) => {
     setSections((prev) => ({ ...prev, [key]: !prev[key] }))
   }, [])
 
-  const anyOpen = SECTION_KEYS.some((k) => sections[k]) || showRaw
+  const anyOpen = SECTION_KEYS.some((k) => sections[k])
 
   function closeAll() {
     setSections({ overview: false, skills: false, qualifications: false, responsibilities: false, description: false })
-    setShowRaw(false)
   }
 
   if (loading) {
@@ -89,7 +88,9 @@ export function JobParsedDetailPanel({ job, loading, error }) {
     )
   }
 
-  const { mustHave, goodToHave } = jdSkillLists(parsedJd)
+  const { mustHave, goodToHave } = jdSkillLists({
+    skills: skillsFromJob(job),
+  })
   const qualifications = jdStringList(parsedJd, 'qualifications')
   const responsibilities = jdStringList(parsedJd, 'responsibilities')
   const parsedExperience = jdExperienceRange(parsedJd)
@@ -194,21 +195,8 @@ export function JobParsedDetailPanel({ job, loading, error }) {
         </Section>
 
         <Section title="Description" open={sections.description} onToggle={() => toggle('description')}>
-          <p className="text-body-sm text-on-surface whitespace-pre-wrap">
-            {job.description || 'No description entered.'}
-          </p>
+          <HtmlContent html={job.description} empty="No description entered." />
         </Section>
-
-        <div className="pt-sm">
-          <Button variant="ghost" size="sm" onClick={() => setShowRaw((v) => !v)}>
-            {showRaw ? 'Hide raw JSON' : 'Show raw JSON'}
-          </Button>
-          {showRaw ? (
-            <pre className="mt-sm text-mono-sm whitespace-pre-wrap break-words rounded-DEFAULT border border-outline-variant bg-surface p-md max-h-60 overflow-auto">
-              {JSON.stringify(parsedJd, null, 2)}
-            </pre>
-          ) : null}
-        </div>
       </div>
     </Panel>
   )

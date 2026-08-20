@@ -6,10 +6,12 @@ import { Input, Select } from '../../components/ui/Input'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { TableSkeleton } from '../../components/ui/Skeleton'
 import { Alert } from '../../components/ui/Alert'
+import { useOrgSettings } from '../org-admin/OrgSettingsContext'
 import {
   applicantScore,
   candidateName,
   fitBorderClass,
+  fitFilterOptions,
   fitLabel,
   fitTone,
   formatApplicationStatus,
@@ -17,15 +19,6 @@ import {
   scoreTextClass,
 } from './applicationFields'
 import { formatDate } from './jobFields'
-
-const FIT_FILTERS = [
-  { value: 'all', label: 'All fit levels' },
-  { value: 'strong', label: 'Strong (8+)' },
-  { value: 'moderate', label: 'Moderate (6–7.9)' },
-  { value: 'weak', label: 'Weak (<6)' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'screened', label: 'Scored' },
-]
 
 export function ApplicantsTable({
   jobId,
@@ -39,12 +32,14 @@ export function ApplicantsTable({
   processing = false,
 }) {
   const navigate = useNavigate()
+  const { fitLabels } = useOrgSettings()
   const [query, setQuery] = useState('')
+  const filterOptions = fitFilterOptions(fitLabels)
 
   const filteredApplicants = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return applicants.filter((applicant) => {
-      if (!matchesFitFilter(applicant, fitFilter)) return false
+      if (!matchesFitFilter(applicant, fitFilter, fitLabels)) return false
       if (!needle) return true
       const haystack = [candidateName(applicant), applicant.email, applicant.phone]
         .filter(Boolean)
@@ -52,7 +47,7 @@ export function ApplicantsTable({
         .toLowerCase()
       return haystack.includes(needle)
     })
-  }, [applicants, fitFilter, query])
+  }, [applicants, fitFilter, fitLabels, query])
 
   if (error) {
     return (
@@ -108,14 +103,19 @@ export function ApplicantsTable({
               onChange={(event) => onFitFilterChange?.(event.target.value)}
               className="h-10"
             >
-              {FIT_FILTERS.map((option) => (
+              {filterOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </Select>
           </div>
-          <Button variant="secondary" size="sm" loading={refreshing} onClick={onRefresh}>
+          <Button
+            variant="secondary"
+            icon="refresh"
+            loading={refreshing}
+            onClick={onRefresh}
+          >
             Refresh
           </Button>
         </div>
@@ -128,35 +128,24 @@ export function ApplicantsTable({
           description="Try another fit level, clear search, or refresh after processing completes."
         />
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-xl border border-outline-variant/80 bg-surface-container-lowest/60">
           <table className="w-full text-left">
             <thead>
-              <tr className="bg-surface border-b border-outline-variant">
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Candidate
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Score
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Fit
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  YOE
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Status
-                </th>
-                <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">
-                  Created
-                </th>
+              <tr className="bg-surface-container-low/60 border-b border-outline-variant/80">
+                <th className="ez-table-head">Candidate</th>
+                <th className="ez-table-head">Score</th>
+                <th className="ez-table-head">Fit</th>
+                <th className="ez-table-head">YOE</th>
+                <th className="ez-table-head">Status</th>
+                <th className="ez-table-head">Created</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant">
+            <tbody className="divide-y divide-outline-variant/70">
               {filteredApplicants.map((applicant) => {
                 const score = applicantScore(applicant)
                 const name = candidateName(applicant)
                 const href = `/org-admin/jobs/${jobId}/applicants/${applicant.id}`
+                const initial = (name?.[0] || '?').toUpperCase()
 
                 return (
                   <tr
@@ -170,20 +159,29 @@ export function ApplicantsTable({
                         navigate(href)
                       }
                     }}
-                    className={`border-l-2 hover:bg-surface-container-low cursor-pointer ${fitBorderClass(score)}`}
+                    className={`ez-table-row cursor-pointer border-l-[3px] ${fitBorderClass(score, fitLabels)}`}
                   >
                     <td className="py-md px-md text-body-sm">
-                      <span className="font-medium text-secondary">{name}</span>
-                      <p className="text-on-surface-variant">
-                        {applicant.email || 'No email'}
-                        {applicant.phone ? ` · ${applicant.phone}` : ''}
-                      </p>
+                      <div className="flex items-center gap-sm">
+                        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-container text-label-md font-label-md text-on-primary-container">
+                          {initial}
+                        </span>
+                        <div className="min-w-0">
+                          <span className="font-medium text-on-surface">{name}</span>
+                          <p className="text-on-surface-variant truncate">
+                            {applicant.email || 'No email'}
+                            {applicant.phone ? ` · ${applicant.phone}` : ''}
+                          </p>
+                        </div>
+                      </div>
                     </td>
-                    <td className={`py-md px-md text-body-sm font-medium ${scoreTextClass(score)}`}>
+                    <td className={`py-md px-md text-body-sm font-medium ${scoreTextClass(score, fitLabels)}`}>
                       {score == null ? '—' : score.toFixed(1)}
                     </td>
                     <td className="py-md px-md">
-                      <Badge tone={fitTone(score)}>{fitLabel(score)}</Badge>
+                      <Badge tone={fitTone(score, fitLabels)}>
+                        {fitLabel(score, fitLabels)}
+                      </Badge>
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
                       {applicant.candidate_yoe == null ? '—' : applicant.candidate_yoe}

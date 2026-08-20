@@ -1,7 +1,7 @@
 export function LogoMark({ subtitle, compact = false }) {
   return (
     <div className="flex items-center gap-sm">
-      <div className="w-8 h-8 rounded-DEFAULT bg-primary flex items-center justify-center shrink-0">
+      <div className="w-8 h-8 rounded-lg bg-primary shadow-soft flex items-center justify-center shrink-0">
         <span className="material-symbols-outlined text-on-primary text-[18px]">
           monitor_heart
         </span>

@@ -49,8 +49,7 @@ export function OrgAdminTeamPage() {
         description="Organization admins and HR users in your workspace."
         actions={
           isOrgAdmin ? (
-            <Button to="/org-admin/team/invite">
-              <span className="material-symbols-outlined text-[18px]">person_add</span>
+            <Button to="/org-admin/team/invite" icon="person_add">
               Invite user
             </Button>
           ) : null

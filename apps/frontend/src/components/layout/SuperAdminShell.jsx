@@ -8,9 +8,9 @@ import { cn } from '../../lib/cn'
 
 function navClass({ isActive }) {
   return cn(
-    'flex items-center gap-sm px-md py-sm rounded-lg text-body-sm relative transition-colors',
+    'flex items-center gap-sm px-md py-sm rounded-xl text-body-sm relative transition-all',
     isActive
-      ? 'bg-surface-container-low text-on-surface font-medium before:absolute before:left-0 before:top-1 before:bottom-1 before:w-0.5 before:bg-secondary before:rounded-full'
+      ? 'bg-primary-container/80 text-on-primary-container font-medium shadow-soft'
       : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface',
   )
 }
@@ -33,19 +33,16 @@ export function SuperAdminShell() {
       }
 
   return (
-    <div className="flex min-h-screen bg-surface text-on-surface">
+    <div className="flex min-h-screen text-on-surface">
       <motion.aside
-        className="hidden md:flex w-sidebar-width shrink-0 flex-col h-screen sticky top-0 border-r border-outline-variant bg-surface-container-lowest"
+        className="hidden md:flex w-sidebar-width shrink-0 flex-col h-screen sticky top-0 border-r border-outline-variant/70 bg-surface-container-lowest/85 backdrop-blur-xl"
         {...asideProps}
       >
-        <div className="p-lg border-b border-outline-variant">
+        <div className="h-14 shrink-0 flex items-center px-lg border-b border-outline-variant/70">
           <LogoMark subtitle="Platform Control" />
         </div>
         <div className="p-md">
-          <Button to="/super-admin/orgs/new" className="w-full">
-            <span className="material-symbols-outlined text-[18px] text-on-primary">
-              add
-            </span>
+          <Button to="/super-admin/orgs/new" className="w-full" icon="add">
             Create Organization
           </Button>
         </div>
@@ -63,13 +60,13 @@ export function SuperAdminShell() {
             <span>Settings</span>
           </NavLink>
         </nav>
-        <div className="p-md border-t border-outline-variant">
-          <div className="flex items-center gap-sm">
-            <div className="w-9 h-9 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center text-label-md font-label-md">
+        <div className="p-md border-t border-outline-variant/70 space-y-sm">
+          <div className="flex items-center gap-sm rounded-xl bg-surface-container-low/70 px-sm py-sm">
+            <div className="w-9 h-9 rounded-full bg-primary text-on-primary flex items-center justify-center text-label-md font-label-md shadow-soft">
               {initial}
             </div>
             <div className="min-w-0">
-              <p className="text-body-sm text-on-surface truncate">{displayName}</p>
+              <p className="text-body-sm text-on-surface truncate font-medium">{displayName}</p>
               <p className="text-label-md text-on-surface-variant truncate">
                 {user?.email}
               </p>
@@ -78,7 +75,7 @@ export function SuperAdminShell() {
           <button
             type="button"
             onClick={() => void logout()}
-            className="mt-sm block text-label-md text-on-surface-variant hover:text-secondary text-left"
+            className="w-full rounded-xl px-md py-sm text-left text-label-md text-on-surface-variant hover:bg-surface-container-low hover:text-secondary transition-colors"
           >
             Sign out
           </button>
@@ -86,12 +83,13 @@ export function SuperAdminShell() {
       </motion.aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 border-b border-outline-variant bg-surface-container-lowest/90 backdrop-blur sticky top-0 z-20 flex items-center justify-between px-margin-mobile md:px-margin-desktop">
+        <header className="h-14 shrink-0 border-b border-outline-variant/70 bg-surface-container-lowest/75 backdrop-blur-xl sticky top-0 z-20 flex items-center justify-between px-margin-mobile md:px-lg">
           <div className="md:hidden">
             <LogoMark />
           </div>
-          <div className="hidden md:block text-body-sm text-on-surface-variant">
-            Workspace · EZScreen
+          <div className="hidden md:flex items-center gap-sm text-body-sm text-on-surface-variant">
+            <span className="inline-flex h-2 w-2 rounded-full bg-primary" />
+            Platform control
           </div>
           <div className="flex items-center gap-md">
             <span className="material-symbols-outlined text-[20px] text-on-surface-variant">

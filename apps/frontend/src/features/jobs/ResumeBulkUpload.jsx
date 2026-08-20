@@ -163,15 +163,14 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
           <div className="flex flex-wrap gap-sm justify-center">
             <Button
               variant="secondary"
-              size="sm"
+              icon="folder_open"
               onClick={() => inputRef.current?.click()}
               disabled={uploading}
             >
               Browse files
             </Button>
             <Button
-              variant="primary"
-              size="sm"
+              icon="cloud_upload"
               onClick={onSubmit}
               loading={uploading}
               disabled={!hasFiles}

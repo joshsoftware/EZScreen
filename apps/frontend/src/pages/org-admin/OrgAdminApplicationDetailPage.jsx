@@ -8,11 +8,13 @@ import {
   rerunJobFitRequest,
 } from '../../features/jobs/api'
 import { ApplicationDetailPanel } from '../../features/jobs/ApplicationDetailPanel'
+import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
   candidateInitials,
   candidateName,
   fitLabel,
   fitTone,
+  formatApplicationStatus,
   resolveMatchScore,
 } from '../../features/jobs/applicationFields'
 import { ApiError } from '../../lib/api/client'
@@ -24,12 +26,12 @@ import { PageSkeleton } from '../../components/ui/Skeleton'
 
 export function OrgAdminApplicationDetailPage() {
   const { jobId = '', applicationId = '' } = useParams()
+  const { fitLabels } = useOrgSettings()
   const [job, setJob] = useState(null)
   const [detail, setDetail] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [rerunning, setRerunning] = useState(false)
-  const [showRaw, setShowRaw] = useState(false)
 
   const load = useCallback(async () => {
     if (!jobId || !applicationId) return
@@ -148,22 +150,17 @@ export function OrgAdminApplicationDetailPage() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-sm">
-            <Badge tone={fitTone(score)}>{fitLabel(score)}</Badge>
+            <Badge tone={fitTone(score, fitLabels)}>
+              {fitLabel(score, fitLabels)}
+            </Badge>
+            <Badge tone="info">Status · {formatApplicationStatus(detail.status)}</Badge>
             <Button
-              variant="secondary"
-              size="sm"
+              icon="replay"
               loading={rerunning}
               disabled={!canRerun}
               onClick={onRerun}
             >
               Rerun fit
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowRaw((v) => !v)}
-            >
-              {showRaw ? 'Hide raw data' : 'Raw data'}
             </Button>
           </div>
         }
@@ -174,8 +171,6 @@ export function OrgAdminApplicationDetailPage() {
         loading={false}
         error={null}
         onRerunComplete={load}
-        showRaw={showRaw}
-        onToggleRaw={() => setShowRaw((v) => !v)}
       />
     </div>
   )

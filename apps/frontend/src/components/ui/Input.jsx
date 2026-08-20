@@ -1,7 +1,7 @@
 import { cn } from '../../lib/cn'
 
 const fieldClass =
-  'w-full h-11 px-md border border-outline-variant rounded-DEFAULT text-body-sm bg-surface-container-lowest text-on-surface placeholder:text-on-surface-variant/70 focus:outline-none focus:ring-2 focus:ring-primary/35 focus:border-primary disabled:opacity-60'
+  'w-full h-11 px-md border border-outline-variant/90 rounded-lg text-body-sm bg-surface-container-lowest/95 text-on-surface shadow-soft placeholder:text-on-surface-variant/65 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary focus:shadow-focus transition-shadow disabled:opacity-60'
 
 export function Label({ htmlFor, className, children }) {
   return (

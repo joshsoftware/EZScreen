@@ -37,18 +37,20 @@ export function Modal({ open, onClose, title, children, className }) {
       style={{ marginTop: '15vh' }}
       className={cn(
         'backdrop:bg-on-surface/40 backdrop:backdrop-blur-sm',
-        'rounded-xl border border-outline-variant bg-surface-container-lowest shadow-lg',
+        'rounded-2xl border border-outline-variant/80 bg-surface-container-lowest shadow-lift',
         'p-0 max-w-2xl w-full max-h-[85vh] overflow-hidden',
         'open:animate-in open:fade-in-0 open:zoom-in-95',
         className,
       )}
     >
       <div className="flex items-center justify-between px-lg pt-lg pb-sm">
-        <h2 className="font-headline-sm text-headline-sm text-on-surface">{title}</h2>
+        <h2 className="font-headline-sm text-headline-sm text-on-surface tracking-tight">
+          {title}
+        </h2>
         <button
           type="button"
           onClick={() => onClose?.()}
-          className="text-on-surface-variant hover:text-on-surface transition-colors p-xs rounded-DEFAULT"
+          className="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors p-xs rounded-lg"
         >
           <span className="material-symbols-outlined text-[20px]">close</span>
         </button>

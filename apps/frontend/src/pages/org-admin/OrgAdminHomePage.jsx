@@ -4,10 +4,30 @@ import { useAuth } from '../../features/auth/AuthContext'
 import { getOrganizationRequest } from '../../features/org-admin/api'
 import { PageHeader, Panel, StatCard } from '../../components/ui/PageHeader'
 import { Alert } from '../../components/ui/Alert'
-import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Skeleton } from '../../components/ui/Skeleton'
 import { ApiError } from '../../lib/api/client'
+
+const QUICK_LINKS = [
+  {
+    to: '/org-admin/jobs/new',
+    icon: 'add_circle',
+    title: 'Create a job',
+    description: 'Paste a JD and let AI extract skills and requirements.',
+  },
+  {
+    to: '/org-admin/jobs',
+    icon: 'group',
+    title: 'Review applicants',
+    description: 'Open a role to screen resumes and compare AI fit scores.',
+  },
+  {
+    to: '/org-admin/settings',
+    icon: 'tune',
+    title: 'Fit labels',
+    description: 'Define custom Strong / Moderate / Weak score ranges.',
+  },
+]
 
 export function OrgAdminHomePage() {
   const { user } = useAuth()
@@ -50,15 +70,16 @@ export function OrgAdminHomePage() {
 
   const roleLabel =
     user?.role === 'hr' ? 'HR' : user?.role === 'organization_admin' ? 'Org Admin' : user?.role
+  const firstName = user?.first_name?.trim() || 'there'
+  const orgName = loading ? '…' : org?.name || 'your organization'
 
   return (
     <div>
       <PageHeader
-        title="Workspace home"
-        description="You are signed into your organization tenant."
+        title={`Welcome back, ${firstName}`}
+        description={`You’re in ${orgName}. Create openings, screen applicants, and tune fit ratings.`}
         actions={
-          <Button to="/org-admin/jobs/new">
-            <span className="material-symbols-outlined text-[18px]">add</span>
+          <Button to="/org-admin/jobs/new" icon="add">
             Create job
           </Button>
         }
@@ -70,69 +91,56 @@ export function OrgAdminHomePage() {
         </div>
       ) : null}
 
-      <div className="grid gap-md md:grid-cols-3 mb-xl">
-        <StatCard label="Signed in as" value={roleLabel || '—'} />
+      <div className="grid gap-md sm:grid-cols-2 lg:grid-cols-4 mb-xl">
         <StatCard
           label="Organization"
           value={loading ? '…' : org?.name || '—'}
+          hint={org?.domain ? `${org.domain}.ezscreen.io` : roleLabel}
         />
         <StatCard
-          label="Jobs"
-          value={loading ? '…' : org?.job_count ?? '—'}
+          label="Open jobs"
+          value={loading ? '…' : String(org?.job_count ?? 0)}
+          hint="Across your workspace"
+        />
+        <StatCard
+          label="Applications"
+          value={loading ? '…' : String(org?.application_count ?? 0)}
+          hint="All roles"
+        />
+        <StatCard
+          label="Workspace"
+          value={loading ? '…' : org?.is_active ? 'Active' : 'Suspended'}
+          hint={roleLabel}
         />
       </div>
 
-      <Panel title="Session">
+      <Panel title="Get started">
         {loading ? (
-          <div className="space-y-sm">
-            <Skeleton className="h-5 w-2/3" />
-            <Skeleton className="h-5 w-1/2" />
+          <div className="grid gap-md md:grid-cols-3">
+            <Skeleton className="h-28 rounded-xl" />
+            <Skeleton className="h-28 rounded-xl" />
+            <Skeleton className="h-28 rounded-xl" />
           </div>
         ) : (
-          <dl className="grid gap-md sm:grid-cols-2 text-body-sm">
-            <div>
-              <dt className="text-on-surface-variant mb-xs">Email</dt>
-              <dd className="text-on-surface">{user?.email}</dd>
-            </div>
-            <div>
-              <dt className="text-on-surface-variant mb-xs">Role</dt>
-              <dd>
-                <Badge>{roleLabel}</Badge>
-              </dd>
-            </div>
-            <div>
-              <dt className="text-on-surface-variant mb-xs">Organization ID</dt>
-              <dd className="font-mono text-label-md break-all">
-                {user?.organization_id || '—'}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-on-surface-variant mb-xs">Domain</dt>
-              <dd className="text-on-surface">{org?.domain || '—'}</dd>
-            </div>
-            <div>
-              <dt className="text-on-surface-variant mb-xs">Organization status</dt>
-              <dd>
-                {org ? (
-                  <Badge tone={org.is_active ? 'success' : 'danger'}>
-                    {org.is_active ? 'Active' : 'Suspended'}
-                  </Badge>
-                ) : (
-                  '—'
-                )}
-              </dd>
-            </div>
-          </dl>
+          <div className="grid gap-md md:grid-cols-3">
+            {QUICK_LINKS.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className="group rounded-xl border border-outline-variant/80 bg-surface-container-low/50 p-md shadow-soft transition-all hover:-translate-y-0.5 hover:border-secondary/50 hover:shadow-lift"
+              >
+                <span className="mb-sm inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary-container text-on-primary-container transition-colors group-hover:bg-primary group-hover:text-on-primary">
+                  <span className="material-symbols-outlined text-[22px]">{item.icon}</span>
+                </span>
+                <p className="font-label-md text-label-md text-on-surface mb-xs">
+                  {item.title}
+                </p>
+                <p className="text-body-sm text-on-surface-variant">{item.description}</p>
+              </Link>
+            ))}
+          </div>
         )}
       </Panel>
-
-      <p className="mt-lg text-body-sm text-on-surface-variant">
-        Open{' '}
-        <Link to="/org-admin/jobs" className="text-secondary hover:underline">
-          Jobs
-        </Link>{' '}
-        to list, create, or update openings. Applicants and interviews come next.
-      </p>
     </div>
   )
 }

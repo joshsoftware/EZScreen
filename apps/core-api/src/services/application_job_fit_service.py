@@ -8,7 +8,6 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from src.models.application import Application
-from src.models.enums import ApplicationStatus
 from src.models.job_description import JobDescription
 from src.schemas.application import JobFitRunResponse
 from src.services.application_ai_service import call_match_resume_jd
@@ -107,16 +106,12 @@ def apply_job_fit(
         if flat_analysis:
             application.job_fit_analysis = flat_analysis
 
-    if application.status == ApplicationStatus.applied:
-        application.status = ApplicationStatus.scored
-
     db.add(application)
     logger.info(
-        "Job-fit success for application %s: score=%s, yoe=%s, status=%s",
+        "Job-fit success for application %s: score=%s, yoe=%s",
         application.id,
         application.resume_score,
         application.candidate_yoe,
-        application.status.value,
     )
 
 

@@ -74,6 +74,11 @@ const OrgAdminApplicationDetailPage = lazy(() =>
     default: m.OrgAdminApplicationDetailPage,
   })),
 )
+const OrgAdminSettingsPage = lazy(() =>
+  import('./pages/org-admin/OrgAdminSettingsPage').then((m) => ({
+    default: m.OrgAdminSettingsPage,
+  })),
+)
 
 function Lazy({ children }) {
   return <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
@@ -234,6 +239,14 @@ export default function App() {
                     <OrgAdminProvisionHrPage />
                   </Lazy>
                 </RequireRole>
+              }
+            />
+            <Route
+              path="settings"
+              element={
+                <Lazy>
+                  <OrgAdminSettingsPage />
+                </Lazy>
               }
             />
           </Route>

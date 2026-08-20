@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { JobForm } from '../../features/jobs/JobForm'
+import { JobSkillsEditor } from '../../features/jobs/JobSkillsEditor'
 import { getJobApplicantsRequest, getJobRequest, updateJobRequest } from '../../features/jobs/api'
 import { ApplicantsTable } from '../../features/jobs/ApplicantsTable'
 import { ResumeBulkUpload } from '../../features/jobs/ResumeBulkUpload'
@@ -10,12 +11,15 @@ import {
   applicantScore,
   isPendingApplicant,
   jobSubtitle,
+  topFitLabelId,
 } from '../../features/jobs/applicationFields'
+import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
   formatJobStatus,
   jobStatusTone,
   jobToFormValues,
 } from '../../features/jobs/jobFields'
+import { skillsFromJob } from '../../features/jobs/jobParsedFields'
 import { ApiError } from '../../lib/api/client'
 import { Alert } from '../../components/ui/Alert'
 import { Badge } from '../../components/ui/Badge'
@@ -29,11 +33,15 @@ const POLL_TIMEOUT_MS = 120000
 
 export function OrgAdminJobDetailPage() {
   const { jobId = '' } = useParams()
+  const { fitLabels } = useOrgSettings()
+  const topLabelId = topFitLabelId(fitLabels)
   const [job, setJob] = useState(null)
   const [error, setError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [showEditJob, setShowEditJob] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
+  const [editSkills, setEditSkills] = useState({ must_have: [], good_to_have: [] })
+  const [skillsSubmitting, setSkillsSubmitting] = useState(false)
   const [applicants, setApplicants] = useState([])
   const [applicantsLoading, setApplicantsLoading] = useState(true)
   const [applicantsError, setApplicantsError] = useState(null)
@@ -103,6 +111,12 @@ export function OrgAdminJobDetailPage() {
   }, [job])
 
   useEffect(() => {
+    if (showEditJob && job) {
+      setEditSkills(skillsFromJob(job))
+    }
+  }, [showEditJob, job])
+
+  useEffect(() => {
     if (!queueWatch || !jobId) return undefined
 
     let cancelled = false
@@ -145,11 +159,23 @@ export function OrgAdminJobDetailPage() {
       await updateJobRequest(jobId, payload)
       toast.success('Job updated')
       await load()
-      setShowEditJob(false)
     } catch (err) {
       throw err instanceof ApiError ? err : new Error('Failed to update job')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function onSkillsSubmit() {
+    setSkillsSubmitting(true)
+    try {
+      await updateJobRequest(jobId, { skills: editSkills })
+      toast.success('Skill years updated')
+      await load()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Failed to save skills')
+    } finally {
+      setSkillsSubmitting(false)
     }
   }
 
@@ -219,15 +245,13 @@ export function OrgAdminJobDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-sm">
             <Badge tone={jobStatusTone(job.status)}>{formatJobStatus(job.status)}</Badge>
-            <Button
-              variant="primary"
-              onClick={() => setShowUploadModal(true)}
-            >
+            <Button icon="upload_file" onClick={() => setShowUploadModal(true)}>
               Upload resumes
             </Button>
             {canEditJd ? (
               <Button
                 variant="secondary"
+                icon={showEditJob ? 'close' : 'edit'}
                 onClick={() => setShowEditJob((value) => !value)}
               >
                 {showEditJob ? 'Hide job settings' : 'Edit job'}
@@ -266,8 +290,8 @@ export function OrgAdminJobDetailPage() {
         <StatCard
           label="Top fit"
           value={topFit > 0 ? topFit.toFixed(1) : '—'}
-          selected={fitFilter === 'strong'}
-          onClick={() => setFitFilter('strong')}
+          selected={fitFilter === topLabelId}
+          onClick={() => setFitFilter(topLabelId || 'all')}
         />
       </div>
 
@@ -313,8 +337,19 @@ export function OrgAdminJobDetailPage() {
             initialValues={jobToFormValues(job)}
             onSubmit={onSubmit}
             submitting={submitting}
-            submitLabel="Save changes"
+            submitLabel="Save details"
+            submittingLabel="Parsing skills…"
           />
+          <div className="mt-lg pt-lg border-t border-outline-variant">
+            <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md">Skill years</h3>
+            <JobSkillsEditor
+              skills={editSkills}
+              onChange={setEditSkills}
+              onSubmit={onSkillsSubmit}
+              submitting={skillsSubmitting}
+              submitLabel="Save skill years"
+            />
+          </div>
         </Panel>
       ) : null}
     </div>

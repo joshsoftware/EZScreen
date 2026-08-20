@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
+from html import unescape
 from uuid import UUID
 
 import httpx
@@ -14,7 +16,7 @@ from src.models.enums import JobStatus, UserRole
 from src.models.job_description import JobDescription
 from src.models.organization import Organization
 from src.models.user import User
-from src.schemas.job import JobCreate, JobUpdate
+from src.schemas.job import JobCreate, JobSkills, JobUpdate
 
 _JD_PARSE_FIELDS = (
     "title",
@@ -24,7 +26,6 @@ _JD_PARSE_FIELDS = (
     "location",
     "experience_min",
     "experience_max",
-    "skills",
 )
 
 __all__ = [
@@ -93,6 +94,25 @@ def _apply_status_timestamps(job: JobDescription, new_status: JobStatus) -> None
         job.closed_at = None
 
 
+def _skills_dict(skills: JobSkills | dict | None) -> dict | None:
+    if skills is None:
+        return None
+    if isinstance(skills, JobSkills):
+        return skills.model_dump()
+    if isinstance(skills, dict):
+        return JobSkills.model_validate(skills).model_dump()
+    return None
+
+
+def _apply_skills(job: JobDescription, skills: JobSkills | dict | None) -> None:
+    payload = _skills_dict(skills)
+    job.skills = payload
+    parsed = dict(job.parsed_jd) if isinstance(job.parsed_jd, dict) else {}
+    if payload is not None:
+        parsed["skills"] = payload
+        job.parsed_jd = parsed
+
+
 def create_job(
     db: Session,
     *,
@@ -101,7 +121,7 @@ def create_job(
     data: JobCreate,
 ) -> JobDescription:
     _assert_org_active(db, organization_id)
-    payload = data.model_dump(exclude={"organization_id"})
+    payload = data.model_dump(exclude={"organization_id", "skills"})
     parsed_jd = _call_parse_jd(data)
     job = JobDescription(
         organization_id=organization_id,
@@ -109,6 +129,8 @@ def create_job(
         parsed_jd=parsed_jd,
         **payload,
     )
+    if data.skills is not None:
+        _apply_skills(job, data.skills)
     _apply_status_timestamps(job, job.status)
     db.add(job)
     db.commit()
@@ -118,6 +140,8 @@ def create_job(
 
 def update_job(db: Session, job: JobDescription, data: JobUpdate) -> JobDescription:
     payload = data.model_dump(exclude_unset=True)
+    skills = payload.pop("skills", None)
+    skills_set = "skills" in data.model_fields_set
     new_status = payload.get("status")
     for key, value in payload.items():
         setattr(job, key, value)
@@ -125,6 +149,8 @@ def update_job(db: Session, job: JobDescription, data: JobUpdate) -> JobDescript
         _apply_status_timestamps(job, new_status)
     if any(field in payload for field in _JD_PARSE_FIELDS):
         job.parsed_jd = _call_parse_jd(job)
+    if skills_set:
+        _apply_skills(job, skills)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -135,16 +161,27 @@ def _enum_value(value: object) -> object:
     return value.value if hasattr(value, "value") else value
 
 
+def _html_to_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = re.sub(r"(?i)<br\s*/?>", "\n", value)
+    text = re.sub(r"(?i)</(p|div|h[1-6]|li)>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = unescape(text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip() or None
+
+
 def _jd_parse_body(source: JobCreate | JobDescription) -> dict:
     return {
         "title": source.title,
-        "description": source.description,
+        "description": _html_to_text(source.description) or source.description,
         "job_type": _enum_value(source.job_type),
         "work_type": _enum_value(source.work_type),
         "location": source.location,
         "experience_min": source.experience_min,
         "experience_max": source.experience_max,
-        "skills": source.skills,
         "status": _enum_value(source.status),
     }
 

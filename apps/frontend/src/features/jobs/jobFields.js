@@ -33,7 +33,6 @@ export const EMPTY_JOB_FORM = {
   location: '',
   experience_min: '',
   experience_max: '',
-  skills: '',
   status: 'draft',
 }
 
@@ -89,7 +88,6 @@ export function jobToFormValues(job) {
     location: job.location ?? '',
     experience_min: job.experience_min == null ? '' : String(job.experience_min),
     experience_max: job.experience_max == null ? '' : String(job.experience_max),
-    skills: job.skills ?? '',
     status: job.status ?? 'draft',
   }
 }
@@ -97,6 +95,12 @@ export function jobToFormValues(job) {
 function emptyToNull(value) {
   const trimmed = typeof value === 'string' ? value.trim() : value
   return trimmed ? trimmed : null
+}
+
+function emptyHtmlToNull(value) {
+  if (typeof value !== 'string') return null
+  const text = value.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim()
+  return text ? value : null
 }
 
 function parseOptionalInt(value) {
@@ -125,13 +129,12 @@ export function formValuesToPayload(values) {
 
   return {
     title,
-    description: emptyToNull(values.description),
+    description: emptyHtmlToNull(values.description),
     job_type: emptyToNull(values.job_type),
     work_type: emptyToNull(values.work_type),
     location: emptyToNull(values.location),
     experience_min: experienceMin,
     experience_max: experienceMax,
-    skills: emptyToNull(values.skills),
     status: values.status || 'draft',
   }
 }
