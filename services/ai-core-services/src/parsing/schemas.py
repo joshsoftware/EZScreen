@@ -32,11 +32,16 @@ class Experience(BaseModel):
     total_years: Optional[float] = None
     roles: List[Role] = Field(default_factory=list)
 
+class CandidateSkillExperience(BaseModel):
+    skill: str
+    years: Optional[float] = None
+
 class ParsedResumeData(BaseModel):
     personal_info: Optional[PersonalInfo] = None
     primary_skills: List[str] = Field(default_factory=list)
     secondary_skills: List[str] = Field(default_factory=list)
     domain_expertise: List[str] = Field(default_factory=list)
+    skill_experience: List[CandidateSkillExperience] = Field(default_factory=list)
     experience: Experience = Field(default_factory=Experience)
     education_certificates: List[EducationCertificate] = Field(default_factory=list)
 
@@ -63,7 +68,7 @@ class SkillRequirement(BaseModel):
 
 class JDSkills(BaseModel):
     must_have: List[SkillRequirement] = Field(default_factory=list)
-    good_to_have: List[str] = Field(default_factory=list)
+    good_to_have: List[SkillRequirement] = Field(default_factory=list)
 
 class ParsedJDData(BaseModel):
     title: Optional[str] = None

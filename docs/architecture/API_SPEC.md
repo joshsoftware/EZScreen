@@ -448,7 +448,10 @@ Response 200:
         {"skill": "Spring Boot", "required_years": null},
         {"skill": "PostgreSQL", "required_years": null}
       ],
-      "good_to_have": ["Docker", "AWS"]
+      "good_to_have": [
+        {"skill": "Docker", "required_years": null},
+        {"skill": "AWS", "required_years": null}
+      ]
     },
     "qualifications": ["Bachelor Degree"],
     "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
@@ -494,7 +497,10 @@ Request:
           {"skill": "Spring Boot", "required_years": null},
           {"skill": "PostgreSQL", "required_years": null}
         ],
-        "good_to_have": ["Docker", "AWS"]
+        "good_to_have": [
+          {"skill": "Docker", "required_years": null},
+          {"skill": "AWS", "required_years": null}
+        ]
       },
       "qualifications": ["Bachelor Degree"],
       "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
@@ -533,7 +539,10 @@ Response 201:
         {"skill": "Spring Boot", "required_years": null},
         {"skill": "PostgreSQL", "required_years": null}
       ],
-      "good_to_have": ["Docker", "AWS"]
+      "good_to_have": [
+        {"skill": "Docker", "required_years": null},
+        {"skill": "AWS", "required_years": null}
+      ]
     },
     "qualifications": ["Bachelor Degree"],
     "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
@@ -627,7 +636,10 @@ Response 200:
         {"skill": "Spring Boot", "required_years": null},
         {"skill": "PostgreSQL", "required_years": null}
       ],
-      "good_to_have": ["Docker", "AWS"]
+      "good_to_have": [
+        {"skill": "Docker", "required_years": null},
+        {"skill": "AWS", "required_years": null}
+      ]
     },
     "qualifications": ["Bachelor Degree"],
     "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
@@ -1171,6 +1183,12 @@ Response 200:
     "primary_skills": [],
     "secondary_skills": [],
     "domain_expertise": [],
+    "skill_experience": [
+      {
+        "skill": "Java",
+        "years": 4.5
+      }
+    ],
     "experience": {},
     "education_certificates": []
   }
@@ -1225,6 +1243,15 @@ Response 200:
           "skill": "Java",
           "required_years": 3.0,
           "candidate_years": 4.0,
+          "skill_experience_ratio": 1.0,
+          "meets_requirement": true
+        }
+      ],
+      "good_to_have_experience": [
+        {
+          "skill": "Docker",
+          "required_years": null,
+          "candidate_years": 2.0,
           "skill_experience_ratio": 1.0,
           "meets_requirement": true
         }

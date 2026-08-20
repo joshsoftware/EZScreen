@@ -90,6 +90,7 @@ services:
       - MINIO_BUCKET_NAME=resumes
     volumes:
       - rapidocr_models:/usr/local/lib/python3.11/site-packages/rapidocr/models
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy
@@ -115,3 +116,4 @@ volumes:
   pgdata:
   miniodata:
   rapidocr_models:
+  hf_cache:

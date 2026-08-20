@@ -52,32 +52,32 @@ __JD_JSON__
 1. Must-Have Skills (40 Points):
    - Calculate the percentage of JD must-have skills found in the resume.
    - Multiply that percentage by 40.
-   - A skill is considered found when there is explicit evidence in the candidate's primary_skills, secondary_skills, or experience.
+   - A skill is considered found (and MUST be placed in `matched_skills`) if it is present anywhere in the candidate's `primary_skills` or `secondary_skills` arrays, REGARDLESS of whether they have 0.0 years of experience with it. If they listed it, they possess the baseline skill.
    - Normalize equivalent technology names before matching.
    - Do not infer a skill from a job title.
 
-2. Relevant Experience (30 Points):
-   - Calculate Relevant Experience ONLY by comparing the candidate's professional experience with the JD's MUST-HAVE skills and their required years.
-   - For each JD must-have skill, identify the candidate's experience with that skill using experience.roles[].highlights and the corresponding role dates/years.
-   - A skill counts as professional experience if the role's title or highlights show that the candidate used it, or if it can be strongly inferred that they applied this skill during that role.
-   - Do not use primary_skills or secondary_skills alone to determine years of experience without matching it to a specific role.
-   - If the same must-have skill appears in multiple roles, combine the relevant experience periods without double-counting overlapping periods.
-   - If the candidate has no role-specific evidence for a required must-have skill, candidate_years = 0.0.
-   - Calculate the skill_experience_ratio for each JD must-have skill using these rules:
-     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate HAS experience: give ratio as 1.0
+2. Relevant Experience (30 Points Total: 20 for Must-Have, 10 for Good-To-Have):
+   - Calculate Relevant Experience by comparing the candidate's `skill_experience` array with the JD's must-have and good-to-have skill requirements.
+   - For each JD skill, identify the candidate's candidate_years from the parsed_resume's `skill_experience` array. If the skill is not in the array, candidate_years = 0.0.
+   - Calculate the skill_experience_ratio for each JD skill using these rules:
+     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate HAS experience (> 0.0): give ratio as 1.0
      * If the required experience is NOT mentioned in the JD for a particular skill and the candidate has NO experience: give ratio as 0.0
      * If the required experience IS mentioned in the JD for a particular skill and the candidate has LESS experience than required: give ratio as candidate_years / required_years
      * If the required experience IS mentioned in the JD for a particular skill and the candidate has MORE or EQUAL experience than required: give ratio as 1.0
-   - Calculate experience_score strictly using this exact formula:
-     experience_score = (Sum of all skill_experience_ratios / total number of must-have skills) * 30
+   - Calculate must-have experience strictly using this exact formula:
+     must_have_experience_score = (Sum of all skill_experience_ratios for must-have skills / total number of must-have skills) * 20
+   - Calculate good-to-have experience strictly using this exact formula:
+     good_to_have_experience_score = (Sum of all skill_experience_ratios for good-to-have skills / total number of good-to-have skills) * 10
+     (If there are no good-to-have skills in the JD, good_to_have_experience_score = 10)
+   - experience_score = must_have_experience_score + good_to_have_experience_score
    - Round experience_score to 2 decimal places.
-   - For each skill in must_have_experience, set `meets_requirement` to `true` ONLY IF `skill_experience_ratio` >= 1.0, otherwise `false`.
+   - For each skill in `must_have_experience` and `good_to_have_experience`, set `meets_requirement` to `true` ONLY IF `skill_experience_ratio` >= 1.0, otherwise `false`.
    - Set `experience_match` to `true` if at least 75% of the must-have skills have `meets_requirement` set to `true`. Otherwise, set it to `false`.
-   - Do not use the candidate's total_years alone to award experience points. The score must reflect experience specifically with the JD's must-have skills.
 
 3. Good-to-Have Skills (20 Points):
    - Calculate the percentage of JD good-to-have skills found.
    - Multiply that percentage by 20.
+   - A skill is considered found (and MUST be placed in `matched_skills`) if it is present anywhere in the candidate's `primary_skills` or `secondary_skills` arrays, REGARDLESS of whether they have 0.0 years of experience with it.
    - Normalize equivalent technology names before matching.
    - Do not infer a skill from a job title.
 
@@ -92,14 +92,19 @@ __JD_JSON__
 ### Instructions:
 
 1. Compare candidate's skills with JD must-have and good-to-have skills.
-2. Calculate Relevant Experience specifically from the candidate's experience with the JD's must-have skills and their required years.
-3. Use role highlights and role dates/years as the evidence for skill-specific experience.
-4. Systematically calculate the score for each of the 4 criteria.
+2. Calculate Relevant Experience specifically using the candidate's `skill_experience` array against the JD's must-have and good-to-have skills and their required years.
+3. Systematically calculate the score for each of the 4 criteria.
 5. Sum the scores to get a total out of 100.
 6. Convert the total to a 0.0–10.0 scale:
    match_score = total_score / 10
-7. Output reasoning in 2–4 short bullet points.
-8. Do not change the predefined weighting: 40 + 30 + 20 + 10 = 100.
+7. Output highly detailed reasoning in 4-6 bullet points written in plain, human-readable language suitable for a non-technical recruiter. DO NOT use technical terms like "ratio", "score", "formula", "0.0", or "1.0" in the reasoning. Instead, write naturally like a human recruiter would explain the candidate's fit. For example:
+   - GOOD: "The candidate has strong Java experience with over 14 years of hands-on work, well exceeding the job requirements."
+   - GOOD: "The candidate lists PostgreSQL as a skill but has no professional work experience using it in any of their roles."
+   - GOOD: "Experience gap in Spring Boot: the candidate has 2 years, but the job requires at least 3 years."
+   - BAD: "Experience ratios for must-have skills are 1.0 for Java and 0.0 for PostgreSQL."
+   - BAD: "skill_experience_ratio is 0.67 for Spring Boot."
+8. CRITICAL RULE: Never put a skill in `missing_skills` if it exists in `primary_skills` or `secondary_skills`, even if the candidate has 0.0 years of experience with it. If it is in their skills array, it MUST go into `matched_skills`.
+9. Do not change the predefined weighting: 40 + 30 + 20 + 10 = 100.
 
 ### Output Format (STRICT JSON):
 
@@ -112,9 +117,11 @@ __JD_JSON__
   },
   "match_score": 8.15,
   "reasoning": [
-    "Strong coverage of the JD's must-have skills.",
-    "The candidate has relevant experience with most required skills but has less experience than required for one must-have skill.",
-    "Qualifications and good-to-have skills are largely aligned with the JD."
+    "The candidate matches all core must-have skills including Java, Python, and SQL, showing strong technical alignment.",
+    "Missing critical must-have skill: AWS — not found anywhere in the candidate's resume.",
+    "Experience gap in Spring Boot: the candidate has 2 years of hands-on experience, but the role requires at least 3 years.",
+    "Good coverage of nice-to-have skills, with practical experience in Docker and Kubernetes.",
+    "Qualification requirements fully met with a Bachelor's degree in Computer Science."
   ],
   "matched_skills": {
     "must_have": ["..."],
@@ -131,13 +138,15 @@ __JD_JSON__
       "candidate_years": 4.0,
       "skill_experience_ratio": 1.0,
       "meets_requirement": true
-    },
+    }
+  ],
+  "good_to_have_experience": [
     {
-      "skill": "Spring Boot",
-      "required_years": 3.0,
+      "skill": "Docker",
+      "required_years": null,
       "candidate_years": 2.0,
-      "skill_experience_ratio": 0.67,
-      "meets_requirement": false
+      "skill_experience_ratio": 1.0,
+      "meets_requirement": true
     }
   ],
   "qualification_match": true,

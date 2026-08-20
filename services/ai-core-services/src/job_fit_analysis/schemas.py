@@ -18,7 +18,7 @@ class SkillCategorization(BaseModel):
     must_have: List[str] = Field(default_factory=list)
     good_to_have: List[str] = Field(default_factory=list)
 
-class MustHaveExperience(BaseModel):
+class SkillMatchExperience(BaseModel):
     skill: str
     required_years: Optional[float] = None
     candidate_years: Optional[float] = None
@@ -31,7 +31,8 @@ class MatchScore(BaseModel):
     reasoning: List[str] = Field(..., description="Bullet points explaining the reasoning")
     matched_skills: SkillCategorization
     missing_skills: SkillCategorization
-    must_have_experience: List[MustHaveExperience] = Field(default_factory=list)
+    must_have_experience: List[SkillMatchExperience] = Field(default_factory=list)
+    good_to_have_experience: List[SkillMatchExperience] = Field(default_factory=list)
     qualification_match: bool
     experience_match: bool
 

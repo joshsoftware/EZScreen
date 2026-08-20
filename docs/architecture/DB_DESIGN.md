@@ -355,10 +355,12 @@ erDiagram
   }},
   "skills": {{
     "must_have": [
-      {{"skill": "skill1", "required_years": null}},
-      {{"skill": "skill2", "required_years": 3.0}}
+      {"skill": "skill1", "required_years": null},
+      {"skill": "skill2", "required_years": 3.0}
     ],
-    "good_to_have": ["skill1", "skill2"]
+    "good_to_have": [
+      {"skill": "skill1", "required_years": null}
+    ]
   },
   "qualifications": ["degree1", "degree2"],
   "responsibilities": ["resp1", "resp2"],
@@ -379,6 +381,12 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
   "primary_skills": ["string"],
   "secondary_skills": ["string"],
   "domain_expertise": ["string"],
+  "skill_experience": [
+    {
+      "skill": "string",
+      "years": "number or null"
+    }
+  ],
   "relevant_experience": {
     "total_years": "number or null",
     "roles": [
@@ -419,7 +427,8 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
   "reasoning": [
     "point 1",
     "point 2",
-    "point 3"
+    "point 3",
+    "point 4"
   ],
   "matched_skills": {
     "must_have": ["..."],
@@ -434,6 +443,15 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
       "skill": "Java",
       "required_years": 3.0,
       "candidate_years": 4.0,
+      "skill_experience_ratio": 1.0,
+      "meets_requirement": true
+    }
+  ],
+  "good_to_have_experience": [
+    {
+      "skill": "Docker",
+      "required_years": null,
+      "candidate_years": 2.0,
       "skill_experience_ratio": 1.0,
       "meets_requirement": true
     }

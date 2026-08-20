@@ -8,7 +8,8 @@ from src.core.logger import logger
 
 # Restrict OCR to a single concurrent thread to prevent PyTorch OpenMP thread deadlocks,
 # while still offloading it to a background thread so the FastAPI event loop is NOT blocked!
-ocr_semaphore = asyncio.Semaphore(2)
+# Restrict to 1 concurrent OCR extraction to prevent PyTorch CPU thread deadlocks
+ocr_semaphore = asyncio.Semaphore(1)
 
 class ResumeParser:
     def __init__(self):
@@ -92,6 +93,23 @@ SKILLS:
 * Do not place the same normalized skill in both primary_skills and secondary_skills.
 * Do not infer skills from projects or job titles unless the skill is explicitly stated.
 * Normalize obvious naming variations, e.g. "React.js"/"ReactJS" → "React", "Postgres"/"PostgreSQL" → "PostgreSQL".
+
+SKILL-SPECIFIC EXPERIENCE (skill_experience):
+
+* For EVERY skill identified in primary_skills and secondary_skills, determine the candidate's total years of experience with that specific skill.
+* STEP 1 - Check for DIRECT per-skill year statements ONLY:
+  - A valid explicit statement is when the candidate directly associates a specific number of years with ONE specific skill, such as: "Java (5 years)", "7+ years of Python", "Spring Boot - 3 years".
+  - CRITICAL: Do NOT treat professional summary or objective statements as per-skill declarations. For example, "10+ years of experience in enterprise development using Java, J2EE, Hibernate, JDBC" means the candidate has 10+ years of TOTAL career experience, NOT 10+ years in each of Java, J2EE, Hibernate, and JDBC individually. Ignore such summary statements when calculating per-skill experience.
+  - If a valid direct per-skill statement is found, use that exact number.
+* STEP 2 - If no direct per-skill statement exists, calculate from ROLE HIGHLIGHTS ONLY:
+  - Look at each role in the "Professional Experience" / "Work Experience" section.
+  - A skill is considered "used in a role" ONLY if it is explicitly mentioned in that role's bullet points/highlights. Do NOT assume a skill was used in a role just because the role title sounds related.
+  - Sum the durations (years) of all roles where the skill is explicitly mentioned in the highlights.
+  - Subtract overlapping role durations to prevent double-counting.
+* STEP 3 - Apply safety checks:
+  - The calculated years for any skill MUST NEVER exceed the candidate's `total_years` of professional experience. Cap it if it does.
+  - Round the final skill experience to 1 decimal place.
+* If a skill appears ONLY in a "Technical Skills" section or summary but is NOT mentioned in any role highlight or project, assign it 0.0 years.
 
 WORK EXPERIENCE:
 
@@ -188,6 +206,12 @@ SCHEMA:
 "primary_skills": ["string"],
 "secondary_skills": ["string"],
 "domain_expertise": ["string"],
+"skill_experience": [
+{
+"skill": "string",
+"years": "number or null"
+}
+],
 "experience": {
 "total_years": "number or null",
 "roles": [
