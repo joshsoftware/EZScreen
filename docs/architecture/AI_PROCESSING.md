@@ -21,7 +21,11 @@
 
 ## 1. Pipeline Overview
 
-There are two AI pipelines for Phase 1. Both follow the same pattern: **API enqueues task → broker delivers → worker processes → worker writes results to DB**.
+There are two AI pipelines for Phase 1.
+
+**Pipeline A (JD)** runs once per job (create/publish): form text → `parsed_jd` on `job_descriptions`.
+
+**Pipeline B (resume)** runs once per file, independently (HR bulk or public apply). Core-api returns 202 on bulk; each resume is parse → candidate + application → job-fit (`parsed_jd` vs `parsed_resume`). Matching does not wait for other files.
 
 ```mermaid
 ---
@@ -31,22 +35,19 @@ config:
 flowchart LR
  subgraph PA["Pipeline A: Job Description Parsing"]
     direction LR
-        PA1["HR uploads JD"]
-        PA2["Backend API<br>saves file to S3<br>creates JD record (draft)"]
-        PA3["Enqueue<br>parse-jd task"]
-        PA4["Worker picks up task"]
-        PA5["① LLM extraction: skills, qualifications,<br>responsibilities, location, type<br>② Fuzzy-map keys to schema<br>③ Write results to DB"]
+        PA1["HR saves job form"]
+        PA2["Core-api stores job"]
+        PA3["AI parse/jd"]
+        PA4["Write parsed_jd on job"]
   end
     PA1 --> PA2
     PA2 --> PA3
     PA3 --> PA4
-    PA4 --> PA5
 
      PA1:::actor
      PA2:::backend
-     PA3:::queue
-     PA4:::queue
-     PA5:::process
+     PA3:::ai
+     PA4:::process
     classDef actor fill:#3b82f6,stroke:#2563eb,stroke-width:2px,color:white
     classDef backend fill:#10b981,stroke:#059669,stroke-width:2px,color:white
     classDef queue fill:#f59e0b,stroke:#d97706,stroke-width:2px,color:white
@@ -61,24 +62,27 @@ config:
   layout: elk
 ---
 flowchart LR
- subgraph PB["Pipeline B: Resume Parsing + Matching"]
+ subgraph PB["Pipeline B: Per-resume parse then job-fit"]
     direction LR
-        PB1["Candidate submits resume"]
-        PB2["Backend API<br>saves file to S3<br>creates application (applied)"]
-        PB3["Enqueue<br>parse-resume task"]
-        PB4["Worker picks up task"]
-        PB5["① Download resume from S3<br>② LLM extraction: primary_skills, secondary_skills,<br>domain_expertise, experience, education, certs<br>③ Calculate total_years<br>④ Fetch JD extracted_data from DB<br>⑤ LLM matching: score, matched/missing skills<br>⑥ Write results to DB"]
+        PB1["HR bulk or candidate apply"]
+        PB2["File on S3"]
+        PB3["AI parse/resume"]
+        PB4["Create candidate + application"]
+        PB5["AI match parsed_jd vs parsed_resume"]
+        PB6["Write score on application"]
   end
     PB1 --> PB2
     PB2 --> PB3
     PB3 --> PB4
     PB4 --> PB5
+    PB5 --> PB6
 
      PB1:::actor
      PB2:::backend
-     PB3:::queue
-     PB4:::queue
-     PB5:::process
+     PB3:::ai
+     PB4:::backend
+     PB5:::ai
+     PB6:::process
 
     classDef actor fill:#3b82f6,stroke:#2563eb,stroke-width:2px,color:white
     classDef backend fill:#10b981,stroke:#059669,stroke-width:2px,color:white
