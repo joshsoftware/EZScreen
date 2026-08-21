@@ -9,14 +9,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     curl \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy project metadata and source needed for hatchling build
-COPY pyproject.toml README.md ./
-COPY src ./src
+# Copy pyproject.toml and README
+COPY pyproject.toml .
+COPY README.md .
 
-# Install dependencies using uv
-RUN uv pip install --system .
+# Install dependencies using pip. Use CPU-only PyTorch index to prevent 4GB NVIDIA CUDA downloads.
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu .
 
 COPY . .
 

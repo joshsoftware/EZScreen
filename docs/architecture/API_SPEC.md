@@ -464,6 +464,41 @@ Response 201:
 
 ### C. Job Description Endpoints (Form Create & Unified Update)
 
+Response 200:
+{
+  "title": "Senior Java Developer",
+  "job_type": "full_time",
+  "work_type": "hybrid",
+  "location": "Bangalore",
+  "experience_min": 3,
+  "experience_max": 5,
+  "skills": "Java, Spring Boot, PostgreSQL, Docker",
+  "parsed_jd": {
+    "title": "Senior Java Developer",
+    "company": null,
+    "company_description": null,
+    "experience_required": {
+      "min_years": 3,
+      "max_years": 5
+    },
+    "skills": {
+      "must_have": [
+        {"skill": "Java", "required_years": 3.0},
+        {"skill": "Spring Boot", "required_years": null},
+        {"skill": "PostgreSQL", "required_years": null}
+      ],
+      "good_to_have": [
+        {"skill": "Docker", "required_years": null},
+        {"skill": "AWS", "required_years": null}
+      ]
+    },
+    "qualifications": ["Bachelor Degree"],
+    "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
+    "location": "Bangalore",
+    "employment_type": "full_time"
+  }
+}
+```
 HR creates jobs by filling the form. There is no JD PDF upload and no `POST /api/v1/jobs/parse`. On create (and on update of JD form fields), core-api calls `POST /internal/v1/parse/jd` and stores `parsed_jd` on `job_descriptions`.
 
 #### POST /api/v1/jobs
@@ -488,7 +523,31 @@ Request:
     "experience_min": 3,
     "experience_max": 5,
     "skills": "Java, Spring Boot, PostgreSQL, Docker",
-    "status": "published"
+    "parsed_jd": {
+      "title": "Senior Java Developer",
+      "company": null,
+      "company_description": null,
+      "experience_required": {
+        "min_years": 3,
+        "max_years": 5
+      },
+      "skills": {
+        "must_have": [
+          {"skill": "Java", "required_years": 3.0},
+          {"skill": "Spring Boot", "required_years": null},
+          {"skill": "PostgreSQL", "required_years": null}
+        ],
+        "good_to_have": [
+          {"skill": "Docker", "required_years": null},
+          {"skill": "AWS", "required_years": null}
+        ]
+      },
+      "qualifications": ["Bachelor Degree"],
+      "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
+      "location": "Bangalore",
+      "employment_type": "full_time"
+    },
+
   }
 }
 
@@ -505,7 +564,31 @@ Response 201:
   "experience_min": 3,
   "experience_max": 5,
   "skills": "Java, Spring Boot, PostgreSQL, Docker",
-  "status": "published"
+  "status": "published",
+  "parsed_jd": {
+    "title": "Senior Java Developer",
+    "company": null,
+    "company_description": null,
+    "experience_required": {
+      "min_years": 3,
+      "max_years": 5
+    },
+    "skills": {
+      "must_have": [
+        {"skill": "Java", "required_years": 3.0},
+        {"skill": "Spring Boot", "required_years": null},
+        {"skill": "PostgreSQL", "required_years": null}
+      ],
+      "good_to_have": [
+        {"skill": "Docker", "required_years": null},
+        {"skill": "AWS", "required_years": null}
+      ]
+    },
+    "qualifications": ["Bachelor Degree"],
+    "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
+    "location": "Bangalore",
+    "employment_type": "full_time"
+  }
 }
 ```
 
@@ -578,6 +661,31 @@ Response 200:
   "experience_min": 3,
   "experience_max": 5,
   "skills": "Java, Spring Boot, PostgreSQL, Docker",
+  "status": "published",
+  "parsed_jd": {
+    "title": "Senior Java Developer",
+    "company": null,
+    "company_description": null,
+    "experience_required": {
+      "min_years": 3,
+      "max_years": 5
+    },
+    "skills": {
+      "must_have": [
+        {"skill": "Java", "required_years": 3.0},
+        {"skill": "Spring Boot", "required_years": null},
+        {"skill": "PostgreSQL", "required_years": null}
+      ],
+      "good_to_have": [
+        {"skill": "Docker", "required_years": null},
+        {"skill": "AWS", "required_years": null}
+      ]
+    },
+    "qualifications": ["Bachelor Degree"],
+    "responsibilities": ["Develop REST APIs", "Optimize DB queries"],
+    "location": "Bangalore",
+    "employment_type": "full_time"
+  }
   "status": "published"
 }
 ```
@@ -1135,7 +1243,7 @@ Response 200:
 
 #### POST /internal/v1/parse/jd
 **Tag**: `Internal Service`  
-**Summary**: Internal JD parsing engine (services/parsing-matching)  
+**Summary**: Internal JD parsing engine (services/ai-core-services)  
 **Operation ID**: `internalParseJD`  
 
 **Called by**: Core API on `POST /api/v1/jobs` (and when JD form fields are updated).
@@ -1148,7 +1256,7 @@ Request:
   },
   "body": {
     "title": "Senior Java Developer",
-    "description": "We are hiring a Senior Java Developer...",
+    "description": "We are hiring...",
     "job_type": "full_time",
     "work_type": "hybrid",
     "location": "Bangalore",
@@ -1164,13 +1272,23 @@ Response 200:
   "status": "success",
   "parsed_jd": {
     "title": "Senior Java Developer",
-    "skills": {
-      "must_have": ["Java", "Spring Boot", "PostgreSQL"],
-      "good_to_have": ["Docker", "AWS", "Kafka"]
+    "company": null,
+    "company_description": null,
+    "experience_required": {
+      "min_years": 3,
+      "max_years": 6
     },
-    "experience_required": { "min_years": 3.0, "max_years": 6.0 }
-  },
-  "error_message": null
+    "skills": {
+      "must_have": [
+        {"skill": "Java", "required_years": 3.0}
+      ],
+      "good_to_have": ["Docker"]
+    },
+    "qualifications": [],
+    "responsibilities": [],
+    "location": "Bangalore",
+    "employment_type": "full_time"
+  }
 }
 ```
 
@@ -1178,7 +1296,7 @@ Core-api persists `parsed_jd` on the job. If `status` is not `success`, job crea
 
 #### POST /internal/v1/parse/resume
 **Tag**: `Internal Service`  
-**Summary**: Download resume from S3 and extract structured candidate details  
+**Summary**: Internal resume parsing engine (services/ai-core-services)  
 **Operation ID**: `internalParseResume`  
 **Called by**: Core API worker (after HR bulk upload or public apply)
 
@@ -1191,42 +1309,28 @@ Request:
     "Content-Type": "application/json"
   },
   "body": {
-    "resume_name": "john-doe.pdf",
-    "resume_path": "orgs/987e6543-e89b-12d3-a456-426614174000/jobs/444e4567-e89b-12d3-a456-426614174000/resumes/a1b2c3d4-john-doe.pdf"
+    "resume_name": "resume.pdf",
+    "resume_path": "applications/123/resumes/resume.pdf"
   }
 }
 
 Response 200:
 {
+  "resume_name": "resume.pdf",
+  "status": "success",
   "parsed_resume": {
-    "candidate_name": "John Doe",
-    "email": "john.doe@example.com",
-    "phone": "+1-555-0188",
-    "summary": "Senior backend engineer with 5 years in Java…",
-    "primary_skills": ["Java", "Spring Boot", "PostgreSQL"],
-    "secondary_skills": ["Docker", "AWS"],
-    "domain_expertise": ["FinTech"],
-    "relevant_experience": {
-      "total_years": 5.0,
-      "roles": [
-        {
-          "title": "Senior Java Developer",
-          "company": "Acme Corp",
-          "start_date": "2021-01",
-          "end_date": null,
-          "years": 3.5,
-          "highlights": ["Built REST APIs", "Owned PostgreSQL schema"]
-        }
-      ]
-    },
-    "education_certificates": [
+    "personal_info": {},
+    "primary_skills": [],
+    "secondary_skills": [],
+    "domain_expertise": [],
+    "skill_experience": [
       {
-        "name": "B.Tech Computer Science",
-        "issuer": "Example University",
-        "year": "2019",
-        "type": "degree"
+        "skill": "Java",
+        "years": 4.5
       }
-    ]
+    ],
+    "experience": {},
+    "education_certificates": []
   }
 }
 ```
@@ -1235,7 +1339,7 @@ Response 200:
 
 #### POST /internal/v1/match/resume-jd
 **Tag**: `Internal Service`  
-**Summary**: Score parsed resume against job requirements  
+**Summary**: Internal candidate-JD matching score calculation (services/ai-core-services)  
 **Operation ID**: `internalMatchResumeJD`  
 **Called by**: Core API worker (after parse succeeds and the application row exists)
 
@@ -1248,8 +1352,8 @@ Request:
     "Content-Type": "application/json"
   },
   "body": {
-    "application_id": "555e4567-e89b-12d3-a456-426614174000",
-    "job_id": "444e4567-e89b-12d3-a456-426614174000",
+    "application_id": "app_123",
+    "job_id": "job_999",
     "parsed_resume": {},
     "parsed_jd": {}
   }
@@ -1257,9 +1361,49 @@ Request:
 
 Response 200:
 {
-  "resume_score": 85.0,
-  "candidate_yoe": 5.0,
-  "job_fit_analysis": {}
+  "application_id": "app_123",
+  "job_id": "job_999",
+  "status": "success",
+    "job_fit_analysis": {
+      "score_breakdown": {
+        "must_have_skills_score": 40.0,
+        "experience_score": 30.0,
+        "good_to_have_skills_score": 20.0,
+        "qualifications_score": 10.0
+      },
+      "match_score": 100.0,
+      "reasoning": [
+        "Candidate meets all must-have skills..."
+      ],
+      "matched_skills": {
+        "must_have": ["Java"],
+        "good_to_have": []
+      },
+      "missing_skills": {
+        "must_have": [],
+        "good_to_have": ["Docker"]
+      },
+      "must_have_experience": [
+        {
+          "skill": "Java",
+          "required_years": 3.0,
+          "candidate_years": 4.0,
+          "skill_experience_ratio": 1.0,
+          "meets_requirement": true
+        }
+      ],
+      "good_to_have_experience": [
+        {
+          "skill": "Docker",
+          "required_years": null,
+          "candidate_years": 2.0,
+          "skill_experience_ratio": 1.0,
+          "meets_requirement": true
+        }
+      ],
+      "qualification_match": true,
+      "experience_match": true
+    }
 }
 ```
 

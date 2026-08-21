@@ -59,6 +59,57 @@ class OllamaClient:
             )
             raise
 
+    async def openai_chat_generate(
+        self,
+        prompt: str,
+        system: Optional[str] = None,
+        temperature: float = 0.2,
+        stream: bool = False,
+        timeout: float = 90.0,
+    ) -> LLMGenerateResponse:
+        # Use OpenAI-compatible chat completions endpoint (For Resume Parsing)
+        endpoint_url = f"{self.url}/v1/chat/completions"
+        
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        payload: Dict[str, Any] = {
+            "model": self.default_model,
+            "messages": messages,
+            "stream": stream,
+            "temperature": temperature,
+            "response_format": {"type": "json_object"}
+        }
+
+        logger.info(
+            "Sending prompt to OpenAI-compatible Chat API",
+            extra={"model": self.default_model, "endpoint": endpoint_url, "temperature": temperature}
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(endpoint_url, json=payload, headers=self._get_headers())
+                response.raise_for_status()
+                data = response.json()
+                
+                # Extract the text content from the OpenAI format
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                
+                # Map back to our internal response schema
+                return LLMGenerateResponse(
+                    model=data.get("model", self.default_model),
+                    response=content,
+                    done=True
+                )
+        except httpx.HTTPError as err:
+            logger.error(
+                "HTTP error during OpenAI-compatible generation",
+                extra={"model": self.default_model, "endpoint": endpoint_url, "error": str(err)}
+            )
+            raise
+
     async def generate_request(self, request: LLMGenerateRequest) -> LLMGenerateResponse:
         return await self.generate(
             prompt=request.prompt,
