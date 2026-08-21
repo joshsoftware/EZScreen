@@ -3,7 +3,7 @@
 > **Version**: 1.0.0  
 > **Production Gateway Base URL**: `https://api.ezscreen.io/api/v1`  
 > **Local Dev Gateway Base URL**: `http://localhost:8000/api/v1`  
-> **Internal Service Base URLs**: `http://parsing-matching:8001/internal/v1`, `http://ai-screening:8002/internal/v1`  
+> **Internal Service Base URLs**: `http://ai-core-services:8002/internal/v1`
 > **Format**: JSON (`Content-Type: application/json`)  
 > **Auth**: Bearer Token (`Authorization: Bearer <jwt>`)
 
@@ -37,7 +37,7 @@
   POST /match      ▼                                      ▼ POST /bot/dispatch & /evaluate
  ┌────────────────────────────────────┐  ┌────────────────────────────────────┐
  │    Parsing & Matching Service      │  │        AI Screening Service        │
- │    (services/parsing-matching)     │  │        (services/ai-screening)      │
+ │          (services/ai-core-services)        │
  └────────────────────────────────────┘  └────────────────────────────────────┘
 ```
 
@@ -1236,8 +1236,8 @@ Response 200:
 
 ## 4. Internal Service APIs (`Internal Service`)
 
-### A. Parsing & Matching Microservice (`services/parsing-matching`)
-* **Base URL**: `http://parsing-matching:8001/internal/v1`
+### A. Unified AI Microservice (`services/ai-core-services`)
+* **Base URL**: `http://ai-core-services:8002/internal/v1`
 
 **Ownership**: All resume text extraction and structured field parsing (email, name, phone, skills, experience, education) lives in this service. Core API stores files on S3, calls parse with `resume_name` + `resume_path`, creates candidate + application from `parsed_resume`, then calls match with stored `parsed_jd` — it does **not** embed parsing or scoring logic.
 
@@ -1409,12 +1409,12 @@ Response 200:
 
 ---
 
-### B. AI Screening Microservice (`services/ai-screening`)
-* **Base URL**: `http://ai-screening:8002/internal/v1`
+### B. Meeting Bot API endpoints
+* **Base URL**: `http://ai-core-services:8002/internal/v1`
 
 #### POST /internal/v1/screening/questions/generate
 **Tag**: `Internal Service`  
-**Summary**: Internal session question generation (services/ai-screening)  
+**Summary**: Internal session question generation (services/ai-core-services)  
 **Operation ID**: `internalGenerateQuestions`  
 
 ```json
@@ -1437,7 +1437,7 @@ Response 200:
 
 #### POST /internal/v1/screening/analysis/evaluate
 **Tag**: `Internal Service`  
-**Summary**: Internal transcript screening evaluation (services/ai-screening)  
+**Summary**: Internal transcript screening evaluation (services/ai-core-services)  
 **Operation ID**: `internalEvaluateTranscript`  
 
 ```json

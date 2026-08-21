@@ -60,11 +60,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://ezscreen_user:ezscreen_password@db:5432/ezscreen_db
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minio_admin
-      - MINIO_SECRET_KEY=minio_password
-      - MINIO_SECURE=False
+      - DATABASE_URL=${DOCKER_DATABASE_URL:-postgresql://ezscreen_user:ezscreen_password@db:5432/ezscreen_db}
+      - MINIO_ENDPOINT=${DOCKER_MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minio_admin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minio_password}
+      - MINIO_SECURE=${MINIO_SECURE:-False}
     depends_on:
       db:
         condition: service_healthy
@@ -80,12 +80,24 @@ services:
     ports:
       - "8002:8002"
     environment:
-      - DATABASE_URL=postgresql://ezscreen_user:ezscreen_password@db:5432/ezscreen_db
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minio_admin
-      - MINIO_SECRET_KEY=minio_password
-      - MINIO_SECURE=False
-      - MINIO_BUCKET_NAME=resumes
+      # Infrastructure Overrides for Docker Network (Configurable)
+      - DATABASE_URL=${DOCKER_DATABASE_URL:-postgresql://ezscreen_user:ezscreen_password@db:5432/ezscreen_db}
+      - MINIO_ENDPOINT=${DOCKER_MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minio_admin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minio_password}
+      - MINIO_SECURE=${MINIO_SECURE:-False}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-resumes}
+      
+      # Passed through from the host/root environment (.env)
+      - SERVICE_NAME=${SERVICE_NAME:-ai-core-services}
+      - PORT=${PORT:-8002}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WEBSOCKET_URL=${WEBSOCKET_URL}
+      - OLLAMA_URL=${OLLAMA_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - ATTENDEE_API_KEY=${ATTENDEE_API_KEY}
+      - ATTENDEE_API_URL=${ATTENDEE_API_URL}
     volumes:
       - rapidocr_models:/usr/local/lib/python3.11/site-packages/rapidocr/models
       - hf_cache:/root/.cache/huggingface

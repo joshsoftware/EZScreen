@@ -84,7 +84,7 @@ flowchart TB
 | Pattern | Applied to | Rationale |
 | :--- | :--- | :--- |
 | **Modular Monolith** | Whole System | Code is structured into decoupled modules inside a Monorepo. Enables fast MVP deployment with a shared database while preserving clear boundaries for independent microservice extraction. |
-| **Domain Isolation** | Core API, Parsing, Screening | `core-api`, `parsing-matching`, and `ai-screening` operate as isolated domain packages with strict contract boundaries. |
+| **Domain Isolation** | Core API, Parsing, Screening | `core-api` and `ai-core-services` operate as isolated domain packages with strict contract boundaries. |
 | **Shared Storage MVP** | PostgreSQL & S3 | Shared database across modules for single-transaction ACID consistency and high-speed relational JOINs. |
 
 ---
@@ -98,13 +98,10 @@ The platform is designed as a **Modular Monolith inside a Monorepo**. This guara
 1. **Core Backend Application (`apps/core-api`)**:
    * System gatekeeper handling Authentication, Multi-tenant Organization Scoping (`organization_id`), User Provisioning, Public Job Board API, Interview Scheduling, and Webhook routing.
 
-2. **Parsing & Matching Engine (`services/parsing-matching`)**:
-   * Pure document parsing and matching engine. Extracts structured `parsed_jd` requirements, parses candidate resumes (`parsed_resume`), and computes candidate-JD matching scores (`job_fit_analysis`).
-   * *Standalone Capability*: Can be packaged and deployed independently as a "Resume & JD Parsing API".
-
-3. **AI Screening Microservice (`services/ai-screening`)**:
+2. **Unified AI Microservice (`services/ai-core-services`)**:
+   * Combines pure document parsing (Docling) and matching engine (extracts structured `parsed_jd` requirements, parses candidate resumes, computes candidate-JD matching scores).
    * Handles static interview question generation (`generated_questions`), STT-LLM (`gemma4:31b`)-TTS conversation pipeline, Attendee bot coordination, and transcript Q&A evaluation (`interview_analysis`).
-   * *Standalone Capability*: Can be deployed independently on GPU infrastructure for AI video/voice interview execution.
+   * *Standalone Capability*: Can be deployed independently on GPU infrastructure as a unified AI engine.
 ---
 
 ## 3. Technology Stack
