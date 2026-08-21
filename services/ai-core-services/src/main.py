@@ -27,6 +27,9 @@ def health_check():
         "environment": settings.environment,
         "modules": ["parsing", "job_fit_analysis", "question_generation", "screening_pipeline", "meeting_bot", "interview_analysis"]    }
 
+from src.api.v1.meeting_bot import router as meeting_bot_router
+
 # Register API Routers
 app.include_router(parsing.router, prefix="/internal/v1/parse")
 app.include_router(matching.router, prefix="/internal/v1/match")
+app.include_router(meeting_bot_router)

@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     minio_secure: bool = False
     minio_bucket_name: str
 
+    # Real-time WebSocket Audio Stream Endpoint
+    websocket_url: str
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),
