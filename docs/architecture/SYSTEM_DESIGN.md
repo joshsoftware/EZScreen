@@ -429,6 +429,44 @@ stateDiagram-v2
     class rejected rejected
 ```
 
+### Workflow 2b: HR Bulk Resume Upload (S3 → parse → application → job-fit)
+
+HR bulk-uploads resumes for a published job. There is no batch poll API. Each file is processed independently.
+
+```mermaid
+sequenceDiagram
+    actor HR as HR User
+    participant F as Frontend (SPA)
+    participant B as Core API
+    participant S3 as MinIO (resumes)
+    participant AI as Parsing & Matching
+
+    HR->>F: Select resume files (PDF/DOCX)
+    F->>B: POST /api/v1/jobs/{id}/applications/upload-urls
+    B-->>F: s3_key + presigned upload_url per file
+    loop each file
+        F->>S3: PUT file to upload_url
+    end
+    F->>B: POST /api/v1/jobs/{id}/applications/bulk
+    B-->>F: 202 { job_id, queued }
+
+    par per resume (independent)
+        B->>AI: POST /internal/v1/parse/resume
+        AI-->>B: parsed_resume
+        Note over B: Create/find candidate<br/>Create application
+        B->>AI: POST /internal/v1/match/resume-jd
+        Note over AI: parsed_jd vs parsed_resume
+        AI-->>B: resume_score + job_fit_analysis
+        Note over B: Save score on application
+    end
+
+    HR->>F: Open applicants
+    F->>B: GET /api/v1/jobs/{id}/applicants
+    B-->>F: Ranked list (scores fill in as workers finish)
+```
+
+Prerequisite: the job already has `parsed_jd` (parsed once on job create/publish). Bulk does not parse the JD.
+
 ### Workflow 3: Session-Based Interview Scheduling, Auto Question Generation & Bot Screening
 
 ```mermaid

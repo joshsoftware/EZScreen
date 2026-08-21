@@ -2,8 +2,107 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer utilities {
-  .bg-gradient-radial {
-    background-image: radial-gradient(var(--tw-gradient-stops));
+:root {
+  --ez-primary: #2b7fd4;
+  --ez-on-surface: #0f2740;
+  --ez-surface: #f4f9ff;
+  --ez-radius: 0.5rem;
+  --ez-shadow-soft: 0 1px 2px rgb(15 39 64 / 0.04), 0 4px 16px rgb(15 39 64 / 0.05);
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  color: inherit;
+}
+
+body {
+  @apply font-sans bg-surface text-on-surface antialiased;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 0% -10%, rgb(43 127 212 / 0.08), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 0%, rgb(74 156 245 / 0.06), transparent 50%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+@layer components {
+  .ez-table-head {
+    @apply py-sm px-md font-label-md text-label-md text-on-surface-variant tracking-wide;
   }
+
+  .ez-table-row {
+    @apply transition-colors hover:bg-surface-container-low/80;
+  }
+}
+
+.font-display-lg,
+.font-headline-md,
+.font-headline-sm,
+.font-label-md,
+.font-mono-sm {
+  font-family: Geist, Inter, system-ui, sans-serif;
+}
+
+.rich-text p {
+  margin: 0 0 0.5rem;
+}
+
+.rich-text p:last-child {
+  margin-bottom: 0;
+}
+
+.rich-text h2,
+.rich-text h3 {
+  margin: 0.75rem 0 0.5rem;
+  font-weight: 600;
+  color: #0f2740;
+}
+
+.rich-text h2 {
+  font-size: 18px;
+  line-height: 26px;
+}
+
+.rich-text h3 {
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.rich-text ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin: 0 0 0.5rem;
+}
+
+.rich-text ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+  margin: 0 0 0.5rem;
+}
+
+.rich-text li {
+  margin: 0.125rem 0;
+}
+
+.rich-text strong {
+  font-weight: 600;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: rgb(15 39 64 / 0.45);
 }
