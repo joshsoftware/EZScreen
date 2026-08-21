@@ -925,10 +925,72 @@ paths:
   # 7. INTERNAL SERVICE APIS (services/ai-core-services)
   # Pure Read-Only Stateless Engine - Zero Direct Database Writes
   # ---------------------------------------------------------------------------
+  /internal/v1/parse/jd:
+    post:
+      tags: [Internal Service]
+      summary: Internal JD parsing engine (services/ai-core-services)
+      operationId: internalParseJD
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                job_type:
+                  type: string
+                work_type:
+                  type: string
+                location:
+                  type: string
+                experience_min:
+                  type: integer
+                experience_max:
+                  type: integer
+                skills:
+                  type: string
+                status:
+                  type: string
+      responses:
+        '200':
+          description: Parsed JD requirements JSON
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /internal/v1/parse/resume:
+    post:
+      tags: [Internal Service]
+      summary: Internal resume parsing engine (services/parsing-matching)
+      operationId: internalParseResume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resume_name:
+                  type: string
+                resume_path:
+                  type: string
+      responses:
+        '200':
+          description: Parsed candidate resume JSON
+          content:
+            application/json:
+              schema:
+                type: object
+
   /internal/v1/match/resume-jd:
     post:
       tags: [Internal Service]
-      summary: Candidate-JD matching score calculation (services/ai-core-services)
+      summary: Internal candidate-JD matching score calculation (services/ai-core-services)
       operationId: internalMatchResumeJD
       requestBody:
         required: true
@@ -937,22 +999,35 @@ paths:
             schema:
               type: object
               properties:
+                application_id:
+                  type: string
+                job_id:
+                  type: string
                 parsed_jd:
                   type: object
                 parsed_resume:
                   type: object
       responses:
         '200':
-          description: Matching result matrix & resume score
+          description: Job fit analysis matching result & score
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  resume_score:
-                    type: number
-                  matching_result:
+                  application_id:
+                    type: string
+                  job_id:
+                    type: string
+                  status:
+                    type: string
+                    example: success
+                  job_fit_analysis:
                     type: object
+                    description: "JSON object matching DB_DESIGN.md matching_result schema"
+                  error_message:
+                    type: string
+                    nullable: true
 
   /internal/v1/screening/questions/generate:
     post:
@@ -1185,7 +1260,7 @@ components:
           example: 85.0
         parsed_resume:
           type: object
-        matching_result:
+        job_fit_analysis:
           type: object
 
     InterviewSessionResponse:

@@ -99,7 +99,7 @@ The platform is designed as a **Modular Monolith inside a Monorepo**. This guara
    * System gatekeeper handling Authentication, Multi-tenant Organization Scoping (`organization_id`), User Provisioning, Public Job Board API, Interview Scheduling, and Webhook routing.
 
 2. **Parsing & Matching Engine (`services/parsing-matching`)**:
-   * Pure document parsing and matching engine. Extracts structured `parsed_jd` requirements, parses candidate resumes (`parsed_resume`), and computes candidate-JD matching scores (`matching_result`).
+   * Pure document parsing and matching engine. Extracts structured `parsed_jd` requirements, parses candidate resumes (`parsed_resume`), and computes candidate-JD matching scores (`job_fit_analysis`).
    * *Standalone Capability*: Can be packaged and deployed independently as a "Resume & JD Parsing API".
 
 3. **AI Screening Microservice (`services/ai-core-services`)**:
@@ -201,13 +201,13 @@ The following requirements constrain the option space regardless of preference:
 | `organizations` | Multi-tenant organization records (`name`, `domain`, `logo_url`) | MVP |
 | `users` | All user accounts (`super_admin`, `organization_admin`, `hr`, `candidate`) | MVP |
 | `job_descriptions` | JD records with `parsed_jd` JSONB for AI-extracted requirements | MVP |
-| `applications` | Candidate applications with `parsed_resume` & `matching_result` JSONB | MVP |
+| `applications` | Candidate applications with `parsed_resume` & `job_fit_analysis` JSONB | MVP |
 | `interview_session` | Session-based AI interview scheduling & static question sets (`generated_questions`) | MVP |
 | `interview_analysis` | AI screening report, Q&A transcript analysis (`question_answer`), and call recording URL | MVP |
 
 ### Key Design Decisions
 
-1. **JSONB for Flexible AI Data**: `parsed_jd`, `parsed_resume`, `matching_result`, `generated_questions`, `analysis_result`, and `question_answer` use PostgreSQL's JSONB type
+1. **JSONB for Flexible AI Data**: `parsed_jd`, `parsed_resume`, `job_fit_analysis`, `generated_questions`, `analysis_result`, and `question_answer` use PostgreSQL's JSONB type
    - Allows AI extraction schema evolution without complex SQL migrations
    - Enables efficient querying with GIN indexes
    - Perfect for storing rich AI feedback, score breakdowns, and dual-channel transcripts
@@ -442,6 +442,44 @@ stateDiagram-v2
     class shortlisted success
     class rejected rejected
 ```
+
+### Workflow 2b: HR Bulk Resume Upload (S3 → parse → application → job-fit)
+
+HR bulk-uploads resumes for a published job. There is no batch poll API. Each file is processed independently.
+
+```mermaid
+sequenceDiagram
+    actor HR as HR User
+    participant F as Frontend (SPA)
+    participant B as Core API
+    participant S3 as MinIO (resumes)
+    participant AI as Parsing & Matching
+
+    HR->>F: Select resume files (PDF/DOCX)
+    F->>B: POST /api/v1/jobs/{id}/applications/upload-urls
+    B-->>F: s3_key + presigned upload_url per file
+    loop each file
+        F->>S3: PUT file to upload_url
+    end
+    F->>B: POST /api/v1/jobs/{id}/applications/bulk
+    B-->>F: 202 { job_id, queued }
+
+    par per resume (independent)
+        B->>AI: POST /internal/v1/parse/resume
+        AI-->>B: parsed_resume
+        Note over B: Create/find candidate<br/>Create application
+        B->>AI: POST /internal/v1/match/resume-jd
+        Note over AI: parsed_jd vs parsed_resume
+        AI-->>B: resume_score + job_fit_analysis
+        Note over B: Save score on application
+    end
+
+    HR->>F: Open applicants
+    F->>B: GET /api/v1/jobs/{id}/applicants
+    B-->>F: Ranked list (scores fill in as workers finish)
+```
+
+Prerequisite: the job already has `parsed_jd` (parsed once on job create/publish). Bulk does not parse the JD.
 
 ### Workflow 3: Session-Based Interview Scheduling, Auto Question Generation & Bot Screening
 

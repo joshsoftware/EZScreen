@@ -141,7 +141,7 @@ This document serves as the single source of truth for developer user stories on
   - Compares `parsed_resume` JSONB against the JD `parsed_jd` JSONB.
   - Calculates a 0.0 to 10.0 overall matching score using: `(skills * 0.40 + experience * 0.35 + education * 0.25) * 10`.
   - Generates a fit recommendation (`strong_fit`, `moderate_fit`, `weak_fit`, `not_suitable`), list of matched skills, missing skills, strengths, and concerns.
-  - Writes the matching result to the `matching_result` JSONB and denormalizes `resume_score` and `candidate_yoe` for fast sorting.
+  - Writes the matching result to the `job_fit_analysis` JSONB and denormalizes `resume_score` and `candidate_yoe` for fast sorting.
   - Transitions application status to `resume_screened` (or error state on failure).
 * **Scope / Phase:** MVP (Phase 3: Application Pipeline)
 

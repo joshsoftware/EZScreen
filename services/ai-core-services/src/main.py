@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.core.config import settings
+from src.api.v1 import parsing
+from src.api.v1 import matching
 
 app = FastAPI(
     title="EZScreen Service",
@@ -23,8 +25,8 @@ def health_check():
         "service": settings.service_name,
         "port": settings.port,
         "environment": settings.environment,
-        "modules": ["parsing", "job_fit_analysis", "question_generation", "screening_pipeline", "meeting_bot", "interview_analysis"]
-    }
+        "modules": ["parsing", "job_fit_analysis", "question_generation", "screening_pipeline", "meeting_bot", "interview_analysis"]    }
 
-
-
+# Register API Routers
+app.include_router(parsing.router, prefix="/internal/v1/parse")
+app.include_router(matching.router, prefix="/internal/v1/match")
