@@ -928,7 +928,7 @@ paths:
   /internal/v1/parse/jd:
     post:
       tags: [Internal Service]
-      summary: Internal JD parsing engine (services/parsing-matching)
+      summary: Internal JD parsing engine (services/ai-core-services)
       operationId: internalParseJD
       requestBody:
         required: true
@@ -937,7 +937,23 @@ paths:
             schema:
               type: object
               properties:
-                raw_text:
+                title:
+                  type: string
+                description:
+                  type: string
+                job_type:
+                  type: string
+                work_type:
+                  type: string
+                location:
+                  type: string
+                experience_min:
+                  type: integer
+                experience_max:
+                  type: integer
+                skills:
+                  type: string
+                status:
                   type: string
       responses:
         '200':
@@ -959,9 +975,9 @@ paths:
             schema:
               type: object
               properties:
-                resume_base64:
+                resume_name:
                   type: string
-                file_name:
+                resume_path:
                   type: string
       responses:
         '200':
@@ -974,7 +990,7 @@ paths:
   /internal/v1/match/resume-jd:
     post:
       tags: [Internal Service]
-      summary: Internal candidate-JD matching score calculation (services/parsing-matching)
+      summary: Internal candidate-JD matching score calculation (services/ai-core-services)
       operationId: internalMatchResumeJD
       requestBody:
         required: true
@@ -983,22 +999,35 @@ paths:
             schema:
               type: object
               properties:
+                application_id:
+                  type: string
+                job_id:
+                  type: string
                 parsed_jd:
                   type: object
                 parsed_resume:
                   type: object
       responses:
         '200':
-          description: Param.ai matching result & score
+          description: Job fit analysis matching result & score
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  resume_score:
-                    type: number
-                  matching_result:
+                  application_id:
+                    type: string
+                  job_id:
+                    type: string
+                  status:
+                    type: string
+                    example: success
+                  job_fit_analysis:
                     type: object
+                    description: "JSON object matching DB_DESIGN.md matching_result schema"
+                  error_message:
+                    type: string
+                    nullable: true
 
   /internal/v1/screening/questions/generate:
     post:
@@ -1196,7 +1225,7 @@ components:
           example: 85.0
         parsed_resume:
           type: object
-        matching_result:
+        job_fit_analysis:
           type: object
 
     InterviewSessionResponse:

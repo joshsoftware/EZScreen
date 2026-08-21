@@ -26,6 +26,13 @@ class Settings(BaseSettings):
 
     # Real-time WebSocket Audio Stream Endpoint
     websocket_url: str
+    # Object Storage (MinIO)
+    minio_endpoint: str
+    minio_access_key: str
+    minio_secret_key: str
+    minio_secure: bool = False
+    minio_bucket_name: str
+
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),
