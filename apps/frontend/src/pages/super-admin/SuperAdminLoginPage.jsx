@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { LogoMark } from '../../components/brand/LogoMark'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
-import { Input } from '../../components/ui/Input'
+import { Input, PasswordInput } from '../../components/ui/Input'
 import { FadeIn, FadeSlide } from '../../components/motion/Motion'
 import { useAuth } from '../../features/auth/AuthContext'
 import { ApiError } from '../../lib/api/client'
@@ -80,11 +80,10 @@ export function SuperAdminLoginPage() {
               className="h-12"
               required
             />
-            <Input
+            <PasswordInput
               id="password"
               label="Password"
               name="password"
-              type="password"
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

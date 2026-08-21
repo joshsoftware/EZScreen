@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useAuth } from '../../features/auth/AuthContext'
+import { changePasswordRequest } from '../../features/auth/api'
 import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
   getOrganizationRequest,
@@ -14,7 +15,7 @@ import {
 import { ApiError } from '../../lib/api/client'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
-import { Input } from '../../components/ui/Input'
+import { Input, PasswordInput } from '../../components/ui/Input'
 import { PageHeader, Panel } from '../../components/ui/PageHeader'
 import { PageSkeleton } from '../../components/ui/Skeleton'
 
@@ -105,6 +106,11 @@ export function OrgAdminSettingsPage() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordError, setPasswordError] = useState(null)
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false)
 
   useEffect(() => {
     if (!orgId) {
@@ -170,19 +176,84 @@ export function OrgAdminSettingsPage() {
     }
   }
 
+  async function onChangePassword(event) {
+    event.preventDefault()
+    setPasswordError(null)
+
+    if (newPassword.length < 8) {
+      setPasswordError('New password must be at least 8 characters.')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('New passwords do not match.')
+      return
+    }
+
+    setPasswordSubmitting(true)
+    try {
+      await changePasswordRequest(currentPassword, newPassword)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      toast.success('Password updated')
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.message : 'Failed to update password'
+      setPasswordError(message)
+      toast.error(message)
+    } finally {
+      setPasswordSubmitting(false)
+    }
+  }
+
   if (loading) {
     return <PageSkeleton />
   }
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-3xl space-y-2xl">
       <PageHeader
         title="Settings"
-        description="Create custom fit labels and assign each a score range (0–10)."
+        description="Manage your account password and organization screening labels."
       />
 
+      <Panel title="Change password">
+        <form onSubmit={onChangePassword} className="space-y-md max-w-md">
+          <PasswordInput
+            id="current-password"
+            label="Current password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            required
+          />
+          <PasswordInput
+            id="new-password"
+            label="New password"
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            required
+            minLength={8}
+          />
+          <PasswordInput
+            id="confirm-password"
+            label="Confirm new password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            required
+            minLength={8}
+          />
+          {passwordError ? <Alert>{passwordError}</Alert> : null}
+          <Button type="submit" loading={passwordSubmitting}>
+            {passwordSubmitting ? 'Updating…' : 'Update password'}
+          </Button>
+        </form>
+      </Panel>
+
       {error ? (
-        <div className="mb-lg">
+        <div>
           <Alert>{error}</Alert>
         </div>
       ) : null}

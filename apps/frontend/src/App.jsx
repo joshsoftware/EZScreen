@@ -7,6 +7,8 @@ import { SuperAdminShell } from './components/layout/SuperAdminShell'
 import { OrgAdminShell } from './components/layout/OrgAdminShell'
 import { SuperAdminLoginPage } from './pages/super-admin/SuperAdminLoginPage'
 import { OrgAdminLoginPage } from './pages/org-admin/OrgAdminLoginPage'
+import { OrgAdminForgotPasswordPage } from './pages/org-admin/OrgAdminForgotPasswordPage'
+import { OrgAdminResetPasswordPage } from './pages/org-admin/OrgAdminResetPasswordPage'
 import { PageSkeleton } from './components/ui/Skeleton'
 
 const SuperAdminOrgsPage = lazy(() =>
@@ -103,6 +105,14 @@ export default function App() {
           <Route path="/" element={<Navigate to="/super-admin/login" replace />} />
           <Route path="/super-admin/login" element={<SuperAdminLoginPage />} />
           <Route path="/org-admin/login" element={<OrgAdminLoginPage />} />
+          <Route
+            path="/org-admin/forgot-password"
+            element={<OrgAdminForgotPasswordPage />}
+          />
+          <Route
+            path="/org-admin/reset-password"
+            element={<OrgAdminResetPasswordPage />}
+          />
           <Route path="/login" element={<Navigate to="/org-admin/login" replace />} />
 
           <Route

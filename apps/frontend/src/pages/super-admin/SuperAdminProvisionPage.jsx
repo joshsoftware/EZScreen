@@ -6,7 +6,7 @@ import { getOrganization, provisionOrgUser } from '../../features/super-admin/ap
 import { ApiError } from '../../lib/api/client'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
-import { Input, Select } from '../../components/ui/Input'
+import { Input, PasswordInput, Select } from '../../components/ui/Input'
 import { PageHeader, Panel } from '../../components/ui/PageHeader'
 import { PageSkeleton } from '../../components/ui/Skeleton'
 
@@ -127,10 +127,9 @@ export function SuperAdminProvisionPage() {
               <option value="organization_admin">organization_admin</option>
               <option value="hr">hr</option>
             </Select>
-            <Input
+            <PasswordInput
               id="password"
               label="Password (optional — auto-generated if empty)"
-              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               minLength={8}

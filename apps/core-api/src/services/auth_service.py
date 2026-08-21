@@ -2,36 +2,46 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from src.config.settings import settings
 from src.core.jwt import (
     TokenError,
     create_access_token,
     create_refresh_token,
     decode_refresh_token,
 )
-from src.core.security import verify_password
+from src.core.security import hash_password, verify_password
 from src.models.enums import UserRole, UserStatus
 from src.models.organization import Organization
+from src.models.password_reset_token import PasswordResetToken
 from src.models.refresh_token_revocation import RefreshTokenRevocation
 from src.models.user import User
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "OrgAuthError",
     "OrgAuthFailure",
     "authenticate_user",
     "authenticate_org_workspace_user",
+    "change_password",
     "get_user_by_id",
     "get_user_by_email",
     "issue_token_pair",
     "refresh_access_token",
+    "request_org_password_reset",
+    "reset_password_with_token",
     "revoke_refresh_token",
 ]
 
@@ -188,3 +198,99 @@ def refresh_access_token(
     )
     new_refresh, _, _ = create_refresh_token(user_id=user.id)
     return access_token, expires_in, new_refresh, user
+
+
+def _hash_reset_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def change_password(
+    db: Session, user: User, current_password: str, new_password: str
+) -> None:
+    """Update password for an authenticated org workspace user."""
+    if user.role not in _ORG_WORKSPACE_ROLES:
+        raise ValueError("Organization workspace access only")
+    if not user.password_hash or not verify_password(current_password, user.password_hash):
+        raise PermissionError("Current password is incorrect")
+    if len(new_password) < 8:
+        raise ValueError("New password must be at least 8 characters")
+    if verify_password(new_password, user.password_hash):
+        raise ValueError("New password must be different from the current password")
+
+    user.password_hash = hash_password(new_password)
+    user.updated_at = datetime.now(timezone.utc)
+    db.add(user)
+    db.commit()
+
+
+def request_org_password_reset(db: Session, email: str) -> str | None:
+    """
+    Create a password reset token for org_admin/hr if the account exists.
+    Returns reset_url when password_reset_expose_link is enabled (local/dev);
+    otherwise None. Callers must always show a generic success message.
+    """
+    user = get_user_by_email(db, email)
+    if (
+        user is None
+        or user.status != UserStatus.active
+        or user.role not in _ORG_WORKSPACE_ROLES
+        or not user.password_hash
+    ):
+        return None
+
+    # Invalidate unused tokens for this user
+    now = datetime.now(timezone.utc)
+    db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
+
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = now + timedelta(minutes=settings.password_reset_expire_minutes)
+    db.add(
+        PasswordResetToken(
+            user_id=user.id,
+            token_hash=_hash_reset_token(raw_token),
+            expires_at=expires_at,
+        )
+    )
+    db.commit()
+
+    reset_path = f"/org-admin/reset-password?token={raw_token}"
+    base = settings.frontend_base_url.rstrip("/")
+    reset_url = f"{base}{reset_path}"
+    logger.info("Password reset link for %s: %s", user.email, reset_url)
+    return reset_url if settings.password_reset_expose_link else None
+
+
+def reset_password_with_token(db: Session, raw_token: str, new_password: str) -> None:
+    """Consume a one-time reset token and set a new password."""
+    if len(new_password) < 8:
+        raise ValueError("New password must be at least 8 characters")
+
+    token_hash = _hash_reset_token(raw_token.strip())
+    row = db.scalar(
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+    )
+    now = datetime.now(timezone.utc)
+    if row is None or row.used_at is not None or row.expires_at < now:
+        raise PermissionError("Invalid or expired reset link")
+
+    user = get_user_by_id(db, row.user_id)
+    if (
+        user is None
+        or user.status != UserStatus.active
+        or user.role not in _ORG_WORKSPACE_ROLES
+    ):
+        raise PermissionError("Invalid or expired reset link")
+
+    user.password_hash = hash_password(new_password)
+    user.updated_at = datetime.now(timezone.utc)
+    row.used_at = now
+    db.add(user)
+    db.add(row)
+    db.commit()

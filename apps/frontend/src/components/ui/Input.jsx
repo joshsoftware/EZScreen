@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { cn } from '../../lib/cn'
 
 const fieldClass =
@@ -19,6 +20,36 @@ export function Input({ className, id, label, ...props }) {
     <div>
       {label ? <Label htmlFor={id}>{label}</Label> : null}
       <input id={id} className={cn(fieldClass, className)} {...props} />
+    </div>
+  )
+}
+
+export function PasswordInput({ className, id, label, ...props }) {
+  const [visible, setVisible] = useState(false)
+  const toggleLabel = visible ? 'Hide password' : 'Show password'
+
+  return (
+    <div>
+      {label ? <Label htmlFor={id}>{label}</Label> : null}
+      <div className="relative">
+        <input
+          id={id}
+          type={visible ? 'text' : 'password'}
+          className={cn(fieldClass, 'pr-12', className)}
+          {...props}
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-8 w-8 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors"
+          aria-label={toggleLabel}
+          title={toggleLabel}
+        >
+          <span className="material-symbols-outlined text-[20px]" aria-hidden>
+            {visible ? 'visibility_off' : 'visibility'}
+          </span>
+        </button>
+      </div>
     </div>
   )
 }

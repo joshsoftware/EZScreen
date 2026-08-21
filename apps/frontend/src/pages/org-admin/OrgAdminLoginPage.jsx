@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { LogoMark } from '../../components/brand/LogoMark'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
-import { Input } from '../../components/ui/Input'
+import { Input, PasswordInput } from '../../components/ui/Input'
 import { FadeIn, FadeSlide } from '../../components/motion/Motion'
 import { useAuth } from '../../features/auth/AuthContext'
 import { ApiError } from '../../lib/api/client'
@@ -82,17 +82,25 @@ export function OrgAdminLoginPage() {
               className="h-12"
               required
             />
-            <Input
+            <PasswordInput
               id="org-password"
               label="Password"
               name="password"
-              type="password"
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="h-12"
               required
             />
+
+            <div className="-mt-xs flex justify-end">
+              <Link
+                className="text-body-sm text-secondary hover:underline"
+                to="/org-admin/forgot-password"
+              >
+                Forgot password?
+              </Link>
+            </div>
 
             {error ? <Alert>{error}</Alert> : null}
 

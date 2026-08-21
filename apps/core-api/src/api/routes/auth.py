@@ -12,16 +12,25 @@ from src.core.jwt import TokenError
 from src.models.enums import UserRole
 from src.models.user import User
 from src.schemas.auth import (
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LoginRequest,
     LoginResponse,
     MessageResponse,
     RefreshResponse,
+    ResetPasswordRequest,
     UserResponse,
 )
 from src.config.settings import settings
 from src.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+_GENERIC_FORGOT_MESSAGE = (
+    "If an organization workspace account exists for that email, "
+    "a password reset link has been generated."
+)
 
 
 @router.post(
@@ -150,6 +159,69 @@ def org_workspace_check(
     ],
 ) -> MessageResponse:
     return MessageResponse(message="Organization workspace access confirmed")
+
+
+@router.post(
+    "/org/change-password",
+    response_model=MessageResponse,
+    summary="Change password for authenticated Organization Admin or HR",
+)
+def org_change_password(
+    body: ChangePasswordRequest,
+    db: DbSession,
+    current_user: Annotated[
+        User,
+        Depends(require_roles(UserRole.organization_admin, UserRole.hr)),
+    ],
+) -> MessageResponse:
+    try:
+        auth_service.change_password(
+            db, current_user, body.current_password, body.new_password
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return MessageResponse(message="Password updated successfully")
+
+
+@router.post(
+    "/org/forgot-password",
+    response_model=ForgotPasswordResponse,
+    summary="Request password reset for Organization Admin or HR",
+)
+def org_forgot_password(
+    body: ForgotPasswordRequest, db: DbSession
+) -> ForgotPasswordResponse:
+    reset_url = auth_service.request_org_password_reset(db, body.email)
+    return ForgotPasswordResponse(message=_GENERIC_FORGOT_MESSAGE, reset_url=reset_url)
+
+
+@router.post(
+    "/org/reset-password",
+    response_model=MessageResponse,
+    summary="Reset Organization Admin or HR password with a one-time token",
+)
+def org_reset_password(body: ResetPasswordRequest, db: DbSession) -> MessageResponse:
+    try:
+        auth_service.reset_password_with_token(db, body.token, body.new_password)
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return MessageResponse(message="Password reset successfully. You can sign in now.")
 
 
 # Super-admin-only smoke route — confirms role guard for platform login flow.

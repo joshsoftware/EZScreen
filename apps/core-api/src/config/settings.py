@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Internal parsing service (resume extraction)
     parsing_service_url: str = "http://127.0.0.1:8002/internal/v1"
 
+    # Password reset (org admin / HR). Email delivery not wired yet —
+    # when expose_link is true, API returns reset_url for local/dev use.
+    frontend_base_url: str = "http://localhost:5173"
+    password_reset_expire_minutes: int = 60
+    password_reset_expose_link: bool = True
+
     @property
     def cors_origin_list(self) -> list[str]:
         origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]

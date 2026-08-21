@@ -47,3 +47,32 @@ export function logoutRequest(token) {
     skipAuthRetry: true,
   })
 }
+
+export function changePasswordRequest(currentPassword, newPassword) {
+  return apiRequest('/api/v1/auth/org/change-password', {
+    method: 'POST',
+    body: {
+      current_password: currentPassword,
+      new_password: newPassword,
+    },
+  })
+}
+
+export function forgotPasswordRequest(email) {
+  return apiRequest('/api/v1/auth/org/forgot-password', {
+    method: 'POST',
+    body: { email },
+    skipAuthRetry: true,
+  })
+}
+
+export function resetPasswordRequest(token, newPassword) {
+  return apiRequest('/api/v1/auth/org/reset-password', {
+    method: 'POST',
+    body: {
+      token,
+      new_password: newPassword,
+    },
+    skipAuthRetry: true,
+  })
+}
