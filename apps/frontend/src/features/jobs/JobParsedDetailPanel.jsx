@@ -97,23 +97,19 @@ export function JobParsedDetailPanel({ job, loading, error }) {
   const formExperience = formatExperience(job.experience_min, job.experience_max)
   const companyDesc = safe(parsedJd.company_description)
 
-  const panelTitle = (
-    <div className="flex items-center justify-between w-full">
-      <span>Job requirements (AI-parsed)</span>
-      {anyOpen ? (
-        <button
-          type="button"
-          onClick={closeAll}
-          className="text-label-md text-secondary hover:text-primary transition-colors"
-        >
-          Collapse all
-        </button>
-      ) : null}
-    </div>
-  )
+  const collapseAction = anyOpen ? (
+    <button
+      type="button"
+      onClick={closeAll}
+      className="inline-flex items-center gap-xs text-label-md font-semibold text-primary hover:text-on-primary-fixed-variant transition-colors"
+    >
+      <span className="material-symbols-outlined text-[18px] leading-none">unfold_less</span>
+      Collapse all
+    </button>
+  ) : null
 
   return (
-    <Panel title={panelTitle}>
+    <Panel title="Job requirements (AI-parsed)" actions={collapseAction}>
       <div className="divide-y divide-outline-variant">
         <Section title="Overview" open={sections.overview} onToggle={() => toggle('overview')}>
           <div className="grid sm:grid-cols-2 gap-x-lg">

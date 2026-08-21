@@ -39,15 +39,15 @@ export function Panel({ title, children, className, bodyClassName, actions }) {
       )}
     >
       {title || actions ? (
-        <div className="px-lg pt-lg pb-0 flex items-start justify-between gap-md">
+        <div className="px-lg pt-lg pb-0 flex items-center justify-between gap-md">
           {title ? (
-            <h2 className="font-headline-sm text-headline-sm text-on-surface tracking-tight">
+            <h2 className="font-headline-sm text-headline-sm text-on-surface tracking-tight min-w-0">
               {title}
             </h2>
           ) : (
             <span />
           )}
-          {actions ? <div className="shrink-0">{actions}</div> : null}
+          {actions ? <div className="shrink-0 self-center">{actions}</div> : null}
         </div>
       ) : null}
       <div className={cn('p-lg', bodyClassName)}>{children}</div>
