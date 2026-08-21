@@ -29,6 +29,3 @@ packages = ["src"]
 
 [tool.uv]
 dev-dependencies = []
-
-[tool.hatch.build.targets.wheel]
-packages = ["src"]
