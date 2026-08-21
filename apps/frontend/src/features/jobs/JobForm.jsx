@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Button } from '../../components/ui/Button'
 import { Alert } from '../../components/ui/Alert'
-import { Input, Select } from '../../components/ui/Input'
-import { RichTextEditor } from '../../components/ui/RichTextEditor'
+import { Input, Label, Select } from '../../components/ui/Input'
+import { Skeleton } from '../../components/ui/Skeleton'
 import {
   EMPTY_JOB_FORM,
   JOB_STATUS_OPTIONS,
@@ -10,6 +10,21 @@ import {
   WORK_TYPE_OPTIONS,
   formValuesToPayload,
 } from './jobFields'
+
+const RichTextEditor = lazy(() =>
+  import('../../components/ui/RichTextEditor').then((m) => ({
+    default: m.RichTextEditor,
+  })),
+)
+
+function RichTextEditorFallback({ id, label }) {
+  return (
+    <div>
+      {label ? <Label htmlFor={id}>{label}</Label> : null}
+      <Skeleton className="h-40 w-full rounded-lg" />
+    </div>
+  )
+}
 
 export function JobForm({
   initialValues = EMPTY_JOB_FORM,
@@ -53,13 +68,19 @@ export function JobForm({
         onChange={(e) => setField('title', e.target.value)}
         maxLength={255}
       />
-      <RichTextEditor
-        id="job-description"
-        label="Description"
-        value={values.description}
-        onChange={(html) => setField('description', html)}
-        placeholder="Role summary, responsibilities, must-have vs nice-to-have skills, and expected years per skill…"
-      />
+      <Suspense
+        fallback={
+          <RichTextEditorFallback id="job-description" label="Description" />
+        }
+      >
+        <RichTextEditor
+          id="job-description"
+          label="Description"
+          value={values.description}
+          onChange={(html) => setField('description', html)}
+          placeholder="Role summary, responsibilities, must-have vs nice-to-have skills, and expected years per skill…"
+        />
+      </Suspense>
       <p className="text-label-md text-on-surface-variant -mt-sm">
         Include must-have and nice-to-have skills in the description, with expected years of
         experience where you know them. You can fine-tune years after parsing.

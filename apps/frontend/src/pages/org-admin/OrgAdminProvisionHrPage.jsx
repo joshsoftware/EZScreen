@@ -1,11 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useAuth } from '../../features/auth/AuthContext'
-import {
-  getOrganizationRequest,
-  provisionOrgUserRequest,
-} from '../../features/org-admin/api'
+import { provisionOrgUserRequest } from '../../features/org-admin/api'
+import { useOrganizationQuery } from '../../features/org-admin/useOrganizationQuery'
 import { ApiError } from '../../lib/api/client'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
@@ -17,7 +15,11 @@ export function OrgAdminProvisionHrPage() {
   const { user } = useAuth()
   const orgId = user?.organization_id
   const navigate = useNavigate()
-  const [org, setOrg] = useState(null)
+  const {
+    data: org,
+    isLoading,
+    error: queryError,
+  } = useOrganizationQuery(orgId)
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
@@ -27,14 +29,13 @@ export function OrgAdminProvisionHrPage() {
   const [tempPassword, setTempPassword] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
-  useEffect(() => {
-    if (!orgId) return
-    void getOrganizationRequest(orgId)
-      .then(setOrg)
-      .catch((err) =>
-        setError(err instanceof ApiError ? err.message : 'Failed to load organization'),
-      )
-  }, [orgId])
+  const loadError =
+    error ||
+    (queryError
+      ? queryError instanceof ApiError
+        ? queryError.message
+        : 'Failed to load organization'
+      : null)
 
   async function onSubmit(event) {
     event.preventDefault()
@@ -63,7 +64,7 @@ export function OrgAdminProvisionHrPage() {
     }
   }
 
-  if (!org && !error) {
+  if (isLoading && !org && !loadError) {
     return <PageSkeleton />
   }
 
@@ -137,7 +138,7 @@ export function OrgAdminProvisionHrPage() {
               onChange={(e) => setPassword(e.target.value)}
               minLength={8}
             />
-            {error ? <Alert>{error}</Alert> : null}
+            {loadError ? <Alert>{loadError}</Alert> : null}
             <div className="flex gap-sm pt-md">
               <Button to="/org-admin/team" variant="secondary">
                 Cancel

@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { JobForm } from '../../features/jobs/JobForm'
 import { JobSkillsEditor } from '../../features/jobs/JobSkillsEditor'
 import { createJobRequest, getJobRequest, updateJobRequest } from '../../features/jobs/api'
+import { useJobQueryClient } from '../../features/jobs/useJobQueries'
 import { jobToFormValues } from '../../features/jobs/jobFields'
 import { skillsFromJob } from '../../features/jobs/jobParsedFields'
 import { ApiError } from '../../lib/api/client'
@@ -19,6 +20,7 @@ function StepLabel({ n, label, active }) {
 
 export function OrgAdminJobCreatePage() {
   const navigate = useNavigate()
+  const { setJobData } = useJobQueryClient()
   const [step, setStep] = useState(1)
   const [submitting, setSubmitting] = useState(false)
   const [skillsError, setSkillsError] = useState(null)
@@ -33,6 +35,7 @@ export function OrgAdminJobCreatePage() {
         : await createJobRequest(payload)
       setJob((current) => current ?? saved)
       const full = await getJobRequest(saved.id)
+      setJobData(full.id, full)
       setJob(full)
       setSkills(skillsFromJob({ parsed_jd: full.parsed_jd }))
       setStep(2)

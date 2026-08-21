@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
+import { rerunJobFitRequest } from '../../features/jobs/api'
 import {
-  getApplicationDetailRequest,
-
-  getJobRequest,
-  rerunJobFitRequest,
-} from '../../features/jobs/api'
+  useApplicationQuery,
+  useJobQuery,
+  useJobQueryClient,
+} from '../../features/jobs/useJobQueries'
 import { ApplicationDetailPanel } from '../../features/jobs/ApplicationDetailPanel'
 import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
@@ -27,45 +27,48 @@ import { PageSkeleton } from '../../components/ui/Skeleton'
 export function OrgAdminApplicationDetailPage() {
   const { jobId = '', applicationId = '' } = useParams()
   const { fitLabels } = useOrgSettings()
-  const [job, setJob] = useState(null)
-  const [detail, setDetail] = useState(null)
-  const [error, setError] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const { invalidateApplication, invalidateJobApplicants } = useJobQueryClient()
   const [rerunning, setRerunning] = useState(false)
 
-  const load = useCallback(async () => {
-    if (!jobId || !applicationId) return
-    setLoading(true)
-    setError(null)
-    try {
-      const [jobData, applicationData] = await Promise.all([
-        getJobRequest(jobId),
-        getApplicationDetailRequest(applicationId),
-      ])
-      if (applicationData.job_description_id !== jobId) {
-        setJob(jobData)
-        setDetail(null)
-        setError('Application does not belong to this job')
-        return
-      }
-      setJob(jobData)
-      setDetail(applicationData)
-    } catch (err) {
-      setJob(null)
-      setDetail(null)
-      setError(err instanceof ApiError ? err.message : 'Failed to load application')
-    } finally {
-      setLoading(false)
-    }
-  }, [jobId, applicationId])
+  const {
+    data: job,
+    isLoading: jobLoading,
+    error: jobError,
+  } = useJobQuery(jobId)
 
-  useEffect(() => {
-    void load()
-  }, [load])
+  const {
+    data: detail,
+    isLoading: detailLoading,
+    error: detailError,
+    refetch: refetchDetail,
+  } = useApplicationQuery(applicationId)
+
+  const mismatch =
+    detail && detail.job_description_id !== jobId
+      ? 'Application does not belong to this job'
+      : null
+
+  const loading = jobLoading || detailLoading
+  const error =
+    mismatch ||
+    (detailError
+      ? detailError instanceof ApiError
+        ? detailError.message
+        : 'Failed to load application'
+      : null) ||
+    (jobError
+      ? jobError instanceof ApiError
+        ? jobError.message
+        : 'Failed to load job'
+      : null)
 
   const applicantsHref = `/org-admin/jobs/${jobId}#applicants`
   const score = resolveMatchScore(detail)
-  const canRerun = Boolean(detail?.parsed_resume) && !rerunning
+  const canRerun = Boolean(detail?.parsed_resume) && !rerunning && !mismatch
+
+  async function reload() {
+    await refetchDetail()
+  }
 
   async function onRerun() {
     if (!detail || rerunning) return
@@ -73,7 +76,9 @@ export function OrgAdminApplicationDetailPage() {
     try {
       await rerunJobFitRequest(jobId, detail.id)
       toast.success('Job-fit recalculated')
-      await load()
+      await invalidateApplication(applicationId)
+      await invalidateJobApplicants(jobId)
+      await reload()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to rerun fit')
     } finally {
@@ -85,7 +90,7 @@ export function OrgAdminApplicationDetailPage() {
     return <PageSkeleton />
   }
 
-  if (error && !detail) {
+  if (error && (!detail || mismatch)) {
     return (
       <div>
         <PageHeader
@@ -170,7 +175,7 @@ export function OrgAdminApplicationDetailPage() {
         detail={detail}
         loading={false}
         error={null}
-        onRerunComplete={load}
+        onRerunComplete={reload}
       />
     </div>
   )

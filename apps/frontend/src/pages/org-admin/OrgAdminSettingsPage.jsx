@@ -3,10 +3,11 @@ import { toast } from 'sonner'
 import { useAuth } from '../../features/auth/AuthContext'
 import { changePasswordRequest } from '../../features/auth/api'
 import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
+import { updateOrganizationRequest } from '../../features/org-admin/api'
 import {
-  getOrganizationRequest,
-  updateOrganizationRequest,
-} from '../../features/org-admin/api'
+  useOrganizationQuery,
+  useOrganizationQueryClient,
+} from '../../features/org-admin/useOrganizationQuery'
 import {
   DEFAULT_FIT_LABELS,
   normalizeFitLabels,
@@ -100,39 +101,40 @@ export function OrgAdminSettingsPage() {
   const { user } = useAuth()
   const orgId = user?.organization_id
   const { setFitLabels } = useOrgSettings()
+  const { setOrganizationData } = useOrganizationQueryClient()
+  const {
+    data: org,
+    isLoading,
+    error: queryError,
+  } = useOrganizationQuery(orgId)
   const [rows, setRows] = useState(() =>
     DEFAULT_FIT_LABELS.map((item) => ({ ...item })),
   )
   const [error, setError] = useState(null)
-  const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordError, setPasswordError] = useState(null)
   const [passwordSubmitting, setPasswordSubmitting] = useState(false)
+  const [rowsReady, setRowsReady] = useState(false)
 
   useEffect(() => {
-    if (!orgId) {
-      setLoading(false)
-      return
-    }
-    let cancelled = false
-    void getOrganizationRequest(orgId)
-      .then((org) => {
-        if (cancelled) return
-        setRows(normalizeFitLabels(org?.fit_labels))
-        setLoading(false)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setError(err instanceof ApiError ? err.message : 'Failed to load settings')
-        setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [orgId])
+    if (!org) return
+    setRows(normalizeFitLabels(org.fit_labels))
+    setRowsReady(true)
+    setError(null)
+  }, [org])
+
+  useEffect(() => {
+    if (!queryError) return
+    setError(
+      queryError instanceof ApiError
+        ? queryError.message
+        : 'Failed to load settings',
+    )
+    setRowsReady(true)
+  }, [queryError])
 
   function updateRow(index, patch) {
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)))
@@ -166,6 +168,7 @@ export function OrgAdminSettingsPage() {
       const saved = normalizeFitLabels(updated?.fit_labels)
       setRows(saved)
       setFitLabels(saved)
+      setOrganizationData(orgId, updated)
       toast.success('Fit labels saved')
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Failed to save settings'
@@ -206,7 +209,7 @@ export function OrgAdminSettingsPage() {
     }
   }
 
-  if (loading) {
+  if (isLoading || !rowsReady) {
     return <PageSkeleton />
   }
 

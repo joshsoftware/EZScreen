@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getJobRequest } from '../../features/jobs/api'
+import { useJobQuery } from '../../features/jobs/useJobQueries'
 import { JobParsedDetailPanel } from '../../features/jobs/JobParsedDetailPanel'
 import { jobSubtitle } from '../../features/jobs/applicationFields'
 import { formatJobStatus, jobStatusTone } from '../../features/jobs/jobFields'
@@ -14,32 +13,21 @@ import { PageSkeleton } from '../../components/ui/Skeleton'
 
 export function OrgAdminJobParsedPage() {
   const { jobId = '' } = useParams()
-  const [job, setJob] = useState(null)
-  const [error, setError] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const {
+    data: job,
+    isLoading,
+    error: queryError,
+  } = useJobQuery(jobId)
 
-  const load = useCallback(async () => {
-    if (!jobId) return
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await getJobRequest(jobId)
-      setJob(data)
-    } catch (err) {
-      setJob(null)
-      setError(err instanceof ApiError ? err.message : 'Failed to load job')
-    } finally {
-      setLoading(false)
-    }
-  }, [jobId])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+  const error = queryError
+    ? queryError instanceof ApiError
+      ? queryError.message
+      : 'Failed to load job'
+    : null
 
   const jobHref = `/org-admin/jobs/${jobId}`
 
-  if (loading) {
+  if (isLoading) {
     return <PageSkeleton />
   }
 

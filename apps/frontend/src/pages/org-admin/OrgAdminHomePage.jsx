@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../features/auth/AuthContext'
-import { getOrganizationRequest } from '../../features/org-admin/api'
+import { useOrganizationQuery } from '../../features/org-admin/useOrganizationQuery'
 import { PageHeader, Panel, StatCard } from '../../components/ui/PageHeader'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
@@ -31,42 +30,18 @@ const QUICK_LINKS = [
 
 export function OrgAdminHomePage() {
   const { user } = useAuth()
-  const [org, setOrg] = useState(null)
-  const [error, setError] = useState(null)
-  const [loading, setLoading] = useState(Boolean(user?.organization_id))
+  const orgId = user?.organization_id
+  const {
+    data: org,
+    isLoading: loading,
+    error: queryError,
+  } = useOrganizationQuery(orgId)
 
-  useEffect(() => {
-    let cancelled = false
-    const orgId = user?.organization_id
-    if (!orgId) {
-      setLoading(false)
-      return undefined
-    }
-
-    async function load() {
-      setLoading(true)
-      setError(null)
-      try {
-        const data = await getOrganizationRequest(orgId)
-        if (!cancelled) setOrg(data)
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof ApiError
-              ? err.message
-              : 'Unable to load organization details.',
-          )
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [user?.organization_id])
+  const error = queryError
+    ? queryError instanceof ApiError
+      ? queryError.message
+      : 'Unable to load organization details.'
+    : null
 
   const roleLabel =
     user?.role === 'hr' ? 'HR' : user?.role === 'organization_admin' ? 'Org Admin' : user?.role

@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { JobForm } from '../../features/jobs/JobForm'
 import { JobSkillsEditor } from '../../features/jobs/JobSkillsEditor'
-import { getJobApplicantsRequest, getJobRequest, updateJobRequest } from '../../features/jobs/api'
+import { updateJobRequest } from '../../features/jobs/api'
+import {
+  useJobApplicantsQuery,
+  useJobQuery,
+  useJobQueryClient,
+} from '../../features/jobs/useJobQueries'
 import { ApplicantsTable } from '../../features/jobs/ApplicantsTable'
 import { ResumeBulkUpload } from '../../features/jobs/ResumeBulkUpload'
 import { JobParsedDetailPanel } from '../../features/jobs/JobParsedDetailPanel'
@@ -35,75 +40,51 @@ export function OrgAdminJobDetailPage() {
   const { jobId = '' } = useParams()
   const { fitLabels } = useOrgSettings()
   const topLabelId = topFitLabelId(fitLabels)
-  const [job, setJob] = useState(null)
-  const [error, setError] = useState(null)
+  const { invalidateJob, invalidateJobApplicants } = useJobQueryClient()
   const [submitting, setSubmitting] = useState(false)
   const [showEditJob, setShowEditJob] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [editSkills, setEditSkills] = useState({ must_have: [], good_to_have: [] })
   const [skillsSubmitting, setSkillsSubmitting] = useState(false)
-  const [applicants, setApplicants] = useState([])
-  const [applicantsLoading, setApplicantsLoading] = useState(true)
-  const [applicantsError, setApplicantsError] = useState(null)
-  const [applicantsRefreshing, setApplicantsRefreshing] = useState(false)
   const [fitFilter, setFitFilter] = useState('all')
   const [queueWatch, setQueueWatch] = useState(null)
-  const applicantsRef = useRef(applicants)
-  applicantsRef.current = applicants
+  const applicantsRef = useRef([])
 
-  const load = useCallback(async () => {
-    if (!jobId) return
-    setError(null)
-    try {
-      const data = await getJobRequest(jobId)
-      setJob(data)
-    } catch (err) {
-      setJob(null)
-      setError(err instanceof ApiError ? err.message : 'Failed to load job')
-    }
-  }, [jobId])
+  const {
+    data: job,
+    isLoading: jobLoading,
+    error: jobQueryError,
+    refetch: refetchJob,
+  } = useJobQuery(jobId)
 
-  const loadApplicants = useCallback(
-    async ({ refresh = false } = {}) => {
-      if (!jobId) return
-      if (refresh) {
-        setApplicantsRefreshing(true)
-      } else {
-        setApplicantsLoading(true)
-      }
-      setApplicantsError(null)
-      try {
-        const data = await getJobApplicantsRequest(jobId)
-        const list = Array.isArray(data) ? data : []
-        setApplicants(list)
-        return list
-      } catch (err) {
-        setApplicantsError(
-          err instanceof ApiError ? err.message : 'Failed to load applicants',
-        )
-        return null
-      } finally {
-        if (refresh) {
-          setApplicantsRefreshing(false)
-        } else {
-          setApplicantsLoading(false)
-        }
-      }
+  const {
+    data: applicants = [],
+    isLoading: applicantsLoading,
+    isFetching: applicantsFetching,
+    error: applicantsQueryError,
+    refetch: refetchApplicants,
+  } = useJobApplicantsQuery(
+    jobId,
+    {},
+    {
+      refetchInterval: queueWatch ? POLL_INTERVAL_MS : false,
     },
-    [jobId],
   )
 
-  useEffect(() => {
-    void load()
-  }, [load])
+  applicantsRef.current = applicants
+
+  const error = jobQueryError
+    ? jobQueryError instanceof ApiError
+      ? jobQueryError.message
+      : 'Failed to load job'
+    : null
+  const applicantsError = applicantsQueryError
+    ? applicantsQueryError instanceof ApiError
+      ? applicantsQueryError.message
+      : 'Failed to load applicants'
+    : null
 
   useEffect(() => {
-    void loadApplicants()
-  }, [loadApplicants])
-
-  useEffect(() => {
-    // If a job is published/closed, it becomes non-editable.
-    // Ensure we don't keep the edit UI open.
     if (!job) return
     if (job.status !== 'draft') {
       setShowEditJob(false)
@@ -117,48 +98,29 @@ export function OrgAdminJobDetailPage() {
   }, [showEditJob, job])
 
   useEffect(() => {
-    if (!queueWatch || !jobId) return undefined
+    if (!queueWatch) return undefined
 
-    let cancelled = false
-    const startedAt = queueWatch.startedAt
+    const screened = applicants.filter((item) => applicantScore(item) != null).length
+    const remaining = Math.max(0, queueWatch.targetScreened - screened)
+    const timedOut = Date.now() - queueWatch.startedAt >= POLL_TIMEOUT_MS
 
-    async function poll() {
-      const data = await getJobApplicantsRequest(jobId).catch(() => null)
-      if (cancelled || !data) return
-      const list = Array.isArray(data) ? data : []
-      setApplicants(list)
-
-      const screened = list.filter((item) => applicantScore(item) != null).length
-      const remaining = Math.max(0, queueWatch.targetScreened - screened)
-      const timedOut = Date.now() - startedAt >= POLL_TIMEOUT_MS
-
-      if (remaining <= 0 || timedOut) {
-        if (remaining <= 0) {
-          toast.success('Resume processing finished')
-        } else {
-          toast.message('Still processing — use refresh to check again')
-        }
-        setQueueWatch(null)
+    if (remaining <= 0 || timedOut) {
+      if (remaining <= 0) {
+        toast.success('Resume processing finished')
+      } else {
+        toast.message('Still processing — use refresh to check again')
       }
+      setQueueWatch(null)
     }
-
-    const intervalId = window.setInterval(() => {
-      void poll()
-    }, POLL_INTERVAL_MS)
-    void poll()
-
-    return () => {
-      cancelled = true
-      window.clearInterval(intervalId)
-    }
-  }, [jobId, queueWatch])
+  }, [applicants, queueWatch])
 
   async function onSubmit(payload) {
     setSubmitting(true)
     try {
       await updateJobRequest(jobId, payload)
       toast.success('Job updated')
-      await load()
+      await invalidateJob(jobId)
+      await refetchJob()
     } catch (err) {
       throw err instanceof ApiError ? err : new Error('Failed to update job')
     } finally {
@@ -171,7 +133,8 @@ export function OrgAdminJobDetailPage() {
     try {
       await updateJobRequest(jobId, { skills: editSkills })
       toast.success('Skill years updated')
-      await load()
+      await invalidateJob(jobId)
+      await refetchJob()
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Failed to save skills')
     } finally {
@@ -189,7 +152,7 @@ export function OrgAdminJobDetailPage() {
         added,
       startedAt: current?.startedAt ?? Date.now(),
     }))
-    void loadApplicants({ refresh: true })
+    void invalidateJobApplicants(jobId)
   }
 
   if (error && !job) {
@@ -210,7 +173,7 @@ export function OrgAdminJobDetailPage() {
     )
   }
 
-  if (!job) {
+  if (jobLoading || !job) {
     return <PageSkeleton />
   }
 
@@ -302,11 +265,13 @@ export function OrgAdminJobDetailPage() {
             applicants={applicants}
             loading={applicantsLoading}
             error={applicantsError}
-            refreshing={applicantsRefreshing}
+            refreshing={applicantsFetching && !applicantsLoading}
             fitFilter={fitFilter}
             onFitFilterChange={setFitFilter}
             processing={processingRemaining > 0}
-            onRefresh={() => loadApplicants({ refresh: true })}
+            onRefresh={() => {
+              void refetchApplicants()
+            }}
           />
         </div>
       </Panel>

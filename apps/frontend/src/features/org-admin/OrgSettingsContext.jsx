@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useMemo } from 'react'
 import { useAuth } from '../auth/AuthContext'
-import { getOrganizationRequest } from './api'
+import { useOrganizationQuery, useOrganizationQueryClient } from './useOrganizationQuery'
 import {
   DEFAULT_FIT_LABELS,
   normalizeFitLabels,
@@ -16,44 +16,40 @@ const OrgSettingsContext = createContext({
 export function OrgSettingsProvider({ children }) {
   const { user } = useAuth()
   const orgId = user?.organization_id
-  const [fitLabels, setFitLabelsState] = useState(() =>
-    DEFAULT_FIT_LABELS.map((item) => ({ ...item })),
+  const { data: org, isPending, refetch } = useOrganizationQuery(orgId)
+  const { setOrganizationData } = useOrganizationQueryClient()
+
+  const fitLabels = useMemo(
+    () => normalizeFitLabels(org?.fit_labels),
+    [org?.fit_labels],
   )
-  const [loading, setLoading] = useState(Boolean(orgId))
 
   const refresh = useCallback(async () => {
-    if (!orgId) {
-      setFitLabelsState(DEFAULT_FIT_LABELS.map((item) => ({ ...item })))
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    try {
-      const org = await getOrganizationRequest(orgId)
-      setFitLabelsState(normalizeFitLabels(org?.fit_labels))
-    } catch {
-      setFitLabelsState(DEFAULT_FIT_LABELS.map((item) => ({ ...item })))
-    } finally {
-      setLoading(false)
-    }
-  }, [orgId])
+    if (!orgId) return
+    await refetch()
+  }, [orgId, refetch])
 
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  const setFitLabels = useCallback((next) => {
-    setFitLabelsState(normalizeFitLabels(next))
-  }, [])
+  const setFitLabels = useCallback(
+    (next) => {
+      if (!orgId) return
+      const labels = normalizeFitLabels(next)
+      setOrganizationData(orgId, (current) =>
+        current
+          ? { ...current, fit_labels: labels }
+          : { fit_labels: labels },
+      )
+    },
+    [orgId, setOrganizationData],
+  )
 
   const value = useMemo(
     () => ({
       fitLabels,
-      loading,
+      loading: Boolean(orgId) && isPending && !org,
       refresh,
       setFitLabels,
     }),
-    [fitLabels, loading, refresh, setFitLabels],
+    [fitLabels, orgId, isPending, org, refresh, setFitLabels],
   )
 
   return (
