@@ -6,7 +6,7 @@ EZScreen is an AI-powered candidate screening and interview automation system. T
 
 * **`apps/frontend`**: React Single Page Application built with Vite, TypeScript, and TailwindCSS.
 * **`apps/core-api`**: Core platform backend powered by FastAPI (Python), responsible for multi-tenancy, authentication, DB orchestration, and background worker task distribution.
-* **`services/ai-core-services`**: Unified AI Microservice handling real-time WebSockets, STT-LLM-TTS chaining, Attendee bot synchronization, and background parsing (replaces the old ai-screening service).
+* **`services/ai-core-services`**: Unified AI Microservice handling real-time WebSockets, STT-LLM-TTS chaining, Attendee bot synchronization, and background parsing, matching.
 * **`docs/`**: Requirements, Architecture, MVP, and Integration guides.
 
 ---
