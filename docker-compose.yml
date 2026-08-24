@@ -27,6 +27,7 @@ services:
     environment:
       MINIO_ROOT_USER: minio_admin
       MINIO_ROOT_PASSWORD: minio_password
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
     volumes:
       - miniodata:/data
     command: server /data --console-address ":9001"
@@ -59,12 +60,8 @@ services:
     restart: always
     ports:
       - "8000:8000"
-    environment:
-      - DATABASE_URL=${DOCKER_DATABASE_URL:-postgresql://ezscreen_user:ezscreen_password@db:5432/ezscreen_db}
-      - MINIO_ENDPOINT=${DOCKER_MINIO_ENDPOINT:-minio:9000}
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minio_admin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minio_password}
-      - MINIO_SECURE=${MINIO_SECURE:-False}
+    env_file:
+      - ./apps/core-api/.env
     depends_on:
       db:
         condition: service_healthy
@@ -79,25 +76,9 @@ services:
     restart: always
     ports:
       - "8002:8002"
-    environment:
-      # Infrastructure Overrides for Docker Network (Configurable)
-      - DATABASE_URL=${DOCKER_DATABASE_URL:-postgresql://ezscreen_user:ezscreen_password@db:5432/ezscreen_db}
-      - MINIO_ENDPOINT=${DOCKER_MINIO_ENDPOINT:-minio:9000}
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minio_admin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minio_password}
-      - MINIO_SECURE=${MINIO_SECURE:-False}
-      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-resumes}
-      
-      # Passed through from the host/root environment (.env)
-      - SERVICE_NAME=${SERVICE_NAME:-ai-core-services}
-      - PORT=${PORT:-8002}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - WEBSOCKET_URL=${WEBSOCKET_URL}
-      - OLLAMA_URL=${OLLAMA_URL}
-      - OLLAMA_MODEL=${OLLAMA_MODEL}
-      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
-      - ATTENDEE_API_KEY=${ATTENDEE_API_KEY}
-      - ATTENDEE_API_URL=${ATTENDEE_API_URL}
+    env_file:
+      - ./services/ai-core-services/.env
+
     volumes:
       - rapidocr_models:/usr/local/lib/python3.11/site-packages/rapidocr/models
       - hf_cache:/root/.cache/huggingface
@@ -115,9 +96,8 @@ services:
     restart: always
     ports:
       - "5173:5173"
-    environment:
-      - VITE_CORE_API_URL=http://localhost:8000
-      - VITE_AI_SCREENING_URL=ws://localhost:8002
+    env_file:
+      - ./apps/frontend/.env
     depends_on:
       - core-api
       - ai-core-services

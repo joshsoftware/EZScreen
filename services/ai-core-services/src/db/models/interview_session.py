@@ -80,20 +80,6 @@ class DBInterviewSession(Base):
         info={"description": "Timestamp when the record was created"},
     )
 
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
-        onupdate=func.now(),
-        info={"description": "Timestamp when the record was last updated"},
-    )
-
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        info={"description": "Timestamp when the record was soft-deleted"},
-    )
-
     __table_args__ = (
         Index("idx_interview_session_app_id", "application_id"),
         Index("idx_interview_session_status", "status"),
@@ -111,5 +97,4 @@ class DBInterviewSession(Base):
             generated_questions=self.generated_questions,
             interview_metadata=self.interview_metadata,
             created_at=self.created_at.isoformat() if self.created_at else None,
-            updated_at=self.updated_at.isoformat() if self.updated_at else None,
         )

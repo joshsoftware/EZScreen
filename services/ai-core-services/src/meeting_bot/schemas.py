@@ -48,7 +48,6 @@ class InterviewSessionDetailResponse(BaseModel):
     generated_questions: Optional[List[Dict[str, Any]]] = None
     interview_metadata: Optional[Dict[str, Any]] = None
     created_at: Optional[str] = None
-    updated_at: Optional[str] = None
 
 
 class DispatchBotResponse(BaseModel):
