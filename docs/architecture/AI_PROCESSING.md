@@ -368,26 +368,30 @@ __JD_JSON__
 
 1. Compare candidate's skills with JD must-have and good-to-have skills.
 2. Calculate Relevant Experience specifically using the candidate's `skill_experience` array against the JD's must-have and good-to-have skills and their required years.
-3. Systematically calculate the score for each of the 4 criteria.
-4. Sum the scores to get a total out of 100.
-5. Convert the total to a 0.0–10.0 scale:
-   match_score = total_score / 10
-6. Output highly detailed analysis in plain, human-readable language suitable for a non-technical recruiter. DO NOT use technical terms like "ratio", "score", "formula", "0.0", or "1.0". Instead, write naturally. Provide the analysis in three parts:
+3. Systematically calculate the raw score for each of the 4 criteria based on their respective weights (40, 30, 20, 10).
+4. CRITICAL: Convert each individual raw score into an out-of-10.0 scale for the `score_breakdown`:
+   - `must_have_skills_score` = raw_must_have_score / 4
+   - `experience_score` = raw_experience_score / 3
+   - `good_to_have_skills_score` = raw_good_to_have_score / 2
+   - `qualifications_score` = raw_qualifications_score / 1
+   (e.g., if raw_must_have_score is 32.0 out of 40, output 8.0)
+5. Calculate the final `match_score` as the average of these four converted out-of-10 scores (i.e., sum of the four converted scores divided by 4).
+7. Output highly detailed analysis in plain, human-readable language suitable for a non-technical recruiter. DO NOT use technical terms like "ratio", "score", "formula", "0.0", or "1.0". Instead, write naturally. Provide the analysis in three parts:
    - `reasoning`: 3-4 bullet points summarizing the overall fit (e.g. "The candidate matches all core must-have skills...", "Qualification requirements fully met...").
    - `strengths`: 4-5 bullet points highlighting the candidate's strongest alignments with the JD (e.g. "Strong Java experience with over 14 years...", "Extensive domain expertise in Fintech...").
    - `concerns`: 4-5 bullet points highlighting gaps, missing skills, or shortfalls in experience. Crucially, if the JD requires a balanced skill set (e.g. Full Stack requiring 3 years) but the candidate's experience is heavily skewed (e.g. 3 years frontend, but only 2 months backend), you MUST explicitly point out this imbalance as a concern. (e.g. "Experience gap in Spring Boot: the candidate has 2 years, but the job requires at least 3 years...", "Imbalanced Full Stack experience: Candidate has 3 years of React, but only 2 months of Node.js backend experience against a 3-year requirement."). If no concerns, provide 1 bullet saying "No major concerns identified."
-7. Do not change the predefined weighting: 40 + 30 + 20 + 10 = 100.
+
 
 ### Output Format (STRICT JSON):
 
 {
   "score_breakdown": {
-    "must_have_skills_score": 32.0,
-    "experience_score": 24.5,
-    "good_to_have_skills_score": 15.0,
+    "must_have_skills_score": 8.0,
+    "experience_score": 8.16,
+    "good_to_have_skills_score": 7.5,
     "qualifications_score": 10.0
   },
-  "match_score": 8.15,
+  "match_score": 8.41,
   "reasoning": [
     "Overall strong fit with technical alignment across most core skills.",
     "Qualification requirements fully met with a Bachelor's degree in Computer Science.",
@@ -438,16 +442,15 @@ __JD_JSON__
 
 ## 3. Matching Score Formula
 
-The final `match_score` (0.0–10.0) is derived from a **100-point rubric** evaluated by the LLM matching prompt. The four criteria and their point allocations are:
+The final `match_score` (0.0–10.0) is derived from the four criteria sub-scores which are calculated based on raw point allocations and then normalized to a 10.0 scale. The final `match_score` is the unweighted average of these four normalized sub-scores.
 
 ```
-  total_points (max 100) =
-      must_have_skills_score     (max 40)
-    + experience_score           (max 30)
-    + good_to_have_skills_score  (max 20)
-    + qualifications_score       (max 10)
+  raw_must_have_score     (max 40) -> must_have_skills_score = raw / 4
+  raw_experience_score    (max 30) -> experience_score = raw / 3
+  raw_good_to_have_score  (max 20) -> good_to_have_skills_score = raw / 2
+  raw_qualifications_score(max 10) -> qualifications_score = raw / 1
 
-  match_score = total_points / 10
+  match_score = (must_have_skills_score + experience_score + good_to_have_skills_score + qualifications_score) / 4
 ```
 
 | Max Points | Criterion | Scoring Logic |

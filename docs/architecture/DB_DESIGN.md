@@ -418,17 +418,22 @@ All fields return `null` if not explicitly found in the JD. The LLM prompt const
 ```json
 {
   "score_breakdown": {
-    "must_have_skills_score": 32.0,
-    "experience_score": 24.5,
-    "good_to_have_skills_score": 15.0,
+    "must_have_skills_score": 8.0,
+    "experience_score": 8.16,
+    "good_to_have_skills_score": 7.5,
     "qualifications_score": 10.0
   },
-  "match_score": 8.15,
+  "match_score": 8.41,
   "reasoning": [
-    "point 1",
-    "point 2",
-    "point 3",
-    "point 4"
+    "Overall strong fit with technical alignment across most core skills.",
+    "Qualification requirements fully met with a Bachelor's degree in Computer Science."
+  ],
+  "strengths": [
+    "Strong coverage of core must-have skills, explicitly matching Java."
+  ],
+  "concerns": [
+    "Missing critical must-have skill: AWS.",
+    "Experience gap in Spring Boot: candidate has 2.0 years of experience, but 3.0 years are required."
   ],
   "matched_skills": {
     "must_have": ["..."],
