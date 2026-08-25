@@ -45,6 +45,12 @@ export function getApplicationDetailRequest(applicationId) {
   })
 }
 
+export function getApplicationTimelineRequest(applicationId) {
+  return apiRequest(`/api/v1/applications/${applicationId}/timeline`, {
+    method: 'GET',
+  })
+}
+
 export function getResumeUploadUrlsRequest(jobId, files) {
   return apiRequest(`/api/v1/jobs/${jobId}/applications/upload-urls`, {
     method: 'POST',

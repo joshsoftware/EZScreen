@@ -1,4 +1,5 @@
 from src.models.application import Application
+from src.models.application_timeline_event import ApplicationTimelineEvent
 from src.models.interview_analysis import InterviewAnalysis
 from src.models.interview_session import InterviewSession
 from src.models.job_description import JobDescription
@@ -12,6 +13,7 @@ __all__ = [
     "User",
     "JobDescription",
     "Application",
+    "ApplicationTimelineEvent",
     "InterviewSession",
     "InterviewAnalysis",
     "PasswordResetToken",

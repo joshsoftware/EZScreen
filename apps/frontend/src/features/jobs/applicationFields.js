@@ -176,8 +176,10 @@ const STATUS_LABELS = {
   rejected: 'Rejected',
 }
 
-export function formatApplicationStatus(status) {
+export function formatApplicationStatus(status, source) {
   if (!status) return '—'
+  if (status === 'applied' && source === 'hr_bulk') return 'Scored'
+  if (status === 'applied' && source === 'candidate') return 'Applied'
   return STATUS_LABELS[status] ?? status.replaceAll('_', ' ')
 }
 

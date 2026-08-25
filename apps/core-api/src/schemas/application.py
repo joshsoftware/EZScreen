@@ -80,6 +80,7 @@ class ApplicantListItem(BaseModel):
     job_description_id: UUID
     candidate_id: UUID
     status: str
+    source: str
     candidate_yoe: float | None = None
     resume_score: Decimal | None = None
     first_name: str | None = None
@@ -100,6 +101,7 @@ class ApplicationDetailResponse(BaseModel):
     job_description_id: UUID
     candidate_id: UUID
     status: str
+    source: str
     candidate_yoe: float | None = None
     resume_score: Decimal | None = None
     first_name: str | None = None
@@ -108,3 +110,15 @@ class ApplicationDetailResponse(BaseModel):
     phone: str | None = None
     parsed_resume: dict | None = None
     job_fit_analysis: dict | None = None
+
+
+class TimelineEventResponse(BaseModel):
+    id: UUID
+    application_id: UUID
+    event_type: str
+    from_status: str | None = None
+    to_status: str | None = None
+    actor_id: UUID | None = None
+    actor_type: str
+    metadata: dict | None = None
+    created_at: datetime

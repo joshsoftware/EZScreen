@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getApplicationDetailRequest,
+  getApplicationTimelineRequest,
   getJobApplicantsRequest,
   getJobRequest,
 } from './api'
@@ -38,6 +39,18 @@ export function useApplicationQuery(applicationId, options = {}) {
   })
 }
 
+export function useApplicationTimelineQuery(applicationId, options = {}) {
+  return useQuery({
+    queryKey: queryKeys.applicationTimeline(applicationId),
+    queryFn: async () => {
+      const data = await getApplicationTimelineRequest(applicationId)
+      return Array.isArray(data) ? data : []
+    },
+    enabled: Boolean(applicationId),
+    ...options,
+  })
+}
+
 export function useJobQueryClient() {
   const queryClient = useQueryClient()
 
@@ -60,6 +73,12 @@ export function useJobQueryClient() {
       if (!applicationId) return
       return queryClient.invalidateQueries({
         queryKey: queryKeys.application(applicationId),
+      })
+    },
+    invalidateApplicationTimeline(applicationId) {
+      if (!applicationId) return
+      return queryClient.invalidateQueries({
+        queryKey: queryKeys.applicationTimeline(applicationId),
       })
     },
   }

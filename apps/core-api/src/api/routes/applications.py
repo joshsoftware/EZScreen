@@ -16,6 +16,7 @@ from src.schemas.application import (
     BulkCreateRequest,
     BulkCreateResponse,
     JobFitRunResponse,
+    TimelineEventResponse,
     UploadUrlsRequest,
     UploadUrlsResponse,
 )
@@ -101,7 +102,9 @@ def bulk_create_applications(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     _assert_job_access(current_user, job)
     try:
-        return application_service.enqueue_bulk_resumes(job, body)
+        return application_service.enqueue_bulk_resumes(
+            job, body, actor_id=current_user.id
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -181,3 +184,31 @@ def get_application(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     _assert_job_access(current_user, job)
     return application_service.application_to_detail_response(application)
+
+
+@detail_router.get(
+    "/{application_id}/timeline",
+    response_model=list[TimelineEventResponse],
+    summary="List application timeline events in chronological order",
+)
+def get_application_timeline(
+    application_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+) -> list[TimelineEventResponse]:
+    application = application_service.get_application(db, application_id)
+    if application is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+
+    job = application.job_description
+    if job is None:
+        job = job_service.get_job(db, application.job_description_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+    return application_service.application_timeline_response(
+        db, application_id=application.id
+    )

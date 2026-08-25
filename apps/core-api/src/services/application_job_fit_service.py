@@ -8,9 +8,11 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from src.models.application import Application
+from src.models.enums import TimelineActorType, TimelineEventType
 from src.models.job_description import JobDescription
 from src.schemas.application import JobFitRunResponse
 from src.services.application_ai_service import call_match_resume_jd
+from src.services.application_timeline_service import append_timeline_event
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,8 @@ def apply_job_fit(
     job: JobDescription,
     application: Application,
     parsed_resume: dict,
+    *,
+    timeline_metadata: dict | None = None,
 ) -> None:
     parsed_jd = job.parsed_jd
     if not parsed_jd:
@@ -85,17 +89,21 @@ def apply_job_fit(
         )
         return
 
+    wrote_fit = False
     score = _extract_resume_score(fit)
     if score is not None:
         application.resume_score = Decimal(str(score))
+        wrote_fit = True
 
     yoe = fit.get("candidate_yoe")
     if isinstance(yoe, (int, float)):
         application.candidate_yoe = float(yoe)
+        wrote_fit = True
 
     analysis = fit.get("job_fit_analysis")
     if isinstance(analysis, dict):
         application.job_fit_analysis = analysis
+        wrote_fit = True
     elif fit.get("status") == "success":
         # Some AI deployments return the analysis payload at the top level.
         flat_analysis = {
@@ -105,8 +113,17 @@ def apply_job_fit(
         }
         if flat_analysis:
             application.job_fit_analysis = flat_analysis
+            wrote_fit = True
 
     db.add(application)
+    if wrote_fit:
+        append_timeline_event(
+            db,
+            application=application,
+            event_type=TimelineEventType.job_fit,
+            actor_type=TimelineActorType.system,
+            metadata=timeline_metadata,
+        )
     logger.info(
         "Job-fit success for application %s: score=%s, yoe=%s",
         application.id,
@@ -128,7 +145,13 @@ def rerun_job_fit(
     if not isinstance(application.parsed_resume, dict):
         raise ValueError("Application has no parsed_resume to match")
 
-    apply_job_fit(db, job, application, application.parsed_resume)
+    apply_job_fit(
+        db,
+        job,
+        application,
+        application.parsed_resume,
+        timeline_metadata={"rerun": True},
+    )
     db.commit()
     db.refresh(application)
     return JobFitRunResponse(

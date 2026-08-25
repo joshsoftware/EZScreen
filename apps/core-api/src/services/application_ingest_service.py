@@ -13,7 +13,15 @@ from sqlalchemy.orm import Session
 
 from src.db.session import SessionLocal
 from src.models.application import Application
-from src.models.enums import ApplicationStatus, JobStatus, UserRole, UserStatus
+from src.models.enums import (
+    ApplicationSource,
+    ApplicationStatus,
+    JobStatus,
+    TimelineActorType,
+    TimelineEventType,
+    UserRole,
+    UserStatus,
+)
 from src.models.job_description import JobDescription
 from src.models.user import User
 from src.schemas.application import (
@@ -26,6 +34,7 @@ from src.schemas.application import (
 from src.services import storage_service
 from src.services.application_ai_service import call_parse_resume
 from src.services.application_job_fit_service import apply_job_fit
+from src.services.application_timeline_service import append_timeline_event
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +79,8 @@ def create_upload_urls(
 def enqueue_bulk_resumes(
     job: JobDescription,
     body: BulkCreateRequest,
+    *,
+    actor_id: UUID | None = None,
 ) -> BulkCreateResponse:
     assert_job_accepts_applications(job)
 
@@ -83,7 +94,7 @@ def enqueue_bulk_resumes(
     for resume in body.resumes:
         thread = threading.Thread(
             target=_process_resume,
-            args=(job.id, resume.s3_key, resume.file_name),
+            args=(job.id, resume.s3_key, resume.file_name, actor_id),
             daemon=True,
             name=f"resume-{resume.file_name[:40]}",
         )
@@ -92,7 +103,12 @@ def enqueue_bulk_resumes(
     return BulkCreateResponse(job_id=job.id, queued=len(body.resumes))
 
 
-def _process_resume(job_id: UUID, s3_key: str, file_name: str) -> None:
+def _process_resume(
+    job_id: UUID,
+    s3_key: str,
+    file_name: str,
+    actor_id: UUID | None = None,
+) -> None:
     db = SessionLocal()
     try:
         job = db.get(JobDescription, job_id)
@@ -127,6 +143,7 @@ def _process_resume(job_id: UUID, s3_key: str, file_name: str) -> None:
             candidate=candidate,
             s3_key=s3_key,
             parsed_resume=parsed_resume,
+            actor_id=actor_id,
         )
         logger.info(
             "Application created for job %s, file %s, candidate %s, application %s",
@@ -226,6 +243,7 @@ def _create_application(
     candidate: User,
     s3_key: str,
     parsed_resume: dict,
+    actor_id: UUID | None = None,
 ) -> Application:
     now = datetime.now(timezone.utc)
     application = Application(
@@ -235,6 +253,7 @@ def _create_application(
         parsed_resume=parsed_resume,
         candidate_yoe=_extract_yoe(parsed_resume),
         status=ApplicationStatus.applied,
+        source=ApplicationSource.hr_bulk,
         applied_at=now,
     )
     db.add(application)
@@ -242,6 +261,25 @@ def _create_application(
         db.flush()
     except IntegrityError as exc:
         raise ValueError("Candidate has already applied to this job") from exc
+
+    scored_actor_type = (
+        TimelineActorType.user if actor_id is not None else TimelineActorType.system
+    )
+    append_timeline_event(
+        db,
+        application=application,
+        event_type=TimelineEventType.scored,
+        actor_id=actor_id,
+        actor_type=scored_actor_type,
+        to_status=ApplicationStatus.applied,
+    )
+    append_timeline_event(
+        db,
+        application=application,
+        event_type=TimelineEventType.resume_parsed,
+        actor_type=TimelineActorType.system,
+        to_status=ApplicationStatus.applied,
+    )
     return application
 
 

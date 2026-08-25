@@ -3,6 +3,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Panel, StatCard } from '../../components/ui/PageHeader'
 import { Skeleton } from '../../components/ui/Skeleton'
 import { cn } from '../../lib/cn'
+import { ApplicationTimelinePanel } from './ApplicationTimelinePanel'
 import { useOrgSettings } from '../org-admin/OrgSettingsContext'
 import {
   candidateInitials,
@@ -147,6 +148,9 @@ export function ApplicationDetailPanel({
   detail,
   loading,
   error,
+  timeline = [],
+  timelineLoading = false,
+  timelineError = null,
 }) {
   const { fitLabels } = useOrgSettings()
   const score = resolveMatchScore(detail)
@@ -286,6 +290,13 @@ export function ApplicationDetailPanel({
         </div>
 
         <div className="space-y-lg">
+          <ApplicationTimelinePanel
+            events={timeline}
+            source={detail.source}
+            loading={timelineLoading}
+            error={timelineError}
+          />
+
           <Panel title="Candidate">
             <div className="flex items-center gap-md mb-md">
               <div className="w-12 h-12 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-headline-sm">

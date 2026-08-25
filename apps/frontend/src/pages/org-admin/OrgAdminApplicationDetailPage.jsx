@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { rerunJobFitRequest } from '../../features/jobs/api'
 import {
   useApplicationQuery,
+  useApplicationTimelineQuery,
   useJobQuery,
   useJobQueryClient,
 } from '../../features/jobs/useJobQueries'
@@ -27,7 +28,8 @@ import { PageSkeleton } from '../../components/ui/Skeleton'
 export function OrgAdminApplicationDetailPage() {
   const { jobId = '', applicationId = '' } = useParams()
   const { fitLabels } = useOrgSettings()
-  const { invalidateApplication, invalidateJobApplicants } = useJobQueryClient()
+  const { invalidateApplication, invalidateApplicationTimeline, invalidateJobApplicants } =
+    useJobQueryClient()
   const [rerunning, setRerunning] = useState(false)
 
   const {
@@ -42,6 +44,13 @@ export function OrgAdminApplicationDetailPage() {
     error: detailError,
     refetch: refetchDetail,
   } = useApplicationQuery(applicationId)
+
+  const {
+    data: timeline = [],
+    isLoading: timelineLoading,
+    error: timelineQueryError,
+    refetch: refetchTimeline,
+  } = useApplicationTimelineQuery(applicationId)
 
   const mismatch =
     detail && detail.job_description_id !== jobId
@@ -67,7 +76,7 @@ export function OrgAdminApplicationDetailPage() {
   const canRerun = Boolean(detail?.parsed_resume) && !rerunning && !mismatch
 
   async function reload() {
-    await refetchDetail()
+    await Promise.all([refetchDetail(), refetchTimeline()])
   }
 
   async function onRerun() {
@@ -77,6 +86,7 @@ export function OrgAdminApplicationDetailPage() {
       await rerunJobFitRequest(jobId, detail.id)
       toast.success('Job-fit recalculated')
       await invalidateApplication(applicationId)
+      await invalidateApplicationTimeline(applicationId)
       await invalidateJobApplicants(jobId)
       await reload()
     } catch (err) {
@@ -158,7 +168,9 @@ export function OrgAdminApplicationDetailPage() {
             <Badge tone={fitTone(score, fitLabels)}>
               {fitLabel(score, fitLabels)}
             </Badge>
-            <Badge tone="info">Status · {formatApplicationStatus(detail.status)}</Badge>
+            <Badge tone="info">
+              Status · {formatApplicationStatus(detail.status, detail.source)}
+            </Badge>
             <Button
               icon="replay"
               loading={rerunning}
@@ -175,6 +187,15 @@ export function OrgAdminApplicationDetailPage() {
         detail={detail}
         loading={false}
         error={null}
+        timeline={timeline}
+        timelineLoading={timelineLoading}
+        timelineError={
+          timelineQueryError
+            ? timelineQueryError instanceof ApiError
+              ? timelineQueryError.message
+              : 'Failed to load timeline'
+            : null
+        }
         onRerunComplete={reload}
       />
     </div>
