@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,15 +25,26 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # MinIO / S3 (local dev defaults match docker-compose)
-    minio_endpoint: str = "172.60.1.147:9000"
+    minio_endpoint: str = "host.docker.internal:9000"
     minio_access_key: str = "minio_admin"
     minio_secret_key: str = "minio_password"
     minio_secure: bool = False
     minio_bucket_resumes: str = "resumes"
     s3_presign_expires_seconds: int = 900
 
-    # Internal parsing service (resume extraction)
-    parsing_service_url: str = "http://127.0.0.1:8002/internal/v1"
+    # AI core host. Change this once; URL is derived unless PARSING_SERVICE_URL is set.
+    ai_services_host: str = "127.0.0.1"
+    ai_services_port: int = 8002
+    ai_services_scheme: str = "http"
+    parsing_service_url: str | None = None
+
+    @field_validator("parsing_service_url", mode="before")
+    @classmethod
+    def _optional_parsing_url(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        cleaned = value.split(",")[0].strip()
+        return cleaned or None
 
     # Password reset (org admin / HR). Email delivery not wired yet —
     # when expose_link is true, API returns reset_url for local/dev use.
@@ -49,6 +61,15 @@ class Settings(BaseSettings):
     def s3_endpoint_url(self) -> str:
         scheme = "https" if self.minio_secure else "http"
         return f"{scheme}://{self.minio_endpoint}"
+
+    @property
+    def parsing_service_base_url(self) -> str:
+        if self.parsing_service_url:
+            return self.parsing_service_url.rstrip("/")
+        host = self.ai_services_host.strip()
+        return (
+            f"{self.ai_services_scheme}://{host}:{self.ai_services_port}/internal/v1"
+        )
 
 
 settings = Settings()
