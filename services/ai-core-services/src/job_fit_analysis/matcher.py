@@ -2,6 +2,7 @@ import json
 from src.llm.client import OllamaClient
 from src.core.logger import logger
 from src.parsing.schemas import ParsedResumeData, ParsedJDData
+from src.common.llm_utils import parse_llm_json
 
 class JobFitMatcher:
     def __init__(self):
@@ -15,17 +16,7 @@ class JobFitMatcher:
             logger.info("Sending job fit analysis prompt to LLM")
             response = await self.llm_client.openai_chat_generate(prompt=prompt, temperature=0.1, timeout=120.0)
             
-            raw_json = response.response.strip()
-            
-            # Basic cleanup in case LLM wraps it in markdown blocks
-            if raw_json.startswith("```json"):
-                raw_json = raw_json[7:]
-            if raw_json.startswith("```"):
-                raw_json = raw_json[3:]
-            if raw_json.endswith("```"):
-                raw_json = raw_json[:-3]
-                
-            match_result = json.loads(raw_json.strip())
+            match_result = parse_llm_json(response.response)
             return match_result
             
         except json.JSONDecodeError as e:
@@ -97,12 +88,10 @@ __JD_JSON__
 5. Sum the scores to get a total out of 100.
 6. Convert the total to a 0.0–10.0 scale:
    match_score = total_score / 10
-7. Output highly detailed reasoning in 4-6 bullet points written in plain, human-readable language suitable for a non-technical recruiter. DO NOT use technical terms like "ratio", "score", "formula", "0.0", or "1.0" in the reasoning. Instead, write naturally like a human recruiter would explain the candidate's fit. For example:
-   - GOOD: "The candidate has strong Java experience with over 14 years of hands-on work, well exceeding the job requirements."
-   - GOOD: "The candidate lists PostgreSQL as a skill but has no professional work experience using it in any of their roles."
-   - GOOD: "Experience gap in Spring Boot: the candidate has 2 years, but the job requires at least 3 years."
-   - BAD: "Experience ratios for must-have skills are 1.0 for Java and 0.0 for PostgreSQL."
-   - BAD: "skill_experience_ratio is 0.67 for Spring Boot."
+7. Output highly detailed analysis in plain, human-readable language suitable for a non-technical recruiter. DO NOT use technical terms like "ratio", "score", "formula", "0.0", or "1.0". Instead, write naturally. Provide the analysis in three parts:
+   - `reasoning`: 3-4 bullet points summarizing the overall fit (e.g. "The candidate matches all core must-have skills...", "Qualification requirements fully met...").
+   - `strengths`: 4-5 bullet points highlighting the candidate's strongest alignments with the JD (e.g. "Strong Java experience with over 14 years...", "Extensive domain expertise in Fintech...").
+   - `concerns`: 4-5 bullet points highlighting gaps, missing skills, or shortfalls in experience. Crucially, if the JD requires a balanced skill set (e.g. Full Stack requiring 3 years) but the candidate's experience is heavily skewed (e.g. 3 years frontend, but only 2 months backend), you MUST explicitly point out this imbalance as a concern. (e.g. "Experience gap in Spring Boot: the candidate has 2 years, but the job requires at least 3 years...", "Imbalanced Full Stack experience: Candidate has 3 years of React, but only 2 months of Node.js backend experience against a 3-year requirement."). If no concerns, provide 1 bullet saying "No major concerns identified."
 8. CRITICAL RULE: Never put a skill in `missing_skills` if it exists in `primary_skills` or `secondary_skills`, even if the candidate has 0.0 years of experience with it. If it is in their skills array, it MUST go into `matched_skills`.
 9. Do not change the predefined weighting: 40 + 30 + 20 + 10 = 100.
 
@@ -117,11 +106,21 @@ __JD_JSON__
   },
   "match_score": 8.15,
   "reasoning": [
-    "The candidate matches all core must-have skills including Java, Python, and SQL, showing strong technical alignment.",
+    "Overall strong fit with technical alignment across most core skills.",
+    "Qualification requirements fully met with a Bachelor's degree in Computer Science.",
+    "Slight gaps in cloud infrastructure experience, but solid foundation in backend development."
+  ],
+  "strengths": [
+    "The candidate matches core must-have skills including Java, Python, and SQL.",
+    "Strong hands-on experience in Java (14 years), well exceeding the job requirements.",
+    "Good coverage of nice-to-have skills, with practical experience in Docker and Kubernetes.",
+    "Extensive domain expertise in E-commerce architecture."
+  ],
+  "concerns": [
     "Missing critical must-have skill: AWS — not found anywhere in the candidate's resume.",
     "Experience gap in Spring Boot: the candidate has 2 years of hands-on experience, but the role requires at least 3 years.",
-    "Good coverage of nice-to-have skills, with practical experience in Docker and Kubernetes.",
-    "Qualification requirements fully met with a Bachelor's degree in Computer Science."
+    "Imbalanced experience for a Full Stack role: candidate has 4 years of frontend (React) experience, but only 3 months of backend (Node.js) experience.",
+    "The candidate lists PostgreSQL as a skill but has no professional work experience using it in any of their roles."
   ],
   "matched_skills": {
     "must_have": ["..."],

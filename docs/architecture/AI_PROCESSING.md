@@ -372,7 +372,10 @@ __JD_JSON__
 4. Sum the scores to get a total out of 100.
 5. Convert the total to a 0.0–10.0 scale:
    match_score = total_score / 10
-6. Output highly detailed reasoning in 4-6 bullet points. You MUST explicitly name the specific skills that are missing. You MUST explicitly name the specific skills where the candidate lacks the required years of experience, including the concrete numbers (e.g., 'Lacks required experience in Java: has 2.0 years, but 3.0 years are required').
+6. Output highly detailed analysis in plain, human-readable language suitable for a non-technical recruiter. DO NOT use technical terms like "ratio", "score", "formula", "0.0", or "1.0". Instead, write naturally. Provide the analysis in three parts:
+   - `reasoning`: 3-4 bullet points summarizing the overall fit (e.g. "The candidate matches all core must-have skills...", "Qualification requirements fully met...").
+   - `strengths`: 4-5 bullet points highlighting the candidate's strongest alignments with the JD (e.g. "Strong Java experience with over 14 years...", "Extensive domain expertise in Fintech...").
+   - `concerns`: 4-5 bullet points highlighting gaps, missing skills, or shortfalls in experience. Crucially, if the JD requires a balanced skill set (e.g. Full Stack requiring 3 years) but the candidate's experience is heavily skewed (e.g. 3 years frontend, but only 2 months backend), you MUST explicitly point out this imbalance as a concern. (e.g. "Experience gap in Spring Boot: the candidate has 2 years, but the job requires at least 3 years...", "Imbalanced Full Stack experience: Candidate has 3 years of React, but only 2 months of Node.js backend experience against a 3-year requirement."). If no concerns, provide 1 bullet saying "No major concerns identified."
 7. Do not change the predefined weighting: 40 + 30 + 20 + 10 = 100.
 
 ### Output Format (STRICT JSON):
@@ -386,11 +389,19 @@ __JD_JSON__
   },
   "match_score": 8.15,
   "reasoning": [
+    "Overall strong fit with technical alignment across most core skills.",
+    "Qualification requirements fully met with a Bachelor's degree in Computer Science.",
+    "Slight gaps in cloud infrastructure experience, but solid foundation in backend development."
+  ],
+  "strengths": [
     "Strong coverage of core must-have skills, explicitly matching Java, Python, and SQL.",
+    "Qualifications match the requirement of a Bachelor's degree in Computer Science.",
+    "Good alignment on good-to-have skills, possessing Docker and Kubernetes."
+  ],
+  "concerns": [
     "Missing critical must-have skill: AWS.",
     "Experience gap in Spring Boot: candidate has 2.0 years of experience, but 3.0 years are required.",
-    "Good alignment on good-to-have skills, possessing Docker and Kubernetes.",
-    "Qualifications match the requirement of a Bachelor's degree in Computer Science."
+    "Imbalanced experience for a Full Stack role: candidate has 4 years of frontend (React) experience, but only 3 months of backend (Node.js) experience."
   ],
   "matched_skills": {
     "must_have": ["..."],

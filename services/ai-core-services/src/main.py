@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.core.config import settings
 from src.api.v1 import parsing
 from src.api.v1 import matching
+from src.api.v1 import question_generation
 from src.api.v1.meeting_bot import router as meeting_bot_router
 app = FastAPI(
     title="EZScreen Service",
@@ -31,4 +32,5 @@ def health_check():
 # Register API Routers
 app.include_router(parsing.router, prefix="/internal/v1/parse")
 app.include_router(matching.router, prefix="/internal/v1/match")
+app.include_router(question_generation.router, prefix="/internal/v1/screening/questions")
 app.include_router(meeting_bot_router)
