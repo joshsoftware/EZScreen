@@ -61,13 +61,16 @@ Before deploying an integration, configure the API KEY for your bot from the [at
 Attendee.dev requires **publicly accessible HTTPS and WSS URLs** to send webhooks and connect audio WebSockets to the server.
 
 * **Local Development Setup (Ngrok)**:
-  Run Ngrok to expose local port 5001:
+  Run Ngrok to expose local port 8002 (the `ai-core-services` port):
   ```bash
-  ngrok http 5001
+  ngrok http 8002
   ```
   Ngrok generates a public forwarding URL (e.g. `https://a1b2-34-56-78-90.ngrok-free.app`).
   - Webhook URL: `https://a1b2-34-56-78-90.ngrok-free.app/webhook`
   - WebSocket URL: `wss://a1b2-34-56-78-90.ngrok-free.app/attendee-websocket`
+  
+  > [!IMPORTANT]
+  > Attendee strictly validates that the WebSocket URL begins with `wss://`. Using unencrypted `ws://` or pointing to `localhost` will result in a 400 Bad Request error.
 
 ---
 

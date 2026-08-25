@@ -54,8 +54,7 @@ flowchart TD
         
         subgraph CoreServices["Core Services"]
             CoreAPI["Core API Service<br/>(apps/core-api)"]
-            ParsingSvc["Parsing & Matching Service<br/>(services/parsing-matching)"]
-            AIScreeningSvc["AI Screening Service<br/>(services/ai-screening)"]
+            AICoreSvc["AI Core Services<br/>(services/ai-core-services)"]
         end
         
         HR --> CoreAPI
@@ -116,7 +115,7 @@ sequenceDiagram
 ```
 
 ### Functional Specifications
-* **FR-101 (Direct Parsing Endpoint)**: `POST /api/v1/jobs/parse` accepts raw text or uploaded PDF/DOCX binary, parses requirements in-memory via `services/parsing-matching`, and returns extracted `parsed_jd` fields directly to the UI.
+* **FR-101 (Direct Parsing Endpoint)**: `POST /api/v1/jobs/parse` accepts raw text or uploaded PDF/DOCX binary, parses requirements in-memory via `services/ai-core-services`, and returns extracted `parsed_jd` fields directly to the UI.
 * **FR-102 (Job Creation & Save)**: `POST /api/v1/jobs` accepts HR-verified fields (`title`, `description`, `job_type`, `work_type`, `location`, `experience_min`, `experience_max`, `skills`, `parsed_jd`, `status`) and saves the record in `job_descriptions`.
 * **FR-103 (Unified Update Endpoint)**: `PUT /api/v1/jobs/{id}` serves as the single unified route to update job fields, `parsed_jd` requirements, and/or status (`draft`, `published`, `closed`).
 * **FR-104 (Subdomain Resolution)**: `GET /api/v1/public/jobs` filters published jobs dynamically based on the HTTP Host Header (`{org}.ezscreen.io`).
@@ -152,7 +151,7 @@ sequenceDiagram
 ### Functional Specifications
 * **FR-201 (Candidate Portal Application)**: Candidates apply via `POST /api/v1/public/jobs/{id}/apply` with `first_name`, `last_name`, `email`, `phone`, and `resume` file binary.
 * **FR-201b (HR Bulk Upload)**: HR uploads via `POST /api/v1/jobs/{id}/applications/upload-urls` then `POST /api/v1/jobs/{id}/applications/bulk`. No batch poll API. Results appear on `GET /api/v1/jobs/{id}/applicants`.
-* **FR-202 (Resume Extraction)**: `services/parsing-matching` extracts `candidate_name`, `email`, `phone`, `experience_years`, `skills`, `education`, and `summary` into `parsed_resume` JSONB. Core-api creates the candidate user only after email is extracted.
+* **FR-202 (Resume Extraction)**: `services/ai-core-services` extracts `candidate_name`, `email`, `phone`, `experience_years`, `skills`, `education`, and `summary` into `parsed_resume` JSONB. Core-api creates the candidate user only after email is extracted.
 * **FR-203 (Matching Algorithm)**: Evaluates `parsed_resume` against stored `parsed_jd` and calculates `resume_score` (0.0 to 100.0) based on weighted formula:
   $$\text{resume\_score} = (\text{skills\_score} \times 0.40 + \text{experience\_score} \times 0.35 + \text{education\_score} \times 0.25) \times 100$$
 * **FR-204 (Denormalised Sorting Columns)**: Stores `resume_score` and `candidate_yoe` directly as typed columns on `applications` table for instant sorting without JSON parsing.
@@ -197,7 +196,7 @@ sequenceDiagram
 ```
 
 ### Functional Specifications
-* **FR-401 (Session Scheduling & Question Auto-Gen)**: `POST /api/v1/interview-sessions` schedules an AI interview session and invokes `services/ai-screening` to generate static candidate-tailored questions (`generated_questions`). Each question item contains `id`, `question`, `expected_keywords`, `example_depth`, and `follow_up`.
+* **FR-401 (Session Scheduling & Question Auto-Gen)**: `POST /api/v1/interview-sessions` schedules an AI interview session and invokes `services/ai-core-services` to generate static candidate-tailored questions (`generated_questions`). Each question item contains `id`, `question`, `expected_keywords`, `example_depth`, and `follow_up`.
 * **FR-402 (Attendee Bot Dispatching)**: `POST /api/v1/interview-sessions/{id}/dispatch-bot` dispatches the Attendee.dev meeting bot to join the Google Meet URL 5 minutes prior to start time.
 * **FR-403 (Live Interview Execution Pipeline)**:
   * **STT**: Converts candidate audio stream into real-time transcript tokens.

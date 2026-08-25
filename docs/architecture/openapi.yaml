@@ -11,9 +11,9 @@ servers:
     description: Production Core API Gateway
   - url: http://localhost:8000/api/v1
     description: Local Development Core API
-  - url: http://parsing-matching:8001/internal/v1
+  - url: http://ai-core-services:8002/internal/v1
     description: Internal Parsing & Matching Microservice
-  - url: http://ai-screening:8002/internal/v1
+  - url: http://ai-core-services:8002/internal/v1
     description: Internal AI Screening Microservice
 
 tags:
@@ -966,7 +966,7 @@ paths:
   /internal/v1/parse/resume:
     post:
       tags: [Internal Service]
-      summary: Internal resume parsing engine (services/parsing-matching)
+      summary: Internal resume parsing engine (services/ai-core-services)
       operationId: internalParseResume
       requestBody:
         required: true
@@ -1032,7 +1032,7 @@ paths:
   /internal/v1/screening/questions/generate:
     post:
       tags: [Internal Service]
-      summary: Internal session question generation (services/ai-screening)
+      summary: Internal session question generation (services/ai-core-services)
       operationId: internalGenerateQuestions
       requestBody:
         required: true
@@ -1061,7 +1061,7 @@ paths:
   /internal/v1/screening/analysis/evaluate:
     post:
       tags: [Internal Service]
-      summary: Internal transcript screening evaluation (services/ai-screening)
+      summary: Internal transcript screening evaluation (services/ai-core-services)
       operationId: internalEvaluateTranscript
       requestBody:
         required: true

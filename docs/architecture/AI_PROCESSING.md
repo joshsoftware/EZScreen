@@ -181,7 +181,7 @@ WORK EXPERIENCE:
 * Return years as null only when the available dates are genuinely insufficient to calculate a reliable duration.
 * total_years must represent unique professional experience across all extracted roles. Overlapping employment periods must not be double-counted.
 * CRITICAL: First calculate the individual role `years`. Then, calculate `total_years` as the exact mathematical sum of all individual role `years`, subtracting any overlapping durations so time is not double-counted. Always double-check your addition.
-* `total_years` and individual role `years` should be formatted to only 1 decimal place (e.g., 3.45 becomes 3.4).
+* `total_years` and individual role `years` should be rounded and formatted to only 1 decimal place (e.g., 3.45 becomes 3.4).
 
 ROLE HIGHLIGHTS:
 
@@ -216,30 +216,47 @@ EDUCATION AND CERTIFICATIONS:
 
 Schema:
 {
-  "primary_skills": ["string"],
-  "secondary_skills": ["string"],
-  "domain_expertise": ["string"],
-  "relevant_experience": {
-    "total_years": "number or null",
-    "roles": [
+  "parsed_resume": {
+    "personal_info": {
+      "first_name": "string or null",
+      "last_name": "string or null",
+      "phone_number": "string or null",
+      "email": "string or null",
+      "linkedin_url": "string or null",
+      "github_url": "string or null",
+      "leetcode_url": "string or null"
+    },
+    "primary_skills": ["string"],
+    "secondary_skills": ["string"],
+    "domain_expertise": ["string"],
+    "skill_experience": [
       {
-        "title": "string or null",
-        "company": "string or null",
-        "start_date": "string or null",
-        "end_date": "string or null",
-        "years": "number or null",
-        "highlights": ["string"]
+        "skill": "string",
+        "years": "number or null"
+      }
+    ],
+    "experience": {
+      "total_years": "number or null",
+      "roles": [
+        {
+          "title": "string or null",
+          "company": "string or null",
+          "start_date": "string or null",
+          "end_date": "string or null",
+          "years": "number or null",
+          "highlights": ["string"]
+        }
+      ]
+    },
+    "education_certificates": [
+      {
+        "name": "string",
+        "issuer": "string or null",
+        "year": "string or null",
+        "type": "degree or certification"
       }
     ]
-  },
-  "education_certificates": [
-    {
-      "name": "string",
-      "issuer": "string or null",
-      "year": "string or null",
-      "type": "degree or certification"
-    }
-  ]
+  }
 }
 ```
 
@@ -429,7 +446,7 @@ The final `match_score` (0.0–10.0) is derived from a **100-point rubric** eval
 | **20** | Good-to-Have Skills | `(matched / total good-to-haves) × 20` |
 | **10** | Qualifications & Domain | 10 = exact match · 5 = related field or relevant cert · 0 = unrelated |
 
-The `match_score` is stored as a denormalised `float` column on the `applications` table to allow fast `ORDER BY match_score DESC` queries without recomputation.
+The `resume_score` is stored as a denormalised `Numeric(5, 2)` column on the `applications` table to allow fast `ORDER BY resume_score DESC` queries without recomputation. The full match JSON is stored in the `job_fit_analysis` column.
 
 > **Edge cases**:
 > - If the JD specifies no minimum experience, the candidate receives the full 30 points provided `total_years` is not null/0.
