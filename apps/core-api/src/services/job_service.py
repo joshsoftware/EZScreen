@@ -187,7 +187,7 @@ def _jd_parse_body(source: JobCreate | JobDescription) -> dict:
 
 
 def _call_parse_jd(source: JobCreate | JobDescription) -> dict:
-    url = f"{settings.parsing_service_url.rstrip('/')}/parse/jd"
+    url = f"{settings.parsing_service_base_url}/parse/jd"
     try:
         with httpx.Client(timeout=120.0) as client:
             response = client.post(url, json=_jd_parse_body(source))

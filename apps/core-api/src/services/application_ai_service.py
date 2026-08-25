@@ -17,7 +17,7 @@ __all__ = [
 
 
 def _ai_url(path: str) -> str:
-    return f"{settings.parsing_service_url.rstrip('/')}/{path.lstrip('/')}"
+    return f"{settings.parsing_service_base_url}/{path.lstrip('/')}"
 
 
 def _json_safe(value: object) -> object:

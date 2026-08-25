@@ -64,8 +64,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      # Docker DNS only — do not set MINIO_ENDPOINT here (presigned URLs go to the browser)
-      PARSING_SERVICE_URL: http://ai-core-services:8002/internal/v1
+      # Docker DNS — do not set MINIO_ENDPOINT here (presigned URLs go to the browser)
+      AI_SERVICES_HOST: ai-core-services
     depends_on:
       db:
         condition: service_healthy
