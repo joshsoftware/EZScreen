@@ -64,12 +64,17 @@ How to use the match analysis above:
 - qualification_match: false    → do not expect academic-level depth in answers
 
 ═══ SCREENING DIFFICULTY RULES ═══
-Apply the following difficulty guidance based on the JD requiring {min_y} years of experience:
+CRITICAL: The difficulty of each question MUST be determined on a per-skill basis according to the Job Description's required experience, NOT the candidate's actual experience.
+To determine the target experience level for a specific skill question, use the JD's required years of experience for that skill.
+- Target Experience Level = jd_required_skill_years (If not explicitly stated in JD, default to the JD's overall min_years).
+
+Example 1: Candidate has 10 years of Java, JD requires 3 years -> Ask a 3-year level question.
+Example 2: Candidate has 1 year of Java, JD requires 3 years -> Ask a 3-year level question.
+
+Apply the following difficulty guidance based on the Target Experience Level:
 - If 0-2 years (EASY): Ask basic knowledge-verification questions only.
 - If 3-5 years (MEDIUM): Ask single-concept questions that verify genuine hands-on knowledge.
-- If 5+ years (HARD): Ask high-level "when to use what" questions.
-
-CRITICAL: When generating a question about a specific skill, check the candidate's skill_experience for that skill's years. A candidate may have 10 total years but only 1 year of Docker — ask Docker questions at "aware" level, not "full_depth".
+- If 5+ years (HARD): Ask high-level "when to use what" or architecture questions.
 
 Generate EXACTLY 15 questions in total across the following categories:
 1. CATEGORY "must_have_matched" — from matched_skills.must_have (7–8 questions)
