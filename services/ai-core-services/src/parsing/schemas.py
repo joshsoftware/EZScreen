@@ -41,8 +41,8 @@ class ParsedResumeData(BaseModel):
     primary_skills: List[str] = Field(default_factory=list)
     secondary_skills: List[str] = Field(default_factory=list)
     domain_expertise: List[str] = Field(default_factory=list)
-    skill_experience: List[CandidateSkillExperience] = Field(default_factory=list)
     experience: Experience = Field(default_factory=Experience)
+    skill_experience: List[CandidateSkillExperience] = Field(default_factory=list)
     education_certificates: List[EducationCertificate] = Field(default_factory=list)
 
 class ParsedResumeResponse(BaseModel):

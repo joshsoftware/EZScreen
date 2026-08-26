@@ -1,6 +1,7 @@
 import asyncio
 import json
 import datetime
+import calendar
 from src.core.storage import storage_client
 from src.parsing.docling_wrapper import docling_wrapper
 from src.llm.client import OllamaClient
@@ -47,6 +48,8 @@ class ResumeParser:
                 parsed_data = json.loads(raw_json.strip())
                 if "parsed_resume" in parsed_data:
                     parsed_data = parsed_data["parsed_resume"]
+                    
+                self._recalculate_experience(parsed_data)
                 return parsed_data
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse LLM JSON output: {e}\nRaw Output: {response.response}")
@@ -56,6 +59,66 @@ class ResumeParser:
             import os
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+    def _recalculate_experience(self, parsed_data: dict) -> None:
+        """Overrides the LLM's hallucinated date math with strict Python datetime calculations."""
+        if not parsed_data or "experience" not in parsed_data:
+            return
+        
+        roles = parsed_data["experience"].get("roles", [])
+        if not roles:
+            return
+            
+        def parse_date(date_str, is_end_date=False):
+            if not date_str or str(date_str).lower() in ("present", "current", "now", "null", "none"):
+                return datetime.datetime.now()
+            date_str = str(date_str).strip()
+            try:
+                if len(date_str) == 10:
+                    return datetime.datetime.strptime(date_str, "%Y-%m-%d")
+                elif len(date_str) == 7:
+                    dt = datetime.datetime.strptime(date_str, "%Y-%m")
+                    if is_end_date:
+                        _, last_day = calendar.monthrange(dt.year, dt.month)
+                        dt = dt.replace(day=last_day)
+                    return dt
+                elif len(date_str) == 4:
+                    dt = datetime.datetime.strptime(date_str, "%Y")
+                    if is_end_date:
+                        dt = dt.replace(month=12, day=31)
+                    return dt
+            except ValueError:
+                pass
+            return None
+
+        intervals = []
+        for role in roles:
+            start_dt = parse_date(role.get("start_date"), is_end_date=False)
+            end_dt = parse_date(role.get("end_date"), is_end_date=True)
+            
+            if start_dt and end_dt and start_dt <= end_dt:
+                days = (end_dt - start_dt).days
+                role["years"] = round(days / 365.25, 1)
+                intervals.append([start_dt, end_dt])
+            else:
+                role["years"] = 0.0
+                
+        # Merge overlapping intervals for total_years
+        if not intervals:
+            parsed_data["experience"]["total_years"] = 0.0
+            return
+            
+        intervals.sort(key=lambda x: x[0])
+        merged = [intervals[0]]
+        for current in intervals[1:]:
+            last = merged[-1]
+            if current[0] <= last[1]:
+                last[1] = max(last[1], current[1])
+            else:
+                merged.append(current)
+                
+        total_days = sum((iv[1] - iv[0]).days for iv in merged)
+        parsed_data["experience"]["total_years"] = round(total_days / 365.25, 1)
 
     def _build_prompt(self, markdown_text: str, current_date: str) -> str:
         return f"""
@@ -214,13 +277,8 @@ SCHEMA:
 "primary_skills": ["string"],
 "secondary_skills": ["string"],
 "domain_expertise": ["string"],
-"skill_experience": [
-{
-"skill": "string",
-"years": "number or null"
-}
-],
 "experience": {
+"total_years_calculation": "string",
 "total_years": "number or null",
 "roles": [
 {
@@ -233,6 +291,12 @@ SCHEMA:
 }
 ]
 },
+"skill_experience": [
+{
+"skill": "string",
+"years": "number or null"
+}
+],
 "education_certificates": [
 {
 "name": "string",
