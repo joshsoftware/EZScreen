@@ -51,8 +51,8 @@ __JD_JSON__
    - Calculate Relevant Experience by comparing the candidate's `skill_experience` array with the JD's must-have and good-to-have skill requirements.
    - For each JD skill, identify the candidate's candidate_years from the parsed_resume's `skill_experience` array. If the skill is not in the array, candidate_years = 0.0.
    - Calculate the skill_experience_ratio for each JD skill using these rules:
-     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate HAS experience (> 0.0): give ratio as 1.0
-     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate has NO experience: give ratio as 0.0
+     * If the required experience is NOT mentioned in the JD for a particular skill AND the candidate possesses the skill (i.e., it is in matched_skills): give ratio as 1.0 (even if candidate_years is 0.0)
+     * If the candidate does NOT possess the skill (i.e., it is in missing_skills): give ratio as 0.0
      * If the required experience IS mentioned in the JD for a particular skill and the candidate has LESS experience than required: give ratio as candidate_years / required_years
      * If the required experience IS mentioned in the JD for a particular skill and the candidate has MORE or EQUAL experience than required: give ratio as 1.0
    - Calculate must-have experience strictly using this exact formula:
@@ -60,10 +60,10 @@ __JD_JSON__
    - Calculate good-to-have experience strictly using this exact formula:
      good_to_have_experience_score = (Sum of all skill_experience_ratios for good-to-have skills / total number of good-to-have skills) * 10
      (If there are no good-to-have skills in the JD, good_to_have_experience_score = 10)
-   - experience_score = must_have_experience_score + good_to_have_experience_score
-   - Round experience_score to 2 decimal places.
+   - raw_experience = must_have_experience_score + good_to_have_experience_score
+   - Round raw_experience to 2 decimal places.
    - For each skill in `must_have_experience` and `good_to_have_experience`, set `meets_requirement` to `true` ONLY IF `skill_experience_ratio` >= 1.0, otherwise `false`.
-   - Set `experience_match` to `true` if at least 75% of the must-have skills have `meets_requirement` set to `true`. Otherwise, set it to `false`.
+   - Set `experience_match` to `true` ONLY IF `raw_experience` is >= 20.0. Otherwise, set it to `false`.
 
 3. Good-to-Have Skills (20 Points):
    - Calculate the percentage of JD good-to-have skills found.
@@ -85,13 +85,16 @@ __JD_JSON__
 1. Compare candidate's skills with JD must-have and good-to-have skills.
 2. Calculate Relevant Experience specifically using the candidate's `skill_experience` array against the JD's must-have and good-to-have skills and their required years.
 3. Systematically calculate the raw score for each of the 4 criteria based on their respective weights (40, 30, 20, 10).
-4. CRITICAL: Convert each individual raw score into an out-of-10.0 scale for the `score_breakdown`:
-   - `must_have_skills_score` = raw_must_have_score / 4
-   - `experience_score` = raw_experience_score / 3
-   - `good_to_have_skills_score` = raw_good_to_have_score / 2
-   - `qualifications_score` = raw_qualifications_score / 1
-   (e.g., if raw_must_have_score is 32.0 out of 40, output 8.0)
-5. Calculate the final `match_score` as the average of these four converted out-of-10 scores (i.e., sum of the four converted scores divided by 4).
+4. CRITICAL: Output the raw scores first, then convert them into a consolidated, out-of-10.0 scale for the `score_breakdown`:
+   - `raw_must_have_skills`: max 40.0
+   - `raw_good_to_have_skills`: max 20.0
+   - `raw_experience`: max 30.0
+   - `raw_qualifications`: max 10.0
+   - `skills_score` = (raw_must_have_skills + raw_good_to_have_skills) / 6
+   - `experience_score` = raw_experience / 3
+   - `qualifications_score` = raw_qualifications / 1
+   (e.g., if raw_must_have_skills is 32.0 and raw_good_to_have_skills is 15.0, skills_score is 7.83)
+5. Calculate the final `match_score` out of 10.0 based on the total raw points: match_score = (raw_must_have_skills + raw_experience + raw_good_to_have_skills + raw_qualifications) / 10.
 6. Output highly detailed analysis in plain, human-readable language suitable for a non-technical recruiter. DO NOT use technical terms like "ratio", "score", "formula", "0.0", or "1.0". Instead, write naturally. Provide the analysis in three parts:
    - `reasoning`: 3-4 bullet points summarizing the overall fit (e.g. "The candidate matches all core must-have skills...", "Qualification requirements fully met...").
    - `strengths`: 4-5 bullet points highlighting the candidate's strongest alignments with the JD (e.g. "Strong Java experience with over 14 years...", "Extensive domain expertise in Fintech...").
@@ -102,12 +105,15 @@ __JD_JSON__
 
 {
   "score_breakdown": {
-    "must_have_skills_score": 8.0,
+    "raw_must_have_skills": 32.0,
+    "raw_good_to_have_skills": 15.0,
+    "raw_experience": 24.5,
+    "raw_qualifications": 10.0,
+    "skills_score": 7.83,
     "experience_score": 8.16,
-    "good_to_have_skills_score": 7.5,
     "qualifications_score": 10.0
   },
-  "match_score": 8.41,
+  "match_score": 8.15,
   "reasoning": [
     "Overall strong fit with technical alignment across most core skills.",
     "Qualification requirements fully met with a Bachelor's degree in Computer Science.",

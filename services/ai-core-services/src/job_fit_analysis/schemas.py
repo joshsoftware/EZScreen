@@ -9,9 +9,12 @@ class MatchRequest(BaseModel):
     parsed_jd: ParsedJDData
 
 class ScoreBreakdown(BaseModel):
-    must_have_skills_score: float
+    raw_must_have_skills: float
+    raw_good_to_have_skills: float
+    raw_experience: float
+    raw_qualifications: float
+    skills_score: float
     experience_score: float
-    good_to_have_skills_score: float
     qualifications_score: float
 
 class SkillCategorization(BaseModel):
