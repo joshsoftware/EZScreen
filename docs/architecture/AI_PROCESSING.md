@@ -655,10 +655,10 @@ Each question must include an `answer_depth` level ("aware", "partial_depth", or
 - "partial_depth" → partial coverage: the answer must touch some of the expected keywords with a basic explanation.
 - "full_depth" → full depth: the answer must cover most expected keywords with a clear, accurate explanation.
 
-Assign depth dynamically based on the candidate's {years} years of experience AND the question category:
-- Use "aware" for "lacking_skill" and "good_to_have" categories, OR if the candidate has < 2 years experience (awareness check only).
-- Use "partial_depth" for "must_have_matched" questions when the candidate has 2-4 years experience, OR if experience_match is false.
-- Use "full_depth" for "must_have_matched" and "experience_domain" questions only when the candidate has 5+ years experience and clearly possesses the skill.
+Assign depth dynamically based on the JD's REQUIRED EXPERIENCE for that specific skill (not the candidate's experience) AND the question category:
+- Use "aware" for "lacking_skill" and "good_to_have" categories, OR if the JD requires < 2 years for that specific skill.
+- Use "partial_depth" for "must_have_matched" questions when the JD requires 2-4 years for that specific skill, OR if experience_match is false.
+- Use "full_depth" for "must_have_matched" and "experience_domain" questions only when the JD requires 5+ years for that specific skill.
 
 ═══ OUTPUT FORMAT ═══
 Return a JSON array only. No markdown, no commentary.
