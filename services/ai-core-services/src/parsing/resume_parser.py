@@ -93,13 +93,15 @@ SKILLS:
 * Do not place the same normalized skill in both primary_skills and secondary_skills.
 * Do not infer skills from projects or job titles unless the skill is explicitly stated.
 * Normalize obvious naming variations, e.g. "React.js"/"ReactJS" → "React", "Postgres"/"PostgreSQL" → "PostgreSQL".
+* CRITICAL RULE: Completely ignore Internship roles. Do not extract any skills from internship descriptions into primary_skills or secondary_skills.
 
 SKILL-SPECIFIC EXPERIENCE (skill_experience):
 
 * For EVERY skill identified in primary_skills and secondary_skills, determine the candidate's total years of experience with that specific skill.
 * STEP 1 - Check for DIRECT per-skill year statements ONLY:
-  - A valid explicit statement is when the candidate directly associates a specific number of years with ONE specific skill, such as: "Java (5 years)", "7+ years of Python", "Spring Boot - 3 years".
-  - CRITICAL: Do NOT treat professional summary or objective statements as per-skill declarations. For example, "10+ years of experience in enterprise development using Java, J2EE, Hibernate, JDBC" means the candidate has 10+ years of TOTAL career experience, NOT 10+ years in each of Java, J2EE, Hibernate, and JDBC individually. Ignore such summary statements when calculating per-skill experience.
+  - A valid explicit statement is when the candidate directly associates a specific number of years with one or more specific skills, such as: "Java (5 years)", "7+ years of Python", or "10 years of experience in Java, Spring".
+  - If they mention multiple skills tied directly to a specific year count (e.g., "10 years of experience in Java, Spring"), apply that exact number of years to EACH of those specific skills.
+  - If a candidate includes a broad professional summary statement like "10+ years of experience in enterprise development using Java, J2EE, Hibernate, JDBC", you MUST apply that exact number of years (e.g., 10 years) to EACH of the skills listed in that statement. Consider these statements as valid per-skill declarations.
   - If a valid direct per-skill statement is found, use that exact number.
 * STEP 2 - If no direct per-skill statement exists, calculate from ROLE HIGHLIGHTS ONLY:
   - Look at each role in the "Professional Experience" / "Work Experience" section.
@@ -114,6 +116,7 @@ SKILL-SPECIFIC EXPERIENCE (skill_experience):
 WORK EXPERIENCE:
 
 * Extract every distinct professional role separately.
+* CRITICAL RULE: Do NOT extract Internship roles. Completely ignore all internships for role extraction, total years calculation, and skill experience calculations.
 * For every role, extract title, company, start_date, end_date, years, and highlights.
 * Extract dates only from information explicitly associated with that role.
 * If a date is unavailable, use null. Never infer a missing date from another role.
