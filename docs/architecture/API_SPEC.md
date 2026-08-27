@@ -1366,14 +1366,25 @@ Response 200:
   "status": "success",
     "job_fit_analysis": {
       "score_breakdown": {
-        "must_have_skills_score": 40.0,
-        "experience_score": 30.0,
-        "good_to_have_skills_score": 20.0,
+        "raw_must_have_skills": 32.0,
+        "raw_good_to_have_skills": 15.0,
+        "raw_experience": 24.5,
+        "raw_qualifications": 10.0,
+        "skills_score": 7.83,
+        "experience_score": 8.16,
         "qualifications_score": 10.0
       },
-      "match_score": 100.0,
+      "match_score": 8.15,
       "reasoning": [
-        "Candidate meets all must-have skills..."
+        "Overall strong fit with technical alignment across most core skills.",
+        "Qualification requirements fully met with a Bachelor's degree in Computer Science."
+      ],
+      "strengths": [
+        "Strong coverage of core must-have skills, explicitly matching Java."
+      ],
+      "concerns": [
+        "Missing critical must-have skill: AWS.",
+        "Experience gap in Spring Boot: candidate has 2.0 years of experience, but 3.0 years are required."
       ],
       "matched_skills": {
         "must_have": ["Java"],
@@ -1425,7 +1436,7 @@ Request:
   },
   "body": {
     "parsed_jd": {},
-    "parsed_resume": {}
+    "job_fit_analysis": {}
   }
 }
 

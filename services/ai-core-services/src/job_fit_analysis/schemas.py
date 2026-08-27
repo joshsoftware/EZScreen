@@ -9,9 +9,12 @@ class MatchRequest(BaseModel):
     parsed_jd: ParsedJDData
 
 class ScoreBreakdown(BaseModel):
-    must_have_skills_score: float
+    raw_must_have_skills: float
+    raw_good_to_have_skills: float
+    raw_experience: float
+    raw_qualifications: float
+    skills_score: float
     experience_score: float
-    good_to_have_skills_score: float
     qualifications_score: float
 
 class SkillCategorization(BaseModel):
@@ -28,7 +31,9 @@ class SkillMatchExperience(BaseModel):
 class MatchScore(BaseModel):
     score_breakdown: ScoreBreakdown
     match_score: float = Field(..., description="Final match score out of 10.0")
-    reasoning: List[str] = Field(..., description="Bullet points explaining the reasoning")
+    reasoning: List[str] = Field(..., description="Bullet points explaining the overall reasoning")
+    strengths: List[str] = Field(default_factory=list, description="Strengths based on resume vs JD comparison")
+    concerns: List[str] = Field(default_factory=list, description="Concerns based on resume vs JD comparison")
     matched_skills: SkillCategorization
     missing_skills: SkillCategorization
     must_have_experience: List[SkillMatchExperience] = Field(default_factory=list)

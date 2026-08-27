@@ -139,27 +139,32 @@ SKILLS:
 * Do not place the same normalized skill in both primary_skills and secondary_skills.
 * Do not infer skills from projects or job titles unless the skill is explicitly stated.
 * Normalize obvious naming variations, e.g. "React.js"/"ReactJS" → "React", "Postgres"/"PostgreSQL" → "PostgreSQL".
+* CRITICAL RULE: Completely ignore Internship roles. Do not extract any skills from internship descriptions into primary_skills or secondary_skills.
 
 SKILL-SPECIFIC EXPERIENCE (skill_experience):
 
 * For EVERY skill identified in primary_skills and secondary_skills, determine the candidate's total years of experience with that specific skill.
-* STEP 1 - Check for DIRECT per-skill year statements ONLY:
-  - A valid explicit statement is when the candidate directly associates a specific number of years with ONE specific skill, such as: "Java (5 years)", "7+ years of Python", "Spring Boot - 3 years".
-  - CRITICAL: Do NOT treat professional summary or objective statements as per-skill declarations. For example, "10+ years of experience in enterprise development using Java, J2EE, Hibernate, JDBC" means the candidate has 10+ years of TOTAL career experience, NOT 10+ years in each of Java, J2EE, Hibernate, and JDBC individually. Ignore such summary statements when calculating per-skill experience.
-  - If a valid direct per-skill statement is found, use that exact number.
-* STEP 2 - If no direct per-skill statement exists, calculate from ROLE HIGHLIGHTS ONLY:
+* STEP 1 - Calculate from ROLE HIGHLIGHTS for ALL skills:
   - Look at each role in the "Professional Experience" / "Work Experience" section.
-  - A skill is considered "used in a role" ONLY if it is explicitly mentioned in that role's bullet points/highlights. Do NOT assume a skill was used in a role just because the role title sounds related.
-  - Sum the durations (years) of all roles where the skill is explicitly mentioned in the highlights.
+  - A skill is considered "used in a role" ONLY if it is explicitly mentioned in that role's bullet points/highlights.
+  - Sum the durations (years) of all roles where the skill is explicitly mentioned.
   - Subtract overlapping role durations to prevent double-counting.
-* STEP 3 - Apply safety checks:
-  - The calculated years for any skill MUST NEVER exceed the candidate's `total_years` of professional experience. Cap it if it does.
-  - Round the final skill experience to 1 decimal place.
+  - This provides the `calculated_role_years`.
+* STEP 2 - Check for DIRECT per-skill year statements:
+  - A valid explicit statement is when the candidate directly associates a specific number of years with one or more specific skills, such as: "Java (5 years)", "7+ years of Python", or "10 years of experience in Java, Spring".
+  - If a candidate includes a broad professional summary statement like "3+ years of experience in enterprise development using Java, Spring Boot", apply that exact number of years (e.g., 3.0) to EACH of the skills listed.
+  - CRITICAL: If a candidate states a number of years in a professional summary paragraph (e.g., "7 years of success in DevOps..."), and then lists skills within that SAME summary paragraph (e.g., "... Skilled in Jenkins, Docker"), you MUST apply that exact number of years (e.g., 7.0) to ALL skills mentioned anywhere within that summary block, even if they are in separate sentences.
+  - This provides the `stated_years`.
+* STEP 3 - Determine Final Skill Experience:
+  - If a skill has both `stated_years` and `calculated_role_years`, you MUST use the MAXIMUM of the two values. (e.g., if summary says 3 years, but roles add up to 4.5 years, use 4.5 years).
+  - If a skill only has one of the values, use that value.
+* Round the final skill experience to 1 decimal place.
 * If a skill appears ONLY in a "Technical Skills" section or summary but is NOT mentioned in any role highlight or project, assign it 0.0 years.
 
 WORK EXPERIENCE:
 
 * Extract every distinct professional role separately.
+* CRITICAL RULE - INTERNSHIPS: If a role title or description contains the word "Intern" or "Internship", you MUST skip it entirely. DO NOT extract it. DO NOT add its duration to `total_years`. DO NOT add its duration to any skill. Treat the internship as if it does not exist.
 * For every role, extract title, company, start_date, end_date, years, and highlights.
 * Extract dates only from information explicitly associated with that role.
 * If a date is unavailable, use null. Never infer a missing date from another role.
@@ -180,7 +185,8 @@ WORK EXPERIENCE:
 * Do not return years as null merely because only a year or month/year is available.
 * Return years as null only when the available dates are genuinely insufficient to calculate a reliable duration.
 * total_years must represent unique professional experience across all extracted roles. Overlapping employment periods must not be double-counted.
-* CRITICAL: First calculate the individual role `years`. Then, calculate `total_years` as the exact mathematical sum of all individual role `years`, subtracting any overlapping durations so time is not double-counted. Always double-check your addition.
+* CRITICAL RULE FOR MATH: Inside the `experience` object, you MUST first provide a string field called `total_years_calculation`. In this field, you must write out the exact mathematical addition of the individual role `years` (e.g., "7.5 + 0.6 = 8.1"). Subtract any overlapping durations.
+* After `total_years_calculation`, provide `total_years` as the final calculated float exactly matching your calculation. Do not guess.
 * `total_years` and individual role `years` should be rounded and formatted to only 1 decimal place (e.g., 3.45 becomes 3.4).
 
 ROLE HIGHLIGHTS:
@@ -213,8 +219,30 @@ NAME PARSING:
 EDUCATION AND CERTIFICATIONS:
 
 * Extract every explicitly stated degree and certification.
+* type must be exactly "degree" or "certification".
+* name must contain the explicitly stated degree or certification name.
+* issuer must contain the explicitly stated university, institution, or certification issuer when available.
+* year must contain the explicitly stated graduation, completion, or certification year when available.
+* Never infer an issuer or year.
 
-Schema:
+FINAL VALIDATION:
+
+Before returning the JSON, verify that:
+
+* Every schema field is present, even when its value is null or [].
+* Every extracted role has a title, company, start_date, end_date, years, and highlights field.
+* Ongoing roles use "present" as end_date.
+* Calculated years are numeric or null, never strings.
+* primary_skills, secondary_skills, domain_expertise, roles, highlights, and education_certificates are always arrays as defined in the schema.
+* Empty array fields contain [] rather than null.
+* Skills are deduplicated and normalized.
+* Role highlights contain only information associated with that role.
+* No technology was inferred solely from a job title.
+* No missing information was guessed.
+* The output exactly matches the provided schema.
+* The output is valid JSON.
+
+SCHEMA:
 {
   "parsed_resume": {
     "personal_info": {
@@ -229,13 +257,8 @@ Schema:
     "primary_skills": ["string"],
     "secondary_skills": ["string"],
     "domain_expertise": ["string"],
-    "skill_experience": [
-      {
-        "skill": "string",
-        "years": "number or null"
-      }
-    ],
     "experience": {
+      "total_years_calculation": "string",
       "total_years": "number or null",
       "roles": [
         {
@@ -248,6 +271,12 @@ Schema:
         }
       ]
     },
+    "skill_experience": [
+      {
+        "skill": "string",
+        "years": "number or null"
+      }
+    ],
     "education_certificates": [
       {
         "name": "string",
@@ -335,8 +364,8 @@ __JD_JSON__
    - Calculate Relevant Experience by comparing the candidate's `skill_experience` array with the JD's must-have and good-to-have skill requirements.
    - For each JD skill, identify the candidate's candidate_years from the parsed_resume's `skill_experience` array. If the skill is not in the array, candidate_years = 0.0.
    - Calculate the skill_experience_ratio for each JD skill using these rules:
-     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate HAS experience (> 0.0): give ratio as 1.0
-     * If the required experience is NOT mentioned in the JD for a particular skill and the candidate has NO experience: give ratio as 0.0
+     * If the required experience is NOT mentioned in the JD for a particular skill AND the candidate possesses the skill (i.e., it is in matched_skills): give ratio as 1.0 (even if candidate_years is 0.0)
+     * If the candidate does NOT possess the skill (i.e., it is in missing_skills): give ratio as 0.0
      * If the required experience IS mentioned in the JD for a particular skill and the candidate has LESS experience than required: give ratio as candidate_years / required_years
      * If the required experience IS mentioned in the JD for a particular skill and the candidate has MORE or EQUAL experience than required: give ratio as 1.0
    - Calculate must-have experience strictly using this exact formula:
@@ -344,10 +373,10 @@ __JD_JSON__
    - Calculate good-to-have experience strictly using this exact formula:
      good_to_have_experience_score = (Sum of all skill_experience_ratios for good-to-have skills / total number of good-to-have skills) * 10
      (If there are no good-to-have skills in the JD, good_to_have_experience_score = 10)
-   - experience_score = must_have_experience_score + good_to_have_experience_score
-   - Round experience_score to 2 decimal places.
+   - raw_experience = must_have_experience_score + good_to_have_experience_score
+   - Round raw_experience to 2 decimal places.
    - For each skill in `must_have_experience` and `good_to_have_experience`, set `meets_requirement` to `true` ONLY IF `skill_experience_ratio` >= 1.0, otherwise `false`.
-   - Set `experience_match` to `true` if at least 75% of the must-have skills have `meets_requirement` set to `true`. Otherwise, set it to `false`.
+   - Set `experience_match` to `true` ONLY IF `raw_experience` is >= 20.0. Otherwise, set it to `false`.
 
 3. Good-to-Have Skills (20 Points):
    - Calculate the percentage of JD good-to-have skills found.
@@ -368,29 +397,53 @@ __JD_JSON__
 
 1. Compare candidate's skills with JD must-have and good-to-have skills.
 2. Calculate Relevant Experience specifically using the candidate's `skill_experience` array against the JD's must-have and good-to-have skills and their required years.
-3. Systematically calculate the score for each of the 4 criteria.
-4. Sum the scores to get a total out of 100.
-5. Convert the total to a 0.0–10.0 scale:
-   match_score = total_score / 10
-6. Output highly detailed reasoning in 4-6 bullet points. You MUST explicitly name the specific skills that are missing. You MUST explicitly name the specific skills where the candidate lacks the required years of experience, including the concrete numbers (e.g., 'Lacks required experience in Java: has 2.0 years, but 3.0 years are required').
-7. Do not change the predefined weighting: 40 + 30 + 20 + 10 = 100.
+3. Systematically calculate the raw score for each of the 4 criteria based on their respective weights (40, 30, 20, 10).
+4. CRITICAL: Output the raw scores first, then convert them into a consolidated, out-of-10.0 scale for the `score_breakdown`:
+   - `raw_must_have_skills`: max 40.0
+   - `raw_good_to_have_skills`: max 20.0
+   - `raw_experience`: max 30.0
+   - `raw_qualifications`: max 10.0
+   - `skills_score` = (raw_must_have_skills + raw_good_to_have_skills) / 6
+   - `experience_score` = raw_experience / 3
+   - `qualifications_score` = raw_qualifications / 1
+   (e.g., if raw_must_have_skills is 32.0 and raw_good_to_have_skills is 15.0, skills_score is 7.83)
+5. Calculate the final `match_score` out of 10.0 based on the total raw points: match_score = (raw_must_have_skills + raw_experience + raw_good_to_have_skills + raw_qualifications) / 10.
+6. Output highly detailed analysis in plain, human-readable language suitable for a non-technical recruiter. DO NOT use technical terms like "ratio", "score", "formula", "0.0", or "1.0". Instead, write naturally. Provide the analysis in three parts:
+   - `reasoning`: 3-4 bullet points summarizing the overall fit (e.g. "The candidate matches all core must-have skills...", "Qualification requirements fully met..."). CRITICAL: If the candidate is slightly under the required experience for a particular skill (e.g., 2-3 months under the requirement), you MUST explicitly mention this slight gap here in the reasoning.
+   - `strengths`: 4-5 bullet points highlighting the candidate's strongest alignments with the JD. CRITICAL: If the candidate is "overqualified" (e.g., having 14 years of experience for a 3-6 year role), this MUST be listed as a massive STRENGTH (e.g., "Brings a veteran level of expertise..."), NEVER as a concern.
+   - `concerns`: 4-5 bullet points highlighting gaps, missing skills, or shortfalls in experience. CRITICAL: If the JD requires a balanced skill set but experience is heavily skewed, point this out. NEVER list being "overqualified" as a concern. If no concerns, provide 1 bullet saying "No major concerns identified."
+7. CRITICAL RULE: Never put a skill in `missing_skills` if it exists in `primary_skills` or `secondary_skills`, even if the candidate has 0.0 years of experience with it. If it is in their skills array, it MUST go into `matched_skills`.
+
 
 ### Output Format (STRICT JSON):
 
 {
   "score_breakdown": {
-    "must_have_skills_score": 32.0,
-    "experience_score": 24.5,
-    "good_to_have_skills_score": 15.0,
+    "raw_must_have_skills": 32.0,
+    "raw_good_to_have_skills": 15.0,
+    "raw_experience": 24.5,
+    "raw_qualifications": 10.0,
+    "skills_score": 7.83,
+    "experience_score": 8.16,
     "qualifications_score": 10.0
   },
   "match_score": 8.15,
   "reasoning": [
-    "Strong coverage of core must-have skills, explicitly matching Java, Python, and SQL.",
-    "Missing critical must-have skill: AWS.",
-    "Experience gap in Spring Boot: candidate has 2.0 years of experience, but 3.0 years are required.",
-    "Good alignment on good-to-have skills, possessing Docker and Kubernetes.",
-    "Qualifications match the requirement of a Bachelor's degree in Computer Science."
+    "Overall strong fit with technical alignment across most core skills.",
+    "Qualification requirements fully met with a Bachelor's degree in Computer Science.",
+    "Slight gaps in cloud infrastructure experience, but solid foundation in backend development."
+  ],
+  "strengths": [
+    "The candidate matches core must-have skills including Java, Python, and SQL.",
+    "Strong hands-on experience in Java (14 years), well exceeding the job requirements.",
+    "Good coverage of nice-to-have skills, with practical experience in Docker and Kubernetes.",
+    "Extensive domain expertise in E-commerce architecture."
+  ],
+  "concerns": [
+    "Missing critical must-have skill: AWS — not found anywhere in the candidate's resume.",
+    "Experience gap in Spring Boot: the candidate has 2 years of hands-on experience, but the role requires at least 3 years.",
+    "Imbalanced experience for a Full Stack role: candidate has 4 years of frontend (React) experience, but only 3 months of backend (Node.js) experience.",
+    "The candidate lists PostgreSQL as a skill but has no professional work experience using it in any of their roles."
   ],
   "matched_skills": {
     "must_have": ["..."],
@@ -416,6 +469,15 @@ __JD_JSON__
       "meets_requirement": false
     }
   ],
+  "good_to_have_experience": [
+    {
+      "skill": "Docker",
+      "required_years": null,
+      "candidate_years": 2.0,
+      "skill_experience_ratio": 1.0,
+      "meets_requirement": true
+    }
+  ],
   "qualification_match": true,
   "experience_match": false
 }
@@ -427,16 +489,19 @@ __JD_JSON__
 
 ## 3. Matching Score Formula
 
-The final `match_score` (0.0–10.0) is derived from a **100-point rubric** evaluated by the LLM matching prompt. The four criteria and their point allocations are:
+The final `match_score` (0.0–10.0) is derived from the sub-scores which are calculated based on raw point allocations and then normalized to a 10.0 scale.
 
 ```
-  total_points (max 100) =
-      must_have_skills_score     (max 40)
-    + experience_score           (max 30)
-    + good_to_have_skills_score  (max 20)
-    + qualifications_score       (max 10)
+  raw_must_have_skills     (max 40)
+  raw_experience           (max 30)
+  raw_good_to_have_skills  (max 20)
+  raw_qualifications       (max 10)
 
-  match_score = total_points / 10
+  skills_score = (raw_must_have_skills + raw_good_to_have_skills) / 6
+  experience_score = raw_experience / 3
+  qualifications_score = raw_qualifications / 1
+
+  match_score = (raw_must_have_skills + raw_experience + raw_good_to_have_skills + raw_qualifications) / 10
 ```
 
 | Max Points | Criterion | Scoring Logic |
@@ -581,7 +646,7 @@ The pipeline currently generates a baseline of **15 questions** per candidate, t
 **Question Generation Prompt:**
 *(Note: The prompt below assumes a 15-question limit. The total number and category distribution are dynamically injected based on the interview time limit).*
 ```text
-You are an expert technical AI preparing questions for an AUTOMATED VIDEO SCREENING interview. The candidate will be recording 1-2 minute video answers. The goal of this round is only to verify whether the candidate genuinely knows the required skills — not to run a full-depth technical L1/L2 interview.
+You are an expert technical AI preparing tailored interview questions for a candidate.
 
 ═══ JOB CONTEXT ═══
 Role: {title} at {company}
@@ -590,27 +655,28 @@ JD Must-Have Skills: {must_have_skills}
 JD Good-to-Have Skills: {good_to_have_skills}
 JD Responsibilities: {responsibilities}
 
-═══ CANDIDATE CONTEXT ═══
-Years of Experience: {years}
-Candidate Domain Expertise: {domain}
-
 ═══ FULL MATCH ANALYSIS JSON — use this to decide question focus ═══
 {match_json}
 
 How to use the match analysis above:
-- matched_skills.must_have      → candidate HAS these → generate depth-verification questions
-- missing_skills.must_have      → candidate MISSING these → generate basic awareness questions
-- score_breakdown.must_have_skills_score  → if low (< 20/40), add more "lacking_skill" questions
-- score_breakdown.good_to_have_skills_score → if 0, ask only basic "what is X" awareness
-- reasoning                     → use the gap analysis directly to frame targeted questions
-- experience_match: false       → frame experience_domain questions as awareness checks
-- qualification_match: false    → do not expect academic-level depth in answers
+- matched_skills.must_have      → candidate HAS these → frame questions assuming hands-on experience.
+- missing_skills.must_have      → candidate MISSING these → frame questions acknowledging they haven't used it directly.
+- reasoning                     → use the overall summary to frame the general tone of questions.
+- strengths                     → use these verified strengths to frame harder, depth-verification questions.
+- concerns                      → use these identified gaps or missing skills to frame targeted awareness or behavioral questions.
 
 ═══ SCREENING DIFFICULTY RULES ═══
-Apply the following difficulty guidance based on the JD requiring {min_y} years of experience:
+CRITICAL: The difficulty of each question MUST be determined on a per-skill basis according to the Job Description's required experience, NOT the candidate's actual experience.
+To determine the target experience level for a specific skill question, use the JD's required years of experience for that skill.
+- Target Experience Level = jd_required_skill_years (If not explicitly stated in JD, default to the JD's overall min_years).
+
+Example 1: Candidate has 10 years of Java, JD requires 3 years -> Ask a 3-year level question.
+Example 2: Candidate has 1 year of Java, JD requires 3 years -> Ask a 3-year level question.
+
+Apply the following difficulty guidance based on the Target Experience Level:
 - If 0-2 years (EASY): Ask basic knowledge-verification questions only.
 - If 3-5 years (MEDIUM): Ask single-concept questions that verify genuine hands-on knowledge.
-- If 5+ years (HARD): Ask high-level "when to use what" questions. 
+- If 5+ years (HARD): Ask high-level "when to use what" or architecture questions.
 
 Generate EXACTLY 15 questions in total across the following categories:
 1. CATEGORY "must_have_matched" — from matched_skills.must_have (7–8 questions)
@@ -624,10 +690,10 @@ Each question must include an `answer_depth` level ("aware", "partial_depth", or
 - "partial_depth" → partial coverage: the answer must touch some of the expected keywords with a basic explanation.
 - "full_depth" → full depth: the answer must cover most expected keywords with a clear, accurate explanation.
 
-Assign depth dynamically based on the candidate's {years} years of experience AND the question category:
-- Use "aware" for "lacking_skill" and "good_to_have" categories, OR if the candidate has < 2 years experience (awareness check only).
-- Use "partial_depth" for "must_have_matched" questions when the candidate has 2-4 years experience, OR if experience_match is false.
-- Use "full_depth" for "must_have_matched" and "experience_domain" questions only when the candidate has 5+ years experience and clearly possesses the skill.
+Assign depth dynamically based ONLY on the JD's REQUIRED EXPERIENCE for that specific skill (Target Experience Level), regardless of whether the candidate possesses the skill or not:
+- Use "aware" if the Target Experience Level is < 2 years.
+- Use "partial_depth" if the Target Experience Level is 2-4 years.
+- Use "full_depth" if the Target Experience Level is 5+ years.
 
 ═══ OUTPUT FORMAT ═══
 Return a JSON array only. No markdown, no commentary.

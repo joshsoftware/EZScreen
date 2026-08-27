@@ -1,6 +1,7 @@
 import asyncio
 import json
 import datetime
+import calendar
 from src.core.storage import storage_client
 from src.parsing.docling_wrapper import docling_wrapper
 from src.llm.client import OllamaClient
@@ -47,6 +48,8 @@ class ResumeParser:
                 parsed_data = json.loads(raw_json.strip())
                 if "parsed_resume" in parsed_data:
                     parsed_data = parsed_data["parsed_resume"]
+                    
+                self._recalculate_experience(parsed_data)
                 return parsed_data
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse LLM JSON output: {e}\nRaw Output: {response.response}")
@@ -56,6 +59,66 @@ class ResumeParser:
             import os
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+    def _recalculate_experience(self, parsed_data: dict) -> None:
+        """Overrides the LLM's hallucinated date math with strict Python datetime calculations."""
+        if not parsed_data or "experience" not in parsed_data:
+            return
+        
+        roles = parsed_data["experience"].get("roles", [])
+        if not roles:
+            return
+            
+        def parse_date(date_str, is_end_date=False):
+            if not date_str or str(date_str).lower() in ("present", "current", "now", "null", "none"):
+                return datetime.datetime.now()
+            date_str = str(date_str).strip()
+            try:
+                if len(date_str) == 10:
+                    return datetime.datetime.strptime(date_str, "%Y-%m-%d")
+                elif len(date_str) == 7:
+                    dt = datetime.datetime.strptime(date_str, "%Y-%m")
+                    if is_end_date:
+                        _, last_day = calendar.monthrange(dt.year, dt.month)
+                        dt = dt.replace(day=last_day)
+                    return dt
+                elif len(date_str) == 4:
+                    dt = datetime.datetime.strptime(date_str, "%Y")
+                    if is_end_date:
+                        dt = dt.replace(month=12, day=31)
+                    return dt
+            except ValueError:
+                pass
+            return None
+
+        intervals = []
+        for role in roles:
+            start_dt = parse_date(role.get("start_date"), is_end_date=False)
+            end_dt = parse_date(role.get("end_date"), is_end_date=True)
+            
+            if start_dt and end_dt and start_dt <= end_dt:
+                days = (end_dt - start_dt).days
+                role["years"] = round(days / 365.25, 1)
+                intervals.append([start_dt, end_dt])
+            else:
+                role["years"] = 0.0
+                
+        # Merge overlapping intervals for total_years
+        if not intervals:
+            parsed_data["experience"]["total_years"] = 0.0
+            return
+            
+        intervals.sort(key=lambda x: x[0])
+        merged = [intervals[0]]
+        for current in intervals[1:]:
+            last = merged[-1]
+            if current[0] <= last[1]:
+                last[1] = max(last[1], current[1])
+            else:
+                merged.append(current)
+                
+        total_days = sum((iv[1] - iv[0]).days for iv in merged)
+        parsed_data["experience"]["total_years"] = round(total_days / 365.25, 1)
 
     def _build_prompt(self, markdown_text: str, current_date: str) -> str:
         return f"""
@@ -93,27 +156,32 @@ SKILLS:
 * Do not place the same normalized skill in both primary_skills and secondary_skills.
 * Do not infer skills from projects or job titles unless the skill is explicitly stated.
 * Normalize obvious naming variations, e.g. "React.js"/"ReactJS" → "React", "Postgres"/"PostgreSQL" → "PostgreSQL".
+* CRITICAL RULE: Completely ignore Internship roles. Do not extract any skills from internship descriptions into primary_skills or secondary_skills.
 
 SKILL-SPECIFIC EXPERIENCE (skill_experience):
 
 * For EVERY skill identified in primary_skills and secondary_skills, determine the candidate's total years of experience with that specific skill.
-* STEP 1 - Check for DIRECT per-skill year statements ONLY:
-  - A valid explicit statement is when the candidate directly associates a specific number of years with ONE specific skill, such as: "Java (5 years)", "7+ years of Python", "Spring Boot - 3 years".
-  - CRITICAL: Do NOT treat professional summary or objective statements as per-skill declarations. For example, "10+ years of experience in enterprise development using Java, J2EE, Hibernate, JDBC" means the candidate has 10+ years of TOTAL career experience, NOT 10+ years in each of Java, J2EE, Hibernate, and JDBC individually. Ignore such summary statements when calculating per-skill experience.
-  - If a valid direct per-skill statement is found, use that exact number.
-* STEP 2 - If no direct per-skill statement exists, calculate from ROLE HIGHLIGHTS ONLY:
+* STEP 1 - Calculate from ROLE HIGHLIGHTS for ALL skills:
   - Look at each role in the "Professional Experience" / "Work Experience" section.
-  - A skill is considered "used in a role" ONLY if it is explicitly mentioned in that role's bullet points/highlights. Do NOT assume a skill was used in a role just because the role title sounds related.
-  - Sum the durations (years) of all roles where the skill is explicitly mentioned in the highlights.
+  - A skill is considered "used in a role" ONLY if it is explicitly mentioned in that role's bullet points/highlights.
+  - Sum the durations (years) of all roles where the skill is explicitly mentioned.
   - Subtract overlapping role durations to prevent double-counting.
-* STEP 3 - Apply safety checks:
-  - The calculated years for any skill MUST NEVER exceed the candidate's `total_years` of professional experience. Cap it if it does.
-  - Round the final skill experience to 1 decimal place.
+  - This provides the `calculated_role_years`.
+* STEP 2 - Check for DIRECT per-skill year statements:
+  - A valid explicit statement is when the candidate directly associates a specific number of years with one or more specific skills, such as: "Java (5 years)", "7+ years of Python", or "10 years of experience in Java, Spring".
+  - If a candidate includes a broad professional summary statement like "3+ years of experience in enterprise development using Java, Spring Boot", apply that exact number of years (e.g., 3.0) to EACH of the skills listed.
+  - CRITICAL: If a candidate states a number of years in a professional summary paragraph (e.g., "7 years of success in DevOps..."), and then lists skills within that SAME summary paragraph (e.g., "... Skilled in Jenkins, Docker"), you MUST apply that exact number of years (e.g., 7.0) to ALL skills mentioned anywhere within that summary block, even if they are in separate sentences.
+  - This provides the `stated_years`.
+* STEP 3 - Determine Final Skill Experience:
+  - If a skill has both `stated_years` and `calculated_role_years`, you MUST use the MAXIMUM of the two values. (e.g., if summary says 3 years, but roles add up to 4.5 years, use 4.5 years).
+  - If a skill only has one of the values, use that value.
+* Round the final skill experience to 1 decimal place.
 * If a skill appears ONLY in a "Technical Skills" section or summary but is NOT mentioned in any role highlight or project, assign it 0.0 years.
 
 WORK EXPERIENCE:
 
 * Extract every distinct professional role separately.
+* CRITICAL RULE - INTERNSHIPS: If a role title or description contains the word "Intern" or "Internship", you MUST skip it entirely. DO NOT extract it. DO NOT add its duration to `total_years`. DO NOT add its duration to any skill. Treat the internship as if it does not exist.
 * For every role, extract title, company, start_date, end_date, years, and highlights.
 * Extract dates only from information explicitly associated with that role.
 * If a date is unavailable, use null. Never infer a missing date from another role.
@@ -134,7 +202,8 @@ WORK EXPERIENCE:
 * Do not return years as null merely because only a year or month/year is available.
 * Return years as null only when the available dates are genuinely insufficient to calculate a reliable duration.
 * total_years must represent unique professional experience across all extracted roles. Overlapping employment periods must not be double-counted.
-* CRITICAL: First calculate the individual role `years`. Then, calculate `total_years` as the exact mathematical sum of all individual role `years`, subtracting any overlapping durations so time is not double-counted. Always double-check your addition.
+* CRITICAL RULE FOR MATH: Inside the `experience` object, you MUST first provide a string field called `total_years_calculation`. In this field, you must write out the exact mathematical addition of the individual role `years` (e.g., "7.5 + 0.6 = 8.1"). Subtract any overlapping durations.
+* After `total_years_calculation`, provide `total_years` as the final calculated float exactly matching your calculation. Do not guess.
 * `total_years` and individual role `years` should be rounded and formatted to only 1 decimal place (e.g., 3.45 becomes 3.4).
 
 ROLE HIGHLIGHTS:
@@ -206,13 +275,8 @@ SCHEMA:
 "primary_skills": ["string"],
 "secondary_skills": ["string"],
 "domain_expertise": ["string"],
-"skill_experience": [
-{
-"skill": "string",
-"years": "number or null"
-}
-],
 "experience": {
+"total_years_calculation": "string",
 "total_years": "number or null",
 "roles": [
 {
@@ -225,6 +289,12 @@ SCHEMA:
 }
 ]
 },
+"skill_experience": [
+{
+"skill": "string",
+"years": "number or null"
+}
+],
 "education_certificates": [
 {
 "name": "string",
