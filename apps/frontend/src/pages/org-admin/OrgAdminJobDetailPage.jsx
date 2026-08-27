@@ -42,6 +42,8 @@ export function OrgAdminJobDetailPage() {
   const topLabelId = topFitLabelId(fitLabels)
   const { invalidateJob, invalidateJobApplicants } = useJobQueryClient()
   const [submitting, setSubmitting] = useState(false)
+  const [closing, setClosing] = useState(false)
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const [showEditJob, setShowEditJob] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [editSkills, setEditSkills] = useState({ must_have: [], good_to_have: [] })
@@ -128,17 +130,33 @@ export function OrgAdminJobDetailPage() {
     }
   }
 
-  async function onSkillsSubmit() {
+  async function onSkillsSubmit(nextSkills = editSkills) {
     setSkillsSubmitting(true)
     try {
-      await updateJobRequest(jobId, { skills: editSkills })
-      toast.success('Skill years updated')
+      await updateJobRequest(jobId, { skills: nextSkills })
+      toast.success('Skills updated')
       await invalidateJob(jobId)
       await refetchJob()
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Failed to save skills')
     } finally {
       setSkillsSubmitting(false)
+    }
+  }
+
+  async function onCloseJob() {
+    if (closing) return
+    setClosing(true)
+    try {
+      await updateJobRequest(jobId, { status: 'closed' })
+      toast.success('Job closed')
+      setShowCloseConfirm(false)
+      await invalidateJob(jobId)
+      await refetchJob()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Failed to close job')
+    } finally {
+      setClosing(false)
     }
   }
 
@@ -178,6 +196,8 @@ export function OrgAdminJobDetailPage() {
   }
 
   const canEditJd = job.status === 'draft'
+  const canUploadResumes = job.status === 'published'
+  const canCloseJob = job.status === 'published'
 
   const screenedCount = applicants.filter((item) => applicantScore(item) != null).length
   const pendingCount = applicants.filter(isPendingApplicant).length
@@ -208,9 +228,20 @@ export function OrgAdminJobDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-sm">
             <Badge tone={jobStatusTone(job.status)}>{formatJobStatus(job.status)}</Badge>
-            <Button icon="upload_file" onClick={() => setShowUploadModal(true)}>
-              Upload resumes
-            </Button>
+            {canUploadResumes ? (
+              <Button icon="upload_file" onClick={() => setShowUploadModal(true)}>
+                Upload resumes
+              </Button>
+            ) : null}
+            {canCloseJob ? (
+              <Button
+                variant="danger"
+                icon="cancel"
+                onClick={() => setShowCloseConfirm(true)}
+              >
+                Close job
+              </Button>
+            ) : null}
             {canEditJd ? (
               <Button
                 variant="secondary"
@@ -295,6 +326,36 @@ export function OrgAdminJobDetailPage() {
         />
       </Modal>
 
+      <Modal
+        open={showCloseConfirm}
+        onClose={() => {
+          if (!closing) setShowCloseConfirm(false)
+        }}
+        title="Close this job?"
+      >
+        <p className="text-body-sm text-on-surface-variant mb-md">
+          Closed jobs stop accepting new resume uploads. Existing applicants stay available for
+          review.
+        </p>
+        <div className="flex flex-wrap justify-end gap-sm">
+          <Button
+            variant="secondary"
+            disabled={closing}
+            onClick={() => setShowCloseConfirm(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            icon="cancel"
+            loading={closing}
+            onClick={onCloseJob}
+          >
+            Close job
+          </Button>
+        </div>
+      </Modal>
+
       {canEditJd && showEditJob ? (
         <Panel title="Edit job" className="max-w-3xl">
           <JobForm
@@ -306,13 +367,13 @@ export function OrgAdminJobDetailPage() {
             submittingLabel="Parsing skills…"
           />
           <div className="mt-lg pt-lg border-t border-outline-variant">
-            <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md">Skill years</h3>
+            <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md">Skills</h3>
             <JobSkillsEditor
               skills={editSkills}
               onChange={setEditSkills}
               onSubmit={onSkillsSubmit}
               submitting={skillsSubmitting}
-              submitLabel="Save skill years"
+              submitLabel="Save skills"
             />
           </div>
         </Panel>

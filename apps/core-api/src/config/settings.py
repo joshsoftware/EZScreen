@@ -52,6 +52,20 @@ class Settings(BaseSettings):
     password_reset_expire_minutes: int = 60
     password_reset_expose_link: bool = True
 
+    # Outbound email. console = log invite body (local/dev). smtp reserved for later.
+    email_mode: str = "console"
+    email_from: str = "noreply@ezscreen.io"
+
+    # Google Meet join links (Spaces API only — no Calendar events).
+    # mock = placeholder meet.google.com URL (local/dev default)
+    # live = real Meet space via Meet REST API (usually needs Workspace)
+    google_meet_mode: str = "mock"
+    google_service_account_file: str | None = None
+    google_meet_delegated_user: str | None = None
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: str | None = None
+    google_oauth_refresh_token: str | None = None
+
     @property
     def cors_origin_list(self) -> list[str]:
         origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]

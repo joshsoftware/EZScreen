@@ -187,7 +187,7 @@ export function ApplicantsTable({
                       {applicant.candidate_yoe == null ? '—' : applicant.candidate_yoe}
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
-                      {formatApplicationStatus(applicant.status)}
+                      {formatApplicationStatus(applicant.status, applicant.source)}
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
                       {formatDate(applicant.created_at)}

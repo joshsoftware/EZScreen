@@ -80,6 +80,7 @@ class ApplicantListItem(BaseModel):
     job_description_id: UUID
     candidate_id: UUID
     status: str
+    source: str
     candidate_yoe: float | None = None
     resume_score: Decimal | None = None
     first_name: str | None = None
@@ -100,11 +101,48 @@ class ApplicationDetailResponse(BaseModel):
     job_description_id: UUID
     candidate_id: UUID
     status: str
+    source: str
     candidate_yoe: float | None = None
     resume_score: Decimal | None = None
     first_name: str | None = None
     last_name: str | None = None
     email: str | None = None
     phone: str | None = None
+    has_resume: bool = False
+    resume_file_name: str | None = None
     parsed_resume: dict | None = None
     job_fit_analysis: dict | None = None
+
+
+class ApplicationResumeResponse(BaseModel):
+    application_id: UUID
+    file_name: str
+    content_type: str
+    preview_url: str
+    download_url: str
+    expires_at: datetime
+    previewable: bool
+
+
+class ApplicationRejectRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def strip_reason(cls, value: object) -> object:
+        if isinstance(value, str):
+            text = value.strip()
+            return text or None
+        return value
+
+
+class TimelineEventResponse(BaseModel):
+    id: UUID
+    application_id: UUID
+    event_type: str
+    from_status: str | None = None
+    to_status: str | None = None
+    actor_id: UUID | None = None
+    actor_type: str
+    metadata: dict | None = None
+    created_at: datetime

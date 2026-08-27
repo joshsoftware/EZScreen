@@ -18,7 +18,13 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
-from src.models.enums import ApplicationStatus
+from src.models.enums import ApplicationSource, ApplicationStatus
+
+APPLICATION_STATUS_ENUM = Enum(
+    ApplicationStatus,
+    name="application_status",
+    values_callable=lambda e: [m.value for m in e],
+)
 
 
 class Application(Base):
@@ -32,6 +38,7 @@ class Application(Base):
         Index("ix_applications_job_description_id", "job_description_id"),
         Index("ix_applications_resume_score", "resume_score"),
         Index("ix_applications_status", "status"),
+        Index("ix_applications_source", "source"),
         Index(
             "ix_applications_job_status_score",
             "job_description_id",
@@ -61,14 +68,20 @@ class Application(Base):
     resume_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     job_fit_analysis: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[ApplicationStatus] = mapped_column(
-        Enum(
-            ApplicationStatus,
-            name="application_status",
-            values_callable=lambda e: [m.value for m in e],
-        ),
+        APPLICATION_STATUS_ENUM,
         nullable=False,
         default=ApplicationStatus.applied,
         server_default=ApplicationStatus.applied.value,
+    )
+    source: Mapped[ApplicationSource] = mapped_column(
+        Enum(
+            ApplicationSource,
+            name="application_source",
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=False,
+        default=ApplicationSource.hr_bulk,
+        server_default=ApplicationSource.hr_bulk.value,
     )
     applied_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -98,4 +111,10 @@ class Application(Base):
         "InterviewAnalysis",
         back_populates="application",
         cascade="all, delete-orphan",
+    )
+    timeline_events = relationship(
+        "ApplicationTimelineEvent",
+        back_populates="application",
+        cascade="all, delete-orphan",
+        order_by="ApplicationTimelineEvent.created_at",
     )

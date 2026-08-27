@@ -9,4 +9,5 @@ export const queryKeys = {
     params.limit ?? 50,
   ],
   application: (applicationId) => ['application', applicationId],
+  applicationTimeline: (applicationId) => ['application', applicationId, 'timeline'],
 }
