@@ -175,9 +175,7 @@ SKILL-SPECIFIC EXPERIENCE (skill_experience):
 * STEP 3 - Determine Final Skill Experience:
   - If a skill has both `stated_years` and `calculated_role_years`, you MUST use the MAXIMUM of the two values. (e.g., if summary says 3 years, but roles add up to 4.5 years, use 4.5 years).
   - If a skill only has one of the values, use that value.
-* STEP 4 - Apply safety checks:
-  - The calculated years for any skill MUST NEVER exceed the candidate's `total_years` of professional experience. Cap it if it does.
-  - Round the final skill experience to 1 decimal place.
+* Round the final skill experience to 1 decimal place.
 * If a skill appears ONLY in a "Technical Skills" section or summary but is NOT mentioned in any role highlight or project, assign it 0.0 years.
 
 WORK EXPERIENCE:
