@@ -1,11 +1,10 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from src.parsing.schemas import ParsedResumeData, ParsedJDData
+from src.parsing.schemas import ParsedJDData
 
 
 class GenerateQuestionsRequest(BaseModel):
     interview_session_id: str = Field(..., description="UUID of the interview session")
-    parsed_resume: ParsedResumeData = Field(..., description="Parsed resume JSON from Pipeline B")
     parsed_jd: ParsedJDData = Field(..., description="Parsed JD JSON from Pipeline A")
     job_fit_analysis: Dict[str, Any] = Field(..., description="Full match analysis JSON from the matching endpoint")
 

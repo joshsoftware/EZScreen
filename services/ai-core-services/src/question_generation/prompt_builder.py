@@ -1,5 +1,5 @@
 import json
-from src.parsing.schemas import ParsedResumeData, ParsedJDData
+from src.parsing.schemas import ParsedJDData
 
 
 class QuestionPromptBuilder:
@@ -10,8 +10,8 @@ class QuestionPromptBuilder:
     in AI_PROCESSING.md §5.2.
     """
 
-    def build(self, parsed_jd: ParsedJDData, parsed_resume: ParsedResumeData, match_result: dict) -> str:
-        """Construct the question generation prompt with all candidate and JD context injected."""
+    def build(self, parsed_jd: ParsedJDData, match_result: dict) -> str:
+        """Construct the question generation prompt with JD and match context injected."""
 
         # Extract JD fields
         title = parsed_jd.title or "Unknown Role"
@@ -22,17 +22,11 @@ class QuestionPromptBuilder:
         responsibilities = json.dumps(parsed_jd.responsibilities)
         min_y = parsed_jd.experience_required.min_years or 0
 
-        # Extract candidate fields
-        years = parsed_resume.experience.total_years or 0
-        domain = json.dumps(parsed_resume.domain_expertise)
-        skill_experience_json = json.dumps(
-            [se.model_dump() for se in parsed_resume.skill_experience], indent=2
-        )
 
         # Full match JSON
         match_json = json.dumps(match_result, indent=2)
 
-        return f"""You are an expert technical AI preparing questions for an AUTOMATED VIDEO SCREENING interview. The candidate will be recording 1-2 minute video answers. The goal of this round is only to verify whether the candidate genuinely knows the required skills — not to run a full-depth technical L1/L2 interview.
+        return f"""You are an expert technical AI preparing tailored interview questions for a candidate.
 
 ═══ JOB CONTEXT ═══
 Role: {title} at {company}
@@ -41,27 +35,15 @@ JD Must-Have Skills: {must_have_skills}
 JD Good-to-Have Skills: {good_to_have_skills}
 JD Responsibilities: {responsibilities}
 
-═══ CANDIDATE CONTEXT ═══
-Total Years of Experience: {years}
-Candidate Domain Expertise: {domain}
-
-═══ CANDIDATE SKILL-SPECIFIC EXPERIENCE ═══
-The following shows the candidate's actual years of hands-on experience for each skill they claim. Use this to calibrate question difficulty per skill.
-{skill_experience_json}
-
 ═══ FULL MATCH ANALYSIS JSON — use this to decide question focus ═══
 {match_json}
 
 How to use the match analysis above:
-- matched_skills.must_have      → candidate HAS these → generate depth-verification questions
-- missing_skills.must_have      → candidate MISSING these → generate basic awareness questions
-- score_breakdown.must_have_skills_score  → if low (< 20/40), add more "lacking_skill" questions
-- score_breakdown.good_to_have_skills_score → if 0, ask only basic "what is X" awareness
-- reasoning                     → use the overall summary to frame the general tone of questions
-- strengths                     → use these verified strengths to frame harder, depth-verification questions
-- concerns                      → use these identified gaps or missing skills to frame targeted awareness or behavioral questions
-- experience_match: false       → frame experience_domain questions as awareness checks
-- qualification_match: false    → do not expect academic-level depth in answers
+- matched_skills.must_have      → candidate HAS these → frame questions assuming hands-on experience.
+- missing_skills.must_have      → candidate MISSING these → frame questions acknowledging they haven't used it directly.
+- reasoning                     → use the overall summary to frame the general tone of questions.
+- strengths                     → use these verified strengths to frame harder, depth-verification questions.
+- concerns                      → use these identified gaps or missing skills to frame targeted awareness or behavioral questions.
 
 ═══ SCREENING DIFFICULTY RULES ═══
 CRITICAL: The difficulty of each question MUST be determined on a per-skill basis according to the Job Description's required experience, NOT the candidate's actual experience.
@@ -88,12 +70,12 @@ Each question must include an `answer_depth` level ("aware", "partial_depth", or
 - "partial_depth" → partial coverage: the answer must touch some of the expected keywords with a basic explanation.
 - "full_depth" → full depth: the answer must cover most expected keywords with a clear, accurate explanation.
 
-Assign depth dynamically based on the JD's REQUIRED EXPERIENCE for that specific skill (not the candidate's experience) AND the question category:
-- Use "aware" for "lacking_skill" and "good_to_have" categories, OR if the JD requires < 2 years for that specific skill.
-- Use "partial_depth" for "must_have_matched" questions when the JD requires 2-4 years for that specific skill
-- Use "full_depth" for "must_have_matched" and "experience_domain" questions only when the JD requires 5+ years for that specific skill.
+Assign depth dynamically based ONLY on the JD's REQUIRED EXPERIENCE for that specific skill (Target Experience Level), regardless of whether the candidate possesses the skill or not:
+- Use "aware" if the Target Experience Level is < 2 years.
+- Use "partial_depth" if the Target Experience Level is 2-4 years.
+- Use "full_depth" if the Target Experience Level is 5+ years.
 
-═══ OUTPUT FORMAT ═══
+═══ OUTPUT FORMAT ═══i
 Return a JSON array only. No markdown, no commentary.
 [
   {{

@@ -13,7 +13,7 @@ from src.common.llm_utils import parse_llm_json
 class QuestionGenerator:
     """Orchestrates the question generation pipeline.
 
-    1. Builds the prompt from parsed_jd, parsed_resume, and job_fit_analysis
+    1. Builds the prompt from parsed_jd and job_fit_analysis
     2. Calls the LLM via OpenAI-compatible chat endpoint
     3. Parses the JSON array response
     4. Returns the questions to Core API (no DB write)
@@ -28,7 +28,6 @@ class QuestionGenerator:
             # 1. Build prompt
             prompt = question_prompt_builder.build(
                 parsed_jd=request.parsed_jd,
-                parsed_resume=request.parsed_resume,
                 match_result=request.job_fit_analysis,
             )
 

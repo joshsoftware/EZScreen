@@ -1436,7 +1436,7 @@ Request:
   },
   "body": {
     "parsed_jd": {},
-    "parsed_resume": {}
+    "job_fit_analysis": {}
   }
 }
 
