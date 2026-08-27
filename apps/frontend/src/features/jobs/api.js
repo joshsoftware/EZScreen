@@ -1,4 +1,4 @@
-import { apiRequest } from '../../lib/api/client'
+import { apiBlobRequest, apiRequest } from '../../lib/api/client'
 
 export function listJobsRequest({ status, page = 1, limit = 50 } = {}) {
   const search = new URLSearchParams()
@@ -45,9 +45,39 @@ export function getApplicationDetailRequest(applicationId) {
   })
 }
 
+export function getApplicationResumeRequest(applicationId) {
+  return apiRequest(`/api/v1/applications/${applicationId}/resume`, {
+    method: 'GET',
+  })
+}
+
+/** Stream resume bytes via the API (avoids insecure MinIO HTTP downloads). */
+export function fetchApplicationResumeFile(applicationId, disposition = 'inline') {
+  const search = new URLSearchParams()
+  search.set('disposition', disposition)
+  return apiBlobRequest(
+    `/api/v1/applications/${applicationId}/resume/file?${search.toString()}`,
+    { method: 'GET' },
+  )
+}
+
 export function getApplicationTimelineRequest(applicationId) {
   return apiRequest(`/api/v1/applications/${applicationId}/timeline`, {
     method: 'GET',
+  })
+}
+
+export function rejectApplicationRequest(applicationId, body = {}) {
+  return apiRequest(`/api/v1/applications/${applicationId}/reject`, {
+    method: 'POST',
+    body,
+  })
+}
+
+export function scheduleInterviewSessionRequest(body) {
+  return apiRequest('/api/v1/interview-sessions', {
+    method: 'POST',
+    body,
   })
 }
 

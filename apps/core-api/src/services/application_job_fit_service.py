@@ -8,11 +8,14 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from src.models.application import Application
-from src.models.enums import TimelineActorType, TimelineEventType
+from src.models.enums import ApplicationStatus, TimelineActorType, TimelineEventType
 from src.models.job_description import JobDescription
 from src.schemas.application import JobFitRunResponse
 from src.services.application_ai_service import call_match_resume_jd
-from src.services.application_timeline_service import append_timeline_event
+from src.services.application_timeline_service import (
+    append_timeline_event,
+    timeline_event_types,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,11 +127,34 @@ def apply_job_fit(
             actor_type=TimelineActorType.system,
             metadata=timeline_metadata,
         )
+        _maybe_mark_under_hr_review(db, application)
     logger.info(
         "Job-fit success for application %s: score=%s, yoe=%s",
         application.id,
         application.resume_score,
         application.candidate_yoe,
+    )
+
+
+def _maybe_mark_under_hr_review(db: Session, application: Application) -> None:
+    """After job fit, applications automatically enter HR review (timeline only)."""
+    if application.status != ApplicationStatus.applied:
+        return
+
+    types = timeline_event_types(db, application.id)
+    if "under_hr_review" in types:
+        return
+    if "rejected" in types or "shortlisted_for_l1" in types:
+        return
+
+    append_timeline_event(
+        db,
+        application=application,
+        event_type=TimelineEventType.under_hr_review,
+        actor_type=TimelineActorType.system,
+        from_status=application.status,
+        to_status=application.status,
+        metadata={"auto": True, "after": "job_fit"},
     )
 
 

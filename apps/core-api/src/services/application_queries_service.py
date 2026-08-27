@@ -10,9 +10,11 @@ from sqlalchemy.orm import Session, selectinload
 from src.models.application import Application
 from src.schemas.application import (
     ApplicationDetailResponse,
+    ApplicationResumeResponse,
     ApplicantListItem,
     TimelineEventResponse,
 )
+from src.services import storage_service
 from src.services.application_timeline_service import list_timeline_events
 
 __all__ = [
@@ -20,6 +22,8 @@ __all__ = [
     "get_application",
     "application_to_detail_response",
     "application_timeline_response",
+    "application_resume_response",
+    "application_resume_file",
 ]
 
 
@@ -75,6 +79,7 @@ def application_to_detail_response(
     application: Application,
 ) -> ApplicationDetailResponse:
     candidate = application.candidate
+    resume_key = (application.resume_url or "").strip() or None
     return ApplicationDetailResponse(
         id=application.id,
         job_description_id=application.job_description_id,
@@ -87,9 +92,50 @@ def application_to_detail_response(
         last_name=candidate.last_name if candidate else None,
         email=candidate.email if candidate else None,
         phone=candidate.phone if candidate else None,
+        has_resume=bool(resume_key),
+        resume_file_name=(
+            storage_service.resume_display_name(resume_key) if resume_key else None
+        ),
         parsed_resume=application.parsed_resume,
         job_fit_analysis=application.job_fit_analysis,
     )
+
+
+def application_resume_response(application: Application) -> ApplicationResumeResponse:
+    resume_key = (application.resume_url or "").strip()
+    if not resume_key:
+        raise LookupError("Resume file is not available for this application")
+
+    file_name = storage_service.resume_display_name(resume_key)
+    content_type = storage_service.guess_resume_content_type(resume_key)
+    preview_url, expires_at = storage_service.create_presigned_download_url(
+        resume_key,
+        disposition="inline",
+        file_name=file_name,
+        content_type=content_type,
+    )
+    download_url, _ = storage_service.create_presigned_download_url(
+        resume_key,
+        disposition="attachment",
+        file_name=file_name,
+        content_type=content_type,
+    )
+    return ApplicationResumeResponse(
+        application_id=application.id,
+        file_name=file_name,
+        content_type=content_type,
+        preview_url=preview_url,
+        download_url=download_url,
+        expires_at=expires_at,
+        previewable=content_type == "application/pdf",
+    )
+
+
+def application_resume_file(application: Application) -> storage_service.ResumeObjectPayload:
+    resume_key = (application.resume_url or "").strip()
+    if not resume_key:
+        raise LookupError("Resume file is not available for this application")
+    return storage_service.get_resume_object(resume_key)
 
 
 def application_timeline_response(

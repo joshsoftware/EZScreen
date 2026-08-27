@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
@@ -11,6 +11,13 @@ const ALLOWED_TYPES = new Set([
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ])
+
+function isGoogleDriveConfigured() {
+  return Boolean(
+    String(import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim() &&
+      String(import.meta.env.VITE_GOOGLE_API_KEY || '').trim(),
+  )
+}
 
 function normalizeContentType(file) {
   if (file.type) return file.type
@@ -27,13 +34,17 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
   const [files, setFiles] = useState([])
   const [error, setError] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [pickingDrive, setPickingDrive] = useState(false)
   const [dragActive, setDragActive] = useState(false)
+  const driveConfigured = isGoogleDriveConfigured()
 
   const hasFiles = files.length > 0
-  const fileLabel = useMemo(() => {
-    if (!hasFiles) return 'Drop PDF or DOCX files here, or browse to select.'
-    return `${files.length} file${files.length === 1 ? '' : 's'} ready to upload`
-  }, [files, hasFiles])
+  const busy = uploading || pickingDrive
+  const fileLabel = !hasFiles
+    ? driveConfigured
+      ? 'Drop PDF or DOCX files here, or pick from device / Drive.'
+      : 'Drop PDF or DOCX files here, or browse to select.'
+    : `${files.length} file${files.length === 1 ? '' : 's'} ready to upload`
 
   function addFiles(selected) {
     if (!selected.length) return
@@ -61,6 +72,44 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
     setFiles((current) => current.filter((_, i) => i !== index))
   }
 
+  async function onPickFromDrive() {
+    if (busy) return
+    if (!driveConfigured) {
+      toast.message(
+        'Add VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to apps/frontend/.env, then restart Vite.',
+      )
+      return
+    }
+
+    setPickingDrive(true)
+    setError(null)
+    try {
+      const { pickResumesFromGoogleDrive } = await import('../../lib/googleDrivePicker')
+      const selected = await pickResumesFromGoogleDrive()
+      if (!selected.length) return
+      const allowed = selected.filter((file) => ALLOWED_TYPES.has(normalizeContentType(file)))
+      const skipped = selected.length - allowed.length
+      if (allowed.length) addFiles(allowed)
+      if (skipped > 0) {
+        toast.message(`${skipped} Drive file${skipped === 1 ? '' : 's'} skipped (PDF/DOCX only)`)
+      }
+      if (allowed.length) {
+        toast.success(
+          `${allowed.length} file${allowed.length === 1 ? '' : 's'} added from Drive`,
+        )
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to pick files from Google Drive'
+      if (!/cancel/i.test(message)) {
+        setError(message)
+        toast.error(message)
+      }
+    } finally {
+      setPickingDrive(false)
+    }
+  }
+
   async function uploadToSignedUrl(uploadItem, file) {
     const contentType = normalizeContentType(file)
     const response = await fetch(uploadItem.upload_url, {
@@ -76,7 +125,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
   }
 
   async function onSubmit() {
-    if (!hasFiles || uploading) return
+    if (!hasFiles || busy) return
     setUploading(true)
     setError(null)
 
@@ -158,22 +207,34 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
           <span className="material-symbols-outlined text-[32px] text-secondary">upload_file</span>
           <p className="text-body-sm text-on-surface">{fileLabel}</p>
           <p className="text-label-md text-on-surface-variant">
-            Supports PDF and DOCX · up to 50 files
+            Supports PDF and DOCX
+            {driveConfigured ? ' · device or Google Drive' : ''} · up to 50 files
           </p>
           <div className="flex flex-wrap gap-sm justify-center">
             <Button
               variant="secondary"
               icon="folder_open"
               onClick={() => inputRef.current?.click()}
-              disabled={uploading}
+              disabled={busy}
             >
               Browse files
             </Button>
+            {driveConfigured ? (
+              <Button
+                variant="secondary"
+                icon="add_to_drive"
+                loading={pickingDrive}
+                disabled={busy}
+                onClick={onPickFromDrive}
+              >
+                From Drive
+              </Button>
+            ) : null}
             <Button
               icon="cloud_upload"
               onClick={onSubmit}
               loading={uploading}
-              disabled={!hasFiles}
+              disabled={!hasFiles || busy}
             >
               Upload and queue
             </Button>
@@ -185,7 +246,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
             accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             onChange={onFileChange}
             className="hidden"
-            disabled={uploading}
+            disabled={busy}
           />
         </div>
       </div>
@@ -207,7 +268,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
                 variant="ghost"
                 size="sm"
                 onClick={() => removeFile(index)}
-                disabled={uploading}
+                disabled={busy}
               >
                 Remove
               </Button>

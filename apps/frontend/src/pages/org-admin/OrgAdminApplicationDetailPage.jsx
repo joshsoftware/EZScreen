@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { rerunJobFitRequest } from '../../features/jobs/api'
+import {
+  rejectApplicationRequest,
+  rerunJobFitRequest,
+} from '../../features/jobs/api'
 import {
   useApplicationQuery,
   useApplicationTimelineQuery,
@@ -9,8 +12,11 @@ import {
   useJobQueryClient,
 } from '../../features/jobs/useJobQueries'
 import { ApplicationDetailPanel } from '../../features/jobs/ApplicationDetailPanel'
+import { ResumePreviewButton } from '../../features/jobs/ResumeActions'
 import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
+  canRejectApplication,
+  canScheduleScreening,
   candidateInitials,
   candidateName,
   fitLabel,
@@ -19,11 +25,20 @@ import {
   resolveMatchScore,
 } from '../../features/jobs/applicationFields'
 import { ApiError } from '../../lib/api/client'
+import { ActionMenu } from '../../components/ui/ActionMenu'
 import { Alert } from '../../components/ui/Alert'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
+import { Input } from '../../components/ui/Input'
+import { Modal } from '../../components/ui/Modal'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { PageSkeleton } from '../../components/ui/Skeleton'
+
+const ScheduleScreeningModal = lazy(() =>
+  import('../../features/jobs/ScheduleScreeningModal').then((mod) => ({
+    default: mod.ScheduleScreeningModal,
+  })),
+)
 
 export function OrgAdminApplicationDetailPage() {
   const { jobId = '', applicationId = '' } = useParams()
@@ -31,6 +46,10 @@ export function OrgAdminApplicationDetailPage() {
   const { invalidateApplication, invalidateApplicationTimeline, invalidateJobApplicants } =
     useJobQueryClient()
   const [rerunning, setRerunning] = useState(false)
+  const [rejecting, setRejecting] = useState(false)
+  const [showRejectConfirm, setShowRejectConfirm] = useState(false)
+  const [showSchedule, setShowSchedule] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
 
   const {
     data: job,
@@ -73,26 +92,58 @@ export function OrgAdminApplicationDetailPage() {
 
   const applicantsHref = `/org-admin/jobs/${jobId}#applicants`
   const score = resolveMatchScore(detail)
-  const canRerun = Boolean(detail?.parsed_resume) && !rerunning && !mismatch
+  const busy = rerunning || rejecting
+  const canRerun =
+    Boolean(detail?.parsed_resume) &&
+    !busy &&
+    !mismatch &&
+    detail?.status !== 'rejected'
+  const showScheduleBtn =
+    Boolean(detail) && !mismatch && canScheduleScreening(detail, timeline)
+  const showReject = Boolean(detail) && !mismatch && canRejectApplication(detail, timeline)
 
   async function reload() {
     await Promise.all([refetchDetail(), refetchTimeline()])
   }
 
+  async function refreshAfterAction() {
+    await Promise.all([
+      invalidateApplication(applicationId),
+      invalidateApplicationTimeline(applicationId),
+      invalidateJobApplicants(jobId),
+    ])
+    await reload()
+  }
+
   async function onRerun() {
-    if (!detail || rerunning) return
+    if (!detail || busy) return
     setRerunning(true)
     try {
       await rerunJobFitRequest(jobId, detail.id)
       toast.success('Job-fit recalculated')
-      await invalidateApplication(applicationId)
-      await invalidateApplicationTimeline(applicationId)
-      await invalidateJobApplicants(jobId)
-      await reload()
+      await refreshAfterAction()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to rerun fit')
     } finally {
       setRerunning(false)
+    }
+  }
+
+  async function onReject() {
+    if (!detail || busy) return
+    setRejecting(true)
+    try {
+      await rejectApplicationRequest(detail.id, {
+        reason: rejectReason.trim() || undefined,
+      })
+      toast.success('Applicant rejected')
+      setShowRejectConfirm(false)
+      setRejectReason('')
+      await refreshAfterAction()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reject applicant')
+    } finally {
+      setRejecting(false)
     }
   }
 
@@ -126,6 +177,38 @@ export function OrgAdminApplicationDetailPage() {
       </div>
     )
   }
+
+  const moreItems = [
+    showScheduleBtn
+      ? {
+          id: 'schedule',
+          label: 'Schedule screening',
+          icon: 'event',
+          disabled: busy,
+          onSelect: () => setShowSchedule(true),
+        }
+      : null,
+    canRerun || Boolean(detail?.parsed_resume)
+      ? {
+          id: 'rerun',
+          label: 'Rerun fit',
+          icon: 'replay',
+          disabled: !canRerun,
+          loading: rerunning,
+          onSelect: onRerun,
+        }
+      : null,
+    showReject
+      ? {
+          id: 'reject',
+          label: 'Reject applicant',
+          icon: 'person_off',
+          danger: true,
+          disabled: busy,
+          onSelect: () => setShowRejectConfirm(true),
+        }
+      : null,
+  ].filter(Boolean)
 
   return (
     <div className="space-y-lg">
@@ -168,17 +251,15 @@ export function OrgAdminApplicationDetailPage() {
             <Badge tone={fitTone(score, fitLabels)}>
               {fitLabel(score, fitLabels)}
             </Badge>
-            <Badge tone="info">
-              Status · {formatApplicationStatus(detail.status, detail.source)}
+            <Badge tone={detail.status === 'rejected' ? 'danger' : 'info'}>
+              Status · {formatApplicationStatus(detail.status, detail.source, timeline)}
             </Badge>
-            <Button
-              icon="replay"
-              loading={rerunning}
-              disabled={!canRerun}
-              onClick={onRerun}
-            >
-              Rerun fit
-            </Button>
+            <ResumePreviewButton
+              applicationId={detail.id}
+              hasResume={Boolean(detail.has_resume)}
+              fileName={detail.resume_file_name}
+            />
+            <ActionMenu items={moreItems} />
           </div>
         }
       />
@@ -196,8 +277,69 @@ export function OrgAdminApplicationDetailPage() {
               : 'Failed to load timeline'
             : null
         }
+        scheduleAction={{
+          visible: showScheduleBtn,
+          disabled: busy,
+          onClick: () => setShowSchedule(true),
+        }}
         onRerunComplete={reload}
       />
+
+      {showSchedule ? (
+        <Suspense fallback={null}>
+          <ScheduleScreeningModal
+            open={showSchedule}
+            onClose={() => setShowSchedule(false)}
+            applicationId={detail.id}
+            candidateLabel={candidateName(detail)}
+            candidateEmail={detail.email || null}
+            onScheduled={refreshAfterAction}
+          />
+        </Suspense>
+      ) : null}
+
+      <Modal
+        open={showRejectConfirm}
+        onClose={() => {
+          if (!rejecting) {
+            setShowRejectConfirm(false)
+            setRejectReason('')
+          }
+        }}
+        title="Reject this applicant?"
+      >
+        <p className="text-body-sm text-on-surface-variant mb-md">
+          This marks the application as rejected and updates the screening timeline. You can add an
+          optional reason for your records.
+        </p>
+        <Input
+          id="reject-reason"
+          label="Reason (optional)"
+          value={rejectReason}
+          onChange={(event) => setRejectReason(event.target.value)}
+          placeholder="e.g. Experience gap on must-have skills"
+        />
+        <div className="flex flex-wrap justify-end gap-sm mt-md">
+          <Button
+            variant="secondary"
+            disabled={rejecting}
+            onClick={() => {
+              setShowRejectConfirm(false)
+              setRejectReason('')
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            icon="person_off"
+            loading={rejecting}
+            onClick={onReject}
+          >
+            Reject applicant
+          </Button>
+        </div>
+      </Modal>
     </div>
   )
 }

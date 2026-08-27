@@ -46,12 +46,12 @@ export function OrgAdminJobCreatePage() {
     }
   }
 
-  async function onSkillsSubmit() {
+  async function onSkillsSubmit(nextSkills = skills) {
     if (!job?.id) return
     setSubmitting(true)
     setSkillsError(null)
     try {
-      await updateJobRequest(job.id, { skills })
+      await updateJobRequest(job.id, { skills: nextSkills })
       toast.success('Job created')
       navigate('/org-admin/jobs', { replace: true })
     } catch (err) {
@@ -73,7 +73,7 @@ export function OrgAdminJobCreatePage() {
           </p>
         }
         title="Create job"
-        description="Step 1 captures the opening. Step 2 lets you set expected years on skills parsed from the description."
+        description="Step 1 captures the opening. Step 2 lets you edit, add, or remove skills and set expected years."
       />
       <p className="text-label-md mb-md">
         <StepLabel n="1." label="Details" active={step === 1} />

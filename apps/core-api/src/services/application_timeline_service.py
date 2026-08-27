@@ -15,6 +15,9 @@ from src.models.enums import ApplicationStatus, TimelineActorType, TimelineEvent
 __all__ = [
     "append_timeline_event",
     "list_timeline_events",
+    "timeline_event_types",
+    "assert_not_terminal",
+    "assert_job_fit_ready",
 ]
 
 
@@ -57,3 +60,30 @@ def list_timeline_events(
         )
     )
     return list(db.scalars(stmt).all())
+
+
+def timeline_event_types(db: Session, application_id: UUID) -> set[str]:
+    return {
+        event.event_type.value
+        for event in list_timeline_events(db, application_id=application_id)
+    }
+
+
+def assert_not_terminal(application: Application, types: set[str]) -> None:
+    if application.status == ApplicationStatus.rejected or "rejected" in types:
+        raise ValueError("Application is already rejected")
+    if (
+        application.status == ApplicationStatus.shortlist_for_l1
+        or "shortlisted_for_l1" in types
+    ):
+        raise ValueError("Application is already shortlisted")
+
+
+def assert_job_fit_ready(
+    application: Application,
+    types: set[str],
+    *,
+    message: str = "Job fit must complete before this action",
+) -> None:
+    if "job_fit" not in types and application.job_fit_analysis is None:
+        raise ValueError(message)

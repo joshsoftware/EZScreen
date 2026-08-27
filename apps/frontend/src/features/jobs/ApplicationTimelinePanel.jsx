@@ -1,3 +1,4 @@
+import { Button } from '../../components/ui/Button'
 import { Alert } from '../../components/ui/Alert'
 import { Panel } from '../../components/ui/PageHeader'
 import { Skeleton } from '../../components/ui/Skeleton'
@@ -26,7 +27,51 @@ function StepMarker({ state, icon }) {
   )
 }
 
-export function ApplicationTimelinePanel({ events, source, loading, error }) {
+function StepDetails({ step }) {
+  const when = step.scheduledAt || step.at
+  return (
+    <>
+      {when ? (
+        <p className="text-label-md text-on-surface-variant mt-xs">
+          {formatDateTime(when)}
+          {step.durationMinutes ? ` · ${step.durationMinutes} min` : ''}
+          {step.rerun ? ' · Rerun' : ''}
+          {step.extraCount > 0 ? ` · ${step.extraCount} earlier` : ''}
+        </p>
+      ) : step.rerun || step.extraCount > 0 ? (
+        <p className="text-label-md text-on-surface-variant mt-xs">
+          {[step.rerun ? 'Rerun' : null, step.extraCount > 0 ? `${step.extraCount} earlier` : null]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
+      ) : null}
+      {step.gmeetLink ? (
+        <a
+          href={step.gmeetLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-xs text-label-md text-primary hover:underline mt-xs break-all"
+        >
+          <span className="material-symbols-outlined text-[16px]">videocam</span>
+          Join Meet
+        </a>
+      ) : null}
+      {Array.isArray(step.attendees) && step.attendees.length > 0 ? (
+        <p className="text-label-md text-on-surface-variant mt-xs break-all">
+          Guests · {step.attendees.join(', ')}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
+export function ApplicationTimelinePanel({
+  events,
+  source,
+  loading,
+  error,
+  scheduleAction = null,
+}) {
   if (loading) {
     return (
       <Panel title="Screening progress">
@@ -61,6 +106,11 @@ export function ApplicationTimelinePanel({ events, source, loading, error }) {
         {activeSteps.map((step, index) => {
           const isLast = index === activeSteps.length - 1
           const lineDone = step.state === 'done'
+          const showScheduleCta =
+            step.state === 'current' &&
+            step.actionId === 'screening_scheduled' &&
+            scheduleAction?.visible
+
           return (
             <li key={step.id} className="flex gap-md">
               <div className="flex flex-col items-center">
@@ -74,7 +124,7 @@ export function ApplicationTimelinePanel({ events, source, loading, error }) {
                   />
                 )}
               </div>
-              <div className={cn('min-w-0', isLast ? 'pb-0' : 'pb-md')}>
+              <div className={cn('min-w-0 flex-1', isLast ? 'pb-0' : 'pb-md')}>
                 <p
                   className={cn(
                     'text-body-sm font-medium',
@@ -86,15 +136,22 @@ export function ApplicationTimelinePanel({ events, source, loading, error }) {
                   {step.title}
                 </p>
                 <p className="text-label-md text-on-surface-variant">{step.description}</p>
-                {step.at ? (
-                  <p className="text-label-md text-on-surface-variant mt-xs">
-                    {formatDateTime(step.at)}
-                    {step.rerun ? ' · Rerun' : ''}
-                    {step.extraCount > 0 ? ` · ${step.extraCount} earlier` : ''}
-                  </p>
-                ) : null}
+                <StepDetails step={step} />
                 {step.state === 'current' ? (
                   <p className="text-label-md text-primary mt-xs">Up next</p>
+                ) : null}
+                {showScheduleCta ? (
+                  <div className="mt-sm">
+                    <Button
+                      size="sm"
+                      icon="event"
+                      className="whitespace-nowrap"
+                      disabled={scheduleAction.disabled}
+                      onClick={scheduleAction.onClick}
+                    >
+                      Schedule screening
+                    </Button>
+                  </div>
                 ) : null}
               </div>
             </li>

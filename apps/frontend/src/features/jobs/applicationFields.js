@@ -176,11 +176,48 @@ const STATUS_LABELS = {
   rejected: 'Rejected',
 }
 
-export function formatApplicationStatus(status, source) {
+function timelineEventTypes(timeline) {
+  return new Set((Array.isArray(timeline) ? timeline : []).map((event) => event.event_type))
+}
+
+export function formatApplicationStatus(status, source, timeline) {
   if (!status) return '—'
+  if (status === 'rejected') return 'Rejected'
+  if (status === 'shortlist_for_l1') return 'Shortlisted for L1'
+  if (status === 'interview_completed') return 'Interview completed'
+
+  const types = timelineEventTypes(timeline)
+  if (types.has('invite_sent')) return 'Invite sent'
+  if (status === 'interview_scheduled' || types.has('screening_scheduled')) {
+    return 'Screening scheduled'
+  }
+  if (types.has('under_hr_review')) return 'HR review'
   if (status === 'applied' && source === 'hr_bulk') return 'Scored'
   if (status === 'applied' && source === 'candidate') return 'Applied'
   return STATUS_LABELS[status] ?? status.replaceAll('_', ' ')
+}
+
+export function canScheduleScreening(detail, timeline) {
+  if (!detail || detail.status !== 'applied') return false
+  const types = timelineEventTypes(timeline)
+  if (
+    types.has('screening_scheduled') ||
+    types.has('rejected') ||
+    types.has('shortlisted_for_l1')
+  ) {
+    return false
+  }
+  if (!(types.has('job_fit') || Boolean(detail.job_fit_analysis))) return false
+  return types.has('under_hr_review')
+}
+
+export function canRejectApplication(detail, timeline) {
+  if (!detail) return false
+  if (detail.status === 'rejected' || detail.status === 'shortlist_for_l1') return false
+  const types = timelineEventTypes(timeline)
+  if (types.has('rejected') || types.has('shortlisted_for_l1')) return false
+  if (detail.status !== 'applied') return false
+  return types.has('job_fit') || Boolean(detail.job_fit_analysis)
 }
 
 export function resolveMatchScore(detail) {
@@ -193,6 +230,22 @@ export function resolveMatchScore(detail) {
   return null
 }
 
+function formatOutOfTen(score) {
+  if (score == null) return '—'
+  return `${score.toFixed(1)}/10`
+}
+
+function skillsScoreFromBreakdown(breakdown) {
+  const skills = numericScore(breakdown.skills_score)
+  if (skills != null) return skills
+
+  // Legacy fit payloads used separate must-have / nice-to-have scores.
+  const mustHave = numericScore(breakdown.must_have_skills_score)
+  const goodToHave = numericScore(breakdown.good_to_have_skills_score)
+  if (mustHave == null && goodToHave == null) return null
+  return ((mustHave ?? 0) * 40 + (goodToHave ?? 0) * 20) / 60
+}
+
 export function scoreBreakdownCards(analysis) {
   if (!analysis || typeof analysis !== 'object') return []
 
@@ -201,33 +254,26 @@ export function scoreBreakdownCards(analysis) {
     const overall = numericScore(analysis.match_score)
     return overall == null
       ? []
-      : [{ label: 'Overall', value: `${overall.toFixed(1)}/10` }]
+      : [{ label: 'Overall', value: formatOutOfTen(overall) }]
   }
 
-  const mustHave = numericScore(breakdown.must_have_skills_score) ?? 0
-  const goodToHave = numericScore(breakdown.good_to_have_skills_score) ?? 0
-  const experience = numericScore(breakdown.experience_score) ?? 0
-  const qualifications = numericScore(breakdown.qualifications_score) ?? 0
-  const overall = numericScore(analysis.match_score)
-
-  const toTen = (value, max) => `${((value / max) * 10).toFixed(1)}/10`
-
+  // BE score_breakdown values are already on a 0–10 scale.
   return [
     {
       label: 'Overall',
-      value: overall == null ? '—' : `${overall.toFixed(1)}/10`,
+      value: formatOutOfTen(numericScore(analysis.match_score)),
     },
     {
       label: 'Skills',
-      value: toTen(mustHave + goodToHave, 60),
+      value: formatOutOfTen(skillsScoreFromBreakdown(breakdown)),
     },
     {
       label: 'Experience',
-      value: toTen(experience, 30),
+      value: formatOutOfTen(numericScore(breakdown.experience_score)),
     },
     {
       label: 'Qualifications',
-      value: toTen(qualifications, 10),
+      value: formatOutOfTen(numericScore(breakdown.qualifications_score)),
     },
   ]
 }

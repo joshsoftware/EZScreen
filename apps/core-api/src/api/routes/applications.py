@@ -6,12 +6,15 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 from src.api.deps import DbSession, require_roles
 from src.models.enums import UserRole
 from src.models.user import User
 from src.schemas.application import (
     ApplicationDetailResponse,
+    ApplicationRejectRequest,
+    ApplicationResumeResponse,
     ApplicantListItem,
     BulkCreateRequest,
     BulkCreateResponse,
@@ -184,6 +187,167 @@ def get_application(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     _assert_job_access(current_user, job)
     return application_service.application_to_detail_response(application)
+
+
+@detail_router.post(
+    "/{application_id}/hr-review",
+    response_model=ApplicationDetailResponse,
+    summary="Move application into HR review (timeline only; status stays applied)",
+)
+def move_application_to_hr_review(
+    application_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+) -> ApplicationDetailResponse:
+    application = application_service.get_application(db, application_id)
+    if application is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+
+    job = application.job_description
+    if job is None:
+        job = job_service.get_job(db, application.job_description_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+    try:
+        updated = application_service.move_to_hr_review(
+            db, application=application, actor_id=current_user.id
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return application_service.application_to_detail_response(updated)
+
+
+@detail_router.post(
+    "/{application_id}/reject",
+    response_model=ApplicationDetailResponse,
+    summary="Reject application after fit / during HR review",
+)
+def reject_application(
+    application_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+    body: ApplicationRejectRequest = ApplicationRejectRequest(),
+) -> ApplicationDetailResponse:
+    application = application_service.get_application(db, application_id)
+    if application is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+
+    job = application.job_description
+    if job is None:
+        job = job_service.get_job(db, application.job_description_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+    try:
+        updated = application_service.reject_application(
+            db,
+            application=application,
+            actor_id=current_user.id,
+            reason=body.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return application_service.application_to_detail_response(updated)
+
+
+@detail_router.get(
+    "/{application_id}/resume",
+    response_model=ApplicationResumeResponse,
+    summary="Issue pre-signed URLs to preview or download the candidate resume",
+)
+def get_application_resume(
+    application_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+) -> ApplicationResumeResponse:
+    application = application_service.get_application(db, application_id)
+    if application is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+
+    job = application.job_description
+    if job is None:
+        job = job_service.get_job(db, application.job_description_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+    try:
+        return application_service.application_resume_response(application)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to create resume URLs: {exc}",
+        ) from exc
+
+
+@detail_router.get(
+    "/{application_id}/resume/file",
+    summary="Stream resume file through the API (preview or download)",
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+def stream_application_resume(
+    application_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+    disposition: str = Query("inline", pattern="^(inline|attachment)$"),
+) -> StreamingResponse:
+    application = application_service.get_application(db, application_id)
+    if application is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+
+    job = application.job_description
+    if job is None:
+        job = job_service.get_job(db, application.job_description_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+    try:
+        payload = application_service.application_resume_file(application)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to load resume file: {exc}",
+        ) from exc
+
+    file_name = payload["file_name"]
+    headers = {
+        "Content-Disposition": f'{disposition}; filename="{file_name}"',
+        "Cache-Control": "private, no-store",
+    }
+    if payload.get("content_length") is not None:
+        headers["Content-Length"] = str(payload["content_length"])
+
+    return StreamingResponse(
+        payload["body"].iter_chunks(),
+        media_type=payload["content_type"],
+        headers=headers,
+    )
 
 
 @detail_router.get(

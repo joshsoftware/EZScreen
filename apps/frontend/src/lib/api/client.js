@@ -117,3 +117,73 @@ export async function apiRequest(path, options = {}) {
 
   return response.json()
 }
+
+/**
+ * Authenticated fetch that returns a Blob (for file download/preview).
+ * Same auth/refresh behavior as apiRequest.
+ */
+export async function apiBlobRequest(path, options = {}) {
+  const {
+    body,
+    token,
+    skipAuthRetry = false,
+    headers: initHeaders,
+    ...rest
+  } = options
+  const headers = new Headers(initHeaders)
+  const bearer = token ?? getAccessToken()
+
+  if (body !== undefined && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  if (bearer) {
+    headers.set('Authorization', `Bearer ${bearer}`)
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...rest,
+    headers,
+    credentials: 'include',
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
+
+  if (
+    response.status === 401 &&
+    bearer &&
+    !skipAuthRetry &&
+    !NO_REFRESH_PATHS.has(path)
+  ) {
+    const newToken = await silentRefresh()
+    if (newToken) {
+      return apiBlobRequest(path, {
+        ...options,
+        token: newToken,
+        skipAuthRetry: true,
+      })
+    }
+    notifySessionExpired()
+  }
+
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`
+    try {
+      const data = await response.json()
+      if (typeof data.detail === 'string') {
+        message = data.detail
+      } else if (Array.isArray(data.detail) && data.detail[0]?.msg) {
+        message = data.detail[0].msg
+      }
+    } catch {
+      // keep default message
+    }
+    throw new ApiError(response.status, message)
+  }
+
+  const blob = await response.blob()
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const match = /filename="([^"]+)"/i.exec(disposition)
+  const fileName = match?.[1] || null
+  const contentType = response.headers.get('Content-Type') || blob.type
+
+  return { blob, fileName, contentType }
+}
