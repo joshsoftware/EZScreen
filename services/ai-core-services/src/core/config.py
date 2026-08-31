@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     kokoro_api_url: str | None = None
     kokoro_api_key: str | None = None
 
+    # Docling: disable OCR for text-based PDF resumes (much faster, lower RAM on CPU).
+    docling_do_ocr: bool = False
+
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),
         env_file_encoding="utf-8",

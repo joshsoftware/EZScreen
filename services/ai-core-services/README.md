@@ -30,30 +30,42 @@ The microservice follows a **modular domain structure** with **shared generic fu
 services/ai-core-services/src/
 ├── main.py                     # Central FastAPI application entrypoint
 ├── core/                       # Configuration, settings loader, & environment variables
+│   ├── config.py
+│   ├── logger.py
+│   └── storage.py              # MinIO object storage client
 │
-├── common/                     # SHARED GENERIC UTILITIES & FUNCTIONS
-│   ├── llm_client.py           # Shared Gemma4:31b LLM engine wrapper & JSON repair parser
-│   ├── file_extractor.py       # Shared PDF / DOCX text extraction helper
-│   ├── storage.py              # Shared MinIO object storage client
-│   └── logger.py               # Shared structured logging utility
+├── common/                     # Shared generic utilities
+│   └── llm_utils.py            # LLM JSON parsing helpers
 │
-├── api/                        # ABSTRACTED API CONTROLLERS (/internal/v1/*)
-│   ├── router.py               # Master API router aggregating all internal routes
-│   └── v1/                     # Clean HTTP request controllers & Pydantic DTO validation
+├── llm/                        # Ollama / Gemma4 LLM client wrapper
+│   └── client.py
+│
+├── api/                        # API controllers (/internal/v1/*)
+│   └── v1/
 │       ├── parsing.py
 │       ├── matching.py
-│       ├── screening.py
-│       ├── bot.py
-│       └── analysis.py
+│       ├── question_generation.py
+│       └── meeting_bot.py
 │
-└── DOMAIN MODULES (Self-Contained Implementation):
-    ├── parsing/                # 1. Direct In-Memory JD & Resume Parsing logic
-    ├── matching_result/        # 2. Custom Candidate-JD Weighted Scoring calculation
-    ├── question_generation/    # 3. Pre-Call Candidate-Tailored Question Generator
-    ├── screening_pipeline/     # 4. Real-Time Audio STT & TTS Pipelines
-    ├── meeting_bot/            # 5. Attendee.dev Meeting Bot Dispatcher & WebSockets
-    └── interview_analysis/     # 6. Candidate Interview Transcript Evaluator
+└── DOMAIN MODULES:
+    ├── parsing/                # JD & resume parsing
+    ├── job_fit_analysis/       # Resume-JD matching & scoring
+    ├── question_generation/    # Pre-call interview question generator
+    ├── screening_pipeline/     # Real-time STT & TTS pipelines
+    ├── meeting_bot/            # Attendee.dev bot dispatcher & WebSockets
+    └── interview_analysis/     # Post-call transcript evaluator
 ```
+
+---
+
+## Agent Skills & Cursor Rules
+
+Python conventions for AI-assisted development live in:
+
+- **Skills**: `.agents/skills/` (design patterns, project structure, testing)
+- **Compiled guide**: `.agents/AGENTS.md`
+
+Run tests: `cd services/ai-core-services && uv run pytest`
 
 ---
 
