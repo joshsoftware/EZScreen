@@ -20,8 +20,6 @@ class QuestionPromptBuilder:
         must_have_skills = json.dumps([s.model_dump() for s in parsed_jd.skills.must_have])
         good_to_have_skills = json.dumps([s.model_dump() for s in parsed_jd.skills.good_to_have])
         responsibilities = json.dumps(parsed_jd.responsibilities)
-        min_y = parsed_jd.experience_required.min_years or 0
-
 
         # Full match JSON
         match_json = json.dumps(match_result, indent=2)
@@ -75,7 +73,7 @@ Assign depth dynamically based ONLY on the JD's REQUIRED EXPERIENCE for that spe
 - Use "partial_depth" if the Target Experience Level is 2-4 years.
 - Use "full_depth" if the Target Experience Level is 5+ years.
 
-═══ OUTPUT FORMAT ═══i
+═══ OUTPUT FORMAT ═══
 Return a JSON array only. No markdown, no commentary.
 [
   {{
