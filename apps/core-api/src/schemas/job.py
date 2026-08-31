@@ -125,6 +125,7 @@ class JobResponse(BaseModel):
     skills: JobSkills | None = None
     status: JobStatus
     parsed_jd: dict | None = None
+    screening_questions: dict | None = None
 
 
 class JobUpdateResponse(BaseModel):
@@ -134,3 +135,35 @@ class JobUpdateResponse(BaseModel):
     title: str | None
     status: JobStatus
     skills: JobSkills | None = None
+    screening_questions: dict | None = None
+
+
+class ScreeningQuestionItem(BaseModel):
+    id: int | None = None
+    category: str = Field(default="must_have", max_length=64)
+    skill_focus: str = Field(default="", max_length=255)
+    question: str = Field(min_length=1, max_length=4000)
+    expected_keywords: list[str] = Field(default_factory=list)
+    answer_depth: str = Field(default="partial_depth", max_length=32)
+
+    @field_validator("skill_focus", "question", mode="before")
+    @classmethod
+    def strip_text(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("expected_keywords", mode="before")
+    @classmethod
+    def normalize_keywords(cls, value: object) -> object:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return value
+
+
+class ScreeningQuestionsUpdate(BaseModel):
+    questions: list[ScreeningQuestionItem] = Field(default_factory=list)

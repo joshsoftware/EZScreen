@@ -19,10 +19,20 @@ import { Button } from '../../components/ui/Button'
 import { Input, PasswordInput } from '../../components/ui/Input'
 import { PageHeader, Panel } from '../../components/ui/PageHeader'
 import { PageSkeleton } from '../../components/ui/Skeleton'
+import { ServiceHealthPanel } from '../../components/system/ServiceHealthPanel'
+import { useWorkspaceHealthContext } from '../../features/system/WorkspaceHealthContext'
+
+function createLabelRowId() {
+  // randomUUID requires a secure context (HTTPS); staging is HTTP-only.
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `label-${crypto.randomUUID().slice(0, 8)}`
+  }
+  return `label-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+}
 
 function newLabelRow() {
   return {
-    id: `label-${crypto.randomUUID().slice(0, 8)}`,
+    id: createLabelRowId(),
     name: '',
     min_score: '',
     max_score: '',
@@ -118,13 +128,24 @@ export function OrgAdminSettingsPage() {
   const [passwordError, setPasswordError] = useState(null)
   const [passwordSubmitting, setPasswordSubmitting] = useState(false)
   const [rowsReady, setRowsReady] = useState(false)
+  const {
+    health: workspaceHealth,
+    error: workspaceHealthError,
+    loading: workspaceHealthLoading,
+    refreshing: workspaceHealthRefreshing,
+    refresh: refreshWorkspaceHealth,
+  } = useWorkspaceHealthContext()
 
   useEffect(() => {
+    if (!orgId) {
+      setRowsReady(true)
+      return
+    }
     if (!org) return
     setRows(normalizeFitLabels(org.fit_labels))
     setRowsReady(true)
     setError(null)
-  }, [org])
+  }, [org, orgId])
 
   useEffect(() => {
     if (!queryError) return
@@ -209,7 +230,7 @@ export function OrgAdminSettingsPage() {
     }
   }
 
-  if (isLoading || !rowsReady) {
+  if ((orgId && isLoading) || !rowsReady) {
     return <PageSkeleton />
   }
 
@@ -217,8 +238,18 @@ export function OrgAdminSettingsPage() {
     <div className="max-w-3xl space-y-2xl">
       <PageHeader
         title="Settings"
-        description="Manage your account password and organization screening labels."
+        description="Manage your account password, service status, and organization screening labels."
       />
+
+      <div id="system-status">
+        <ServiceHealthPanel
+          health={workspaceHealth}
+          error={workspaceHealthError}
+          loading={workspaceHealthLoading}
+          refreshing={workspaceHealthRefreshing}
+          onRefresh={refreshWorkspaceHealth}
+        />
+      </div>
 
       <Panel title="Change password">
         <form onSubmit={onChangePassword} className="space-y-md max-w-md">

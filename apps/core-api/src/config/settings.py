@@ -26,6 +26,8 @@ class Settings(BaseSettings):
 
     # MinIO / S3 (local dev defaults match docker-compose)
     minio_endpoint: str = "host.docker.internal:9000"
+    # Server-side boto3 (get_object). In Docker use minio:9000; presigned URLs use minio_endpoint.
+    minio_internal_endpoint: str | None = None
     minio_access_key: str = "minio_admin"
     minio_secret_key: str = "minio_password"
     minio_secure: bool = False
@@ -77,13 +79,26 @@ class Settings(BaseSettings):
         return f"{scheme}://{self.minio_endpoint}"
 
     @property
+    def s3_internal_endpoint_url(self) -> str:
+        scheme = "https" if self.minio_secure else "http"
+        host = (self.minio_internal_endpoint or self.minio_endpoint).strip()
+        return f"{scheme}://{host}"
+
+    @property
+    def ai_services_base_url(self) -> str:
+        if self.parsing_service_url:
+            base = self.parsing_service_url.rstrip("/")
+            if base.endswith("/internal/v1"):
+                return base[: -len("/internal/v1")]
+            return base
+        host = self.ai_services_host.strip()
+        return f"{self.ai_services_scheme}://{host}:{self.ai_services_port}"
+
+    @property
     def parsing_service_base_url(self) -> str:
         if self.parsing_service_url:
             return self.parsing_service_url.rstrip("/")
-        host = self.ai_services_host.strip()
-        return (
-            f"{self.ai_services_scheme}://{host}:{self.ai_services_port}/internal/v1"
-        )
+        return f"{self.ai_services_base_url}/internal/v1"
 
 
 settings = Settings()

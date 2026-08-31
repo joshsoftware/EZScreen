@@ -30,6 +30,19 @@ export function updateJobRequest(jobId, body) {
   })
 }
 
+export function regenerateJobScreeningQuestionsRequest(jobId) {
+  return apiRequest(`/api/v1/jobs/${jobId}/screening-questions/regenerate`, {
+    method: 'POST',
+  })
+}
+
+export function updateJobScreeningQuestionsRequest(jobId, questions) {
+  return apiRequest(`/api/v1/jobs/${jobId}/screening-questions`, {
+    method: 'PUT',
+    body: { questions },
+  })
+}
+
 export function getJobApplicantsRequest(jobId, { page = 1, limit = 50 } = {}) {
   const search = new URLSearchParams()
   search.set('page', String(page))

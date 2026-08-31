@@ -13,9 +13,14 @@ EZScreen is an AI-powered candidate screening and interview automation system. T
 
 ## Local Development Setup
 
-To spin up the database, cache, local object storage, and all application services, run:
+To spin up the database, cache, local object storage, and all application services:
 
 ```bash
+cp apps/core-api/.env.example apps/core-api/.env
+cp services/ai-core-services/.env.example services/ai-core-services/.env
+# Set POSTGRES_* + DATABASE_URL in core-api/.env
+# Set MINIO_ROOT_* + MINIO_ACCESS_KEY/SECRET_KEY in ai-core-services/.env (same values)
+
 docker compose up -d --build
 ```
 
@@ -24,6 +29,6 @@ docker compose up -d --build
 * **React Frontend**: [http://localhost:5173](http://localhost:5173)
 * **Core API Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
 * **AI Core Services Swagger UI**: [http://localhost:8002/docs](http://localhost:8002/docs)
-* **MinIO Storage Console**: [http://localhost:9001](http://localhost:9001) (Credentials: `minio_admin` / `minio_password`)
-* **PostgreSQL Database**: `localhost:5433` (Credentials: `ezscreen_user` / `ezscreen_password`)
+* **MinIO Storage Console**: [http://localhost:9003](http://localhost:9003) (see `MINIO_ROOT_*` in `services/ai-core-services/.env`)
+* **PostgreSQL Database**: `localhost:5434` (see `POSTGRES_*` in `apps/core-api/.env`)
 

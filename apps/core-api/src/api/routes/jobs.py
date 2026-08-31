@@ -16,6 +16,7 @@ from src.schemas.job import (
     JobResponse,
     JobUpdate,
     JobUpdateResponse,
+    ScreeningQuestionsUpdate,
 )
 from src.services import job_service
 
@@ -161,3 +162,47 @@ def update_job(
         )
         raise HTTPException(status_code=code, detail=detail) from exc
     return JobUpdateResponse.model_validate(job)
+
+
+@router.post(
+    "/{job_id}/screening-questions/regenerate",
+    response_model=JobResponse,
+    summary="Regenerate AI screening question bank for a published job",
+)
+def regenerate_screening_questions(
+    job_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+) -> JobResponse:
+    job = job_service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+    try:
+        job = job_service.regenerate_screening_questions(db, job)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return JobResponse.model_validate(job)
+
+
+@router.put(
+    "/{job_id}/screening-questions",
+    response_model=JobResponse,
+    summary="Save manually edited screening questions for a published job",
+)
+def update_screening_questions(
+    job_id: UUID,
+    body: ScreeningQuestionsUpdate,
+    db: DbSession,
+    current_user: JobActor,
+) -> JobResponse:
+    job = job_service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+    try:
+        questions = [item.model_dump() for item in body.questions]
+        job = job_service.save_screening_questions(db, job, questions)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return JobResponse.model_validate(job)

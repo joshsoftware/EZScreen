@@ -17,6 +17,7 @@ from src.models.job_description import JobDescription
 from src.models.organization import Organization
 from src.models.user import User
 from src.schemas.job import JobCreate, JobSkills, JobUpdate
+from src.services import job_question_service
 
 _JD_PARSE_FIELDS = (
     "title",
@@ -33,6 +34,8 @@ __all__ = [
     "get_job",
     "create_job",
     "update_job",
+    "regenerate_screening_questions",
+    "save_screening_questions",
     "resolve_organization_id",
 ]
 
@@ -113,6 +116,19 @@ def _apply_skills(job: JobDescription, skills: JobSkills | dict | None) -> None:
         job.parsed_jd = parsed
 
 
+def _maybe_generate_screening_questions(
+    job: JobDescription,
+    *,
+    previous_status: JobStatus,
+    new_status: JobStatus | None,
+) -> None:
+    if new_status != JobStatus.published:
+        return
+    if previous_status == JobStatus.published:
+        return
+    job.screening_questions = job_question_service.generate_job_screening_questions(job)
+
+
 def create_job(
     db: Session,
     *,
@@ -132,6 +148,11 @@ def create_job(
     if data.skills is not None:
         _apply_skills(job, data.skills)
     _apply_status_timestamps(job, job.status)
+    _maybe_generate_screening_questions(
+        job,
+        previous_status=JobStatus.draft,
+        new_status=job.status if job.status == JobStatus.published else None,
+    )
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -142,6 +163,7 @@ def update_job(db: Session, job: JobDescription, data: JobUpdate) -> JobDescript
     payload = data.model_dump(exclude_unset=True)
     skills = payload.pop("skills", None)
     skills_set = "skills" in data.model_fields_set
+    previous_status = job.status
     new_status = payload.get("status")
     for key, value in payload.items():
         setattr(job, key, value)
@@ -151,10 +173,31 @@ def update_job(db: Session, job: JobDescription, data: JobUpdate) -> JobDescript
         job.parsed_jd = _call_parse_jd(job)
     if skills_set:
         _apply_skills(job, skills)
+    _maybe_generate_screening_questions(
+        job,
+        previous_status=previous_status,
+        new_status=new_status,
+    )
     db.add(job)
     db.commit()
     db.refresh(job)
     return job
+
+
+def regenerate_screening_questions(db: Session, job: JobDescription) -> JobDescription:
+    if job.status != JobStatus.published:
+        raise ValueError("Screening questions can only be generated for published jobs")
+    return job_question_service.regenerate_job_screening_questions(db, job)
+
+
+def save_screening_questions(
+    db: Session,
+    job: JobDescription,
+    questions: list[dict],
+) -> JobDescription:
+    if job.status != JobStatus.published:
+        raise ValueError("Screening questions can only be edited for published jobs")
+    return job_question_service.save_job_screening_questions(db, job, questions)
 
 
 def _enum_value(value: object) -> object:

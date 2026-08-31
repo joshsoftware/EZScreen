@@ -14,13 +14,23 @@ class ServiceStatus(BaseModel):
 class HealthDetailedResponse(BaseModel):
     status: str
     service: str
+    checked_at: str
     database: ServiceStatus
     api: ServiceStatus
-    parse_workers: ServiceStatus
+    ai_core_services: ServiceStatus
+    parse_workers: ServiceStatus  # alias of ai_core_services (backward compat)
     screening_bot: ServiceStatus
     object_storage: ServiceStatus
     stats: dict[str, int | float | str]
     recent_events: list[dict[str, str]]
+
+
+class HealthStatusResponse(BaseModel):
+    """Lightweight health for org HR / admin workspace."""
+
+    status: str
+    checked_at: str
+    services: list[ServiceStatus]
 
 
 class PlatformSettings(BaseModel):

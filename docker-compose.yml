@@ -3,16 +3,14 @@ services:
     image: postgres:15-alpine
     container_name: ezscreen-db
     restart: always
-    environment:
-      POSTGRES_USER: ezscreen_user
-      POSTGRES_PASSWORD: ezscreen_password
-      POSTGRES_DB: ezscreen_db
+    env_file:
+      - ./apps/core-api/.env
     ports:
-      - "5433:5432"   # host 5433 avoids conflict with local PostgreSQL on 5432
+      - "5434:5432"   # host 5434 avoids conflict with local PostgreSQL on 5432
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ezscreen_user -d ezscreen_db"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -21,12 +19,12 @@ services:
     image: minio/minio:latest
     container_name: ezscreen-minio
     restart: always
+    env_file:
+      - ./services/ai-core-services/.env
     ports:
-      - "9000:9000"      # API
-      - "9001:9001"      # Console
+      - "9002:9000"      # API (host 9002 — avoids conflict if 9000 is taken)
+      - "9003:9001"      # Console
     environment:
-      MINIO_ROOT_USER: minio_admin
-      MINIO_ROOT_PASSWORD: minio_password
       MINIO_API_CORS_ALLOW_ORIGIN: "*"
     volumes:
       - miniodata:/data
@@ -43,9 +41,11 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    env_file:
+      - ./services/ai-core-services/.env
     entrypoint: >
       /bin/sh -c "
-      /usr/bin/mc alias set local http://minio:9000 minio_admin minio_password;
+      /usr/bin/mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
       /usr/bin/mc mb --ignore-existing local/resumes;
       /usr/bin/mc mb --ignore-existing local/jds;
       exit 0;
@@ -66,6 +66,7 @@ services:
     environment:
       # Docker DNS — do not set MINIO_ENDPOINT here (presigned URLs go to the browser)
       AI_SERVICES_HOST: ai-core-services
+      MINIO_INTERNAL_ENDPOINT: minio:9000
     depends_on:
       db:
         condition: service_healthy
@@ -103,6 +104,8 @@ services:
       - "5173:5173"
     env_file:
       - ./apps/frontend/.env
+    environment:
+      DEV_API_PROXY_TARGET: http://core-api:8000
     depends_on:
       - core-api
       - ai-core-services
