@@ -33,6 +33,15 @@ class Settings(BaseSettings):
 
     # Real-time WebSocket Audio Stream Endpoint
     websocket_url: str
+    
+    # Webhook callback URL for Attendee to post lifecycle events to
+    webhook_url: str
+    
+    # Deepgram STT
+    deepgram_api_key: str
+    
+    # TTS API (can be None if relying on the same Deepgram key for Aura)
+    tts_api_key: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),

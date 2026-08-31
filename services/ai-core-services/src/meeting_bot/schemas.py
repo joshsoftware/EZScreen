@@ -11,12 +11,23 @@ class AttendeeWebsocketSettings(BaseModel):
     audio: AttendeeAudioSettings
 
 
+class AttendeeWebhookConfig(BaseModel):
+    url: str
+    triggers: list[str] = ["bot.state_change", "participant_events.speech_start_stop"]
+
+
 class AttendeeScheduleBotRequest(BaseModel):
     meeting_url: str
     bot_name: str = "ezscreener"
     join_at: Optional[str] = None
     transcription_settings: Dict[str, Any] = Field(default_factory=dict)
     websocket_settings: Optional[AttendeeWebsocketSettings] = None
+    webhooks: Optional[list[AttendeeWebhookConfig]] = None
+
+
+class LeaveBotResponse(BaseModel):
+    bot_id: str
+    status: str = "leaving"
 
 
 class AttendeeScheduleBotResponse(BaseModel):

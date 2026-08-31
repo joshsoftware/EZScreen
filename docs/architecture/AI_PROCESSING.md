@@ -737,6 +737,7 @@ SCORING RULES:
 DECISION:
 - "NEXT_QUESTION" if score >= 6 AND coverage_percent >= 50 (candidate understood it well enough for screening).
 - "ASK_FOLLOW_UP" if score < 6 OR coverage_percent < 50 (answer was too shallow or missed key concepts).
+- "REPEAT_QUESTION" if the candidate asked you to repeat the question, or if their response was completely unrelated to the interview (e.g. "I can't hear you", "Hold on a second").
 
 Return STRICT JSON only. No markdown:
 {
@@ -745,9 +746,9 @@ Return STRICT JSON only. No markdown:
   "keywords_found": ["..."],
   "keywords_missing": ["..."],
   "is_sufficient": <true|false>,
-  "decision": "NEXT_QUESTION | ASK_FOLLOW_UP",
+  "decision": "NEXT_QUESTION | ASK_FOLLOW_UP | REPEAT_QUESTION",
   "feedback": "2-3 sentences: what was good, what was missing, pass/fail on this topic for screening",
-  "suggested_follow_up": "If decision is ASK_FOLLOW_UP and this is NOT a follow-up evaluation itself, write a specific, conversational follow-up question here to probe what they missed based on the missing keywords. Otherwise omit this field entirely."
+  "suggested_follow_up": "If decision is ASK_FOLLOW_UP and this is NOT a follow-up evaluation itself, write a specific, conversational follow-up question here to probe what they missed based on the missing keywords. If REPEAT_QUESTION, omit this field."
 }
 ```
 

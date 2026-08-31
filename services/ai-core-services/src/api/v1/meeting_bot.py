@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException, status
-from src.meeting_bot.schemas import DispatchBotRequest, DispatchBotResponse, BotStatusResponse
+from fastapi import APIRouter, HTTPException, status, Response
+from src.meeting_bot.schemas import DispatchBotRequest, DispatchBotResponse, BotStatusResponse, LeaveBotResponse
 from src.meeting_bot.client import bot_client
 
 router = APIRouter(prefix="/screening/bot", tags=["Meeting Bot Service"])
@@ -26,4 +26,34 @@ async def get_bot_status(bot_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch bot status: {str(err)}"
+        )
+
+
+@router.post("/{bot_id}/leave", response_model=LeaveBotResponse, status_code=status.HTTP_200_OK)
+async def leave_bot(bot_id: str):
+    """Instruct the meeting bot to gracefully leave the meeting."""
+    try:
+        return await bot_client.leave_bot(bot_id)
+    except Exception as err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to instruct bot to leave: {str(err)}"
+        )
+
+
+@router.delete("/{bot_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_bot(bot_id: str):
+    """Delete a bot record from Attendee."""
+    try:
+        success = await bot_client.delete_bot(bot_id)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to delete bot"
+            )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except Exception as err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete bot: {str(err)}"
         )

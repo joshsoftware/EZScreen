@@ -9,6 +9,7 @@ from src.meeting_bot.schemas import (
     DispatchBotRequest,
     DispatchBotResponse,
     BotStatusResponse,
+    LeaveBotResponse,
 )
 
 
@@ -65,6 +66,14 @@ class AttendeeBotClient:
             meeting_url=attendee_res.meeting_url,
             duration_seconds=attendee_res.duration_seconds,
         )
+
+    async def leave_bot(self, bot_id: str) -> LeaveBotResponse:
+        """Instruct the bot to leave the meeting."""
+        return await attendee_client.leave_bot(bot_id)
+
+    async def delete_bot(self, bot_id: str) -> bool:
+        """Delete the bot from Attendee."""
+        return await attendee_client.delete_bot(bot_id)
 
 
 bot_client = AttendeeBotClient()
