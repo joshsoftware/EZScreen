@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Webhook callback URL for Attendee to post lifecycle events to
     webhook_url: str
     
+    # Internal URL for Core API (to update DB state)
+    core_api_url: str
+    
     # Deepgram STT
     deepgram_api_key: str
     
