@@ -5,7 +5,7 @@ from src.core.logger import logger
 from src.core.config import settings
 from src.meeting_bot.repository import interview_session_repo
 
-router = APIRouter(tags=["Attendee Webhooks"])
+router = APIRouter(prefix="/screening", tags=["Attendee Webhooks"])
 
 async def update_session_status(session_id: str, new_status: str):
     """Make an internal API call to core-api to update session status."""

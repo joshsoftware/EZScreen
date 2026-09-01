@@ -40,11 +40,13 @@ class Settings(BaseSettings):
     # Internal URL for Core API (to update DB state)
     core_api_url: str
     
-    # Deepgram STT
-    deepgram_api_key: str
+    # Whisper STT (Cloud API)
+    whisper_api_url: str | None = None
+    whisper_api_key: str | None = None
     
-    # TTS API (can be None if relying on the same Deepgram key for Aura)
-    tts_api_key: str | None = None
+    # Kokoro TTS (Cloud API)
+    kokoro_api_url: str | None = None
+    kokoro_api_key: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),

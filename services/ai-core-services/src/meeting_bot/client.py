@@ -37,7 +37,7 @@ class AttendeeBotClient:
             join_at=scheduled_at,
             websocket_settings=AttendeeWebsocketSettings(
                 audio=AttendeeAudioSettings(
-                    url=settings.websocket_url,
+                    url=f"{settings.websocket_url.rstrip('/')}/{request.interview_session_id}",
                     sample_rate=24000
                 )
             )

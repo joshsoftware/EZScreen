@@ -84,6 +84,8 @@ services:
       - ./services/ai-core-services/.env
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    environment:
+      CORE_API_URL: "http://core-api:8000"
     volumes:
       - rapidocr_models:/usr/local/lib/python3.11/site-packages/rapidocr/models
       - hf_cache:/root/.cache/huggingface

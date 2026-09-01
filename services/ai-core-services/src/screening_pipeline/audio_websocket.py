@@ -22,16 +22,23 @@ async def speak_to_attendee(websocket: WebSocket, pcm_bytes: bytes):
             }
         })
 
-@router.websocket("/attendee-websocket")
-async def attendee_audio_ws(websocket: WebSocket):
+@router.websocket("/attendee-websocket/{bot_id}")
+async def attendee_audio_ws(websocket: WebSocket, bot_id: str):
     """
     WebSocket endpoint for bidirectional audio streaming.
     Attendee will connect to this URL.
     """
     await websocket.accept()
-    logger.info("Attendee connected to WebSocket")
+    logger.info("Attendee connected to WebSocket", extra={"bot_id": bot_id})
     
-    bot_id = None
+    from src.screening_pipeline.orchestrator import InterviewOrchestrator
+    orchestrator = InterviewOrchestrator(bot_id=bot_id, websocket=websocket)
+    active_sessions[bot_id] = orchestrator
+    
+    logger.info("Bot audio stream initialized", extra={"bot_id": bot_id})
+    
+    import asyncio
+    asyncio.create_task(orchestrator.start())
     
     try:
         while True:
@@ -42,25 +49,10 @@ async def attendee_audio_ws(websocket: WebSocket):
             if trigger == "realtime_audio.mixed":
                 # Inbound audio from candidate
                 chunk_b64 = data.get("chunk")
-                if chunk_b64 and bot_id and bot_id in active_sessions:
+                if chunk_b64 and bot_id in active_sessions:
                     pcm_bytes = base64.b64decode(chunk_b64)
-                    orchestrator = active_sessions[bot_id]
                     await orchestrator.stt_client.send_audio(pcm_bytes)
                     
-            elif trigger == "bot.joined":
-                # Initial payload sent upon connection
-                bot_id = data.get("bot_id")
-                
-                from src.screening_pipeline.orchestrator import InterviewOrchestrator
-                orchestrator = InterviewOrchestrator(bot_id=bot_id, websocket=websocket)
-                active_sessions[bot_id] = orchestrator
-                
-                logger.info("Bot audio stream initialized", extra={"bot_id": bot_id})
-                
-                # Start the orchestrator logic
-                import asyncio
-                asyncio.create_task(orchestrator.start())
-                
     except WebSocketDisconnect:
         logger.info("Attendee WebSocket disconnected", extra={"bot_id": bot_id})
     finally:
