@@ -89,6 +89,7 @@ services:
     volumes:
       - rapidocr_models:/usr/local/lib/python3.11/site-packages/rapidocr/models
       - hf_cache:/root/.cache/huggingface
+      - kokoro_models:/app/.models
     depends_on:
       db:
         condition: service_healthy
@@ -114,3 +115,4 @@ volumes:
   miniodata:
   rapidocr_models:
   hf_cache:
+  kokoro_models:

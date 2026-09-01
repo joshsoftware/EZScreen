@@ -1,4 +1,6 @@
-from datetime import datetime, timezone
+from fastapi import HTTPException
+from datetime import datetime, timezone, timedelta
+from src.core.logger import logger
 from src.core.config import settings
 from src.meeting_bot.repository import interview_session_repo
 from src.meeting_bot.attendee import attendee_client
@@ -24,6 +26,23 @@ class AttendeeBotClient:
         scheduled_at = None
         if session_detail:
             scheduled_at = session_detail.scheduled_at
+            if scheduled_at:
+                try:
+                    # The calendar saves IST but marks it as UTC. 
+                    # We subtract 5:30 to get the TRUE UTC time for Attendee.dev
+                    dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+                    dt = dt - timedelta(hours=5, minutes=30)
+                    
+                    # If it's already past the start time, block it and return an error to the user
+                    if dt < datetime.now(timezone.utc):
+                        raise HTTPException(status_code=400, detail="Cannot dispatch bot. The scheduled interview time is in the past.")
+                    else:
+                        scheduled_at = dt.isoformat()
+                except HTTPException:
+                    raise # Re-raise the 400 error so Postman sees it
+                except Exception as e:
+                    logger.warning(f"Failed to adjust scheduled_at for IST: {e}")
+                    
             if not meeting_url and session_detail.comment:
                 meeting_url = session_detail.comment
 
@@ -35,10 +54,16 @@ class AttendeeBotClient:
             meeting_url=meeting_url,
             bot_name="ezscreener",
             join_at=scheduled_at,
+            transcription_settings={
+                "meeting_closed_captions": {}
+            },
             websocket_settings=AttendeeWebsocketSettings(
                 audio=AttendeeAudioSettings(
                     url=f"{settings.websocket_url.rstrip('/')}/{request.interview_session_id}",
-                    sample_rate=24000
+                    sample_rate=24000,
+                    receive_audio=True,
+                    listen=True,
+                    events=["realtime_audio.mixed"]
                 )
             )
         )

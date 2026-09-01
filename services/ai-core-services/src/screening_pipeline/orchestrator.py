@@ -10,7 +10,7 @@ from src.core.logger import logger
 from src.core.config import settings
 from src.meeting_bot.repository import interview_session_repo
 from src.screening_pipeline.stt_client import WhisperCloudSTTClient
-from src.screening_pipeline.tts_client import KokoroCloudTTSClient
+from src.screening_pipeline.tts_client import LocalKokoroTTSClient
 from src.screening_pipeline.evaluator import AnswerEvaluator
 from src.screening_pipeline.session_api import SessionApiClient
 from src.screening_pipeline.prompts import (
@@ -27,8 +27,8 @@ class InterviewOrchestrator:
     Coordinates STT, Intent Router, LLM Evaluator, TTS, and Core-API persistence.
     """
 
-    def __init__(self, bot_id: str, websocket):
-        self.bot_id = bot_id
+    def __init__(self, session_id: str, websocket):
+        self.session_id = session_id
         self.websocket = websocket
         self.session: Any = None
         self.questions: list = []
@@ -41,10 +41,7 @@ class InterviewOrchestrator:
             api_key=settings.whisper_api_key,
             on_transcript=self.handle_candidate_speech
         )
-        self.tts_client = KokoroCloudTTSClient(
-            api_url=settings.kokoro_api_url,
-            api_key=settings.kokoro_api_key
-        )
+        self.tts_client = LocalKokoroTTSClient()
 
         # AI modules
         llm_client = OllamaClient()
@@ -60,11 +57,14 @@ class InterviewOrchestrator:
 
     async def start(self):
         """Initializes the interview session and speaks the greeting."""
-        logger.info("Orchestrator starting", extra={"bot_id": self.bot_id})
-        self.session = await interview_session_repo.get_by_bot_id(self.bot_id)
+        logger.info("Orchestrator starting", extra={"session_id": self.session_id})
+        
+        # The websocket path parameter (self.session_id) actually contains the interview_session_id
+        # because the true bot_id isn't known at the time the websocket URL is generated.
+        self.session = await interview_session_repo.get_by_id(self.session_id)
 
         if not self.session:
-            logger.error("No session found for bot. Cannot start interview.", extra={"bot_id": self.bot_id})
+            logger.error("No session found for bot. Cannot start interview.", extra={"session_id": self.session_id})
             return
 
         # Initialize the API client with the real session ID
@@ -96,6 +96,21 @@ class InterviewOrchestrator:
     def handle_candidate_speech(self, transcript: str):
         """Callback from STT when the candidate finishes speaking."""
         if not self.is_active or self.current_interaction_state != "listening":
+            return
+            
+        # Ignore common Whisper hallucinations caused by background noise or silence
+        cleaned = transcript.strip().lower()
+        import re
+        cleaned = re.sub(r'[^\w\s]', '', cleaned)
+        
+        hallucinations = {
+            "thank you", "thanks", "you", "okay", "ok", "yeah",
+            "thank you for watching", "thanks for watching", "subscribe",
+            "no i dont know", "okay i dont know", "i dont know"
+        }
+        
+        if cleaned in hallucinations or len(cleaned) < 2:
+            logger.info("Ignored probable Whisper hallucination or noise", extra={"transcript": transcript})
             return
 
         logger.info("Candidate speech received", extra={"transcript": transcript})

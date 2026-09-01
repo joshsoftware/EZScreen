@@ -20,6 +20,7 @@ class WhisperCloudSTTClient:
         
         self.vad = webrtcvad.Vad(3) # Aggressiveness 3 (highest)
         self.audio_buffer = bytearray()
+        self.speech_buffer = bytearray() # Accumulates the full audio for the API
         self.is_speaking = False
         self.silence_frames = 0
         self.MAX_SILENCE_FRAMES = 50  # ~1.5 seconds of silence before chunking (assuming 30ms frames)
@@ -32,36 +33,58 @@ class WhisperCloudSTTClient:
         logger.info("Initializing Whisper Cloud STT Client")
         self.is_connected = True
 
-    def _downsample_24k_to_16k(self, pcm_bytes: bytes) -> bytes:
+    def _downsample_to_16k(self, pcm_bytes: bytes, orig_rate: int) -> bytes:
         """
-        WebRTC VAD only supports 8kHz, 16kHz, 32kHz, 48kHz.
-        We drop every 3rd sample to convert 24kHz to 16kHz.
+        WebRTC VAD supports 16kHz. We convert 48kHz or 24kHz down to 16kHz.
+        If it's already 16kHz, return as is.
         """
+        if orig_rate == 16000:
+            return pcm_bytes
+            
         samples = struct.unpack(f"<{len(pcm_bytes)//2}h", pcm_bytes)
-        downsampled = [samples[i] for i in range(len(samples)) if i % 3 != 2]
+        
+        if orig_rate == 48000:
+            # 48k to 16k: keep 1 every 3
+            downsampled = [samples[i] for i in range(0, len(samples), 3)]
+        elif orig_rate == 24000:
+            # 24k to 16k: drop 1 every 3
+            downsampled = [samples[i] for i in range(len(samples)) if i % 3 != 2]
+        else:
+            # Fallback (unsupported rate, just return it and hope)
+            return pcm_bytes
+            
         return struct.pack(f"<{len(downsampled)}h", *downsampled)
 
-    async def send_audio(self, pcm_bytes: bytes):
-        """Receive raw 24kHz PCM audio from websocket."""
+    async def send_audio(self, pcm_bytes: bytes, sample_rate: int = 24000):
+        """Receive raw PCM audio from websocket at the given sample rate."""
         if not self.is_connected:
             return
             
-        # We process in 30ms chunks. 24000Hz * 16-bit (2 bytes) * 0.03 = 1440 bytes
-        chunk_size = 1440
+        if not hasattr(self, '_logged_rate'):
+            logger.info(f"STT receiving audio at sample rate: {sample_rate}")
+            self._logged_rate = True
+            
+        # We need 30ms chunks for VAD. 
+        try:
+            chunk_size = int(int(sample_rate) * 2 * 0.03)
+        except Exception:
+            chunk_size = 1440 # fallback to 24kHz
         
         # Buffer incoming bytes
         self.audio_buffer.extend(pcm_bytes)
+        self.speech_buffer.extend(pcm_bytes)
         
         while len(self.audio_buffer) >= chunk_size:
             frame = self.audio_buffer[:chunk_size]
             self.audio_buffer = self.audio_buffer[chunk_size:]
             
-            # VAD check requires 16kHz (30ms = 960 bytes)
-            frame_16k = self._downsample_24k_to_16k(frame)
+            # VAD check requires 16kHz
+            frame_16k = self._downsample_to_16k(frame, int(sample_rate))
             
             try:
                 is_speech = self.vad.is_speech(frame_16k, 16000)
             except Exception as e:
+                logger.error(f"VAD error: {e}. frame len: {len(frame_16k)}")
                 is_speech = False
                 
             if is_speech:
@@ -80,7 +103,8 @@ class WhisperCloudSTTClient:
         self.silence_frames = 0
         
         # Deep copy buffer to clear it for the next sentence
-        audio_chunk = bytes(self.audio_buffer)
+        audio_chunk = bytes(self.speech_buffer)
+        self.speech_buffer = bytearray()
         self.audio_buffer = bytearray()
         
         if len(audio_chunk) < 24000:  # Ignore clips less than 0.5s
@@ -101,7 +125,7 @@ class WhisperCloudSTTClient:
                     'file': ('audio.wav', wav_bytes, 'audio/wav')
                 }
                 data = {
-                    'model': 'distil-whisper-large-v3-en', # Groq's model name, update if using another provider
+                    'model': 'whisper-large-v3', # Groq's active model name
                     'response_format': 'json'
                 }
                 headers = {

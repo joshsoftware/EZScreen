@@ -115,6 +115,8 @@ class AttendeeApiClient:
         except Exception as err:
             logger.warning("Could not fetch bot details from Attendee API", extra={"bot_id": bot_id, "error": str(err)})
 
+        return fallback_response
+
     async def leave_bot(self, bot_id: str) -> LeaveBotResponse:
         """Instruct the bot to gracefully leave the meeting."""
         if not self.api_key:

@@ -26,7 +26,7 @@ class SessionApiClient:
         logger.debug("Transcript payload", extra={"payload": json.dumps(qa_entry, indent=2)})
 
         try:
-            url = f"{self.base_url}/api/v1/interview-sessions/{self.session_id}/transcript"
+            url = f"{self.base_url}/api/v1/interview-sessions/{self.session_id}/qa-transcript"
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.post(url, json=qa_entry)
                 if resp.status_code not in (200, 201, 204):
@@ -108,7 +108,7 @@ class SessionApiClient:
         })
         
         try:
-            url = f"{self.base_url}/api/v1/interview-sessions/{self.session_id}/metadata"
+            url = f"{self.base_url}/api/v1/interview-sessions/{self.session_id}/transcript"
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.post(url, json={"interview_metadata": transcript_log})
                 if resp.status_code not in (200, 201, 204):
