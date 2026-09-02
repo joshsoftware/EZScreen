@@ -126,7 +126,8 @@ class WhisperCloudSTTClient:
                 }
                 data = {
                     'model': 'whisper-large-v3', # Groq's active model name
-                    'response_format': 'json'
+                    'response_format': 'json',
+                    'language': 'en'
                 }
                 headers = {
                     'Authorization': f'Bearer {self.api_key}'

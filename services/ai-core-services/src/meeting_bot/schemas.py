@@ -5,9 +5,6 @@ from pydantic import BaseModel, Field
 class AttendeeAudioSettings(BaseModel):
     url: str
     sample_rate: int = 24000
-    events: Optional[List[str]] = None
-    receive_audio: Optional[bool] = None
-    listen: Optional[bool] = None
 
 
 class AttendeeWebsocketSettings(BaseModel):

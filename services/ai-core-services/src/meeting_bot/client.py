@@ -57,13 +57,10 @@ class AttendeeBotClient:
             transcription_settings={
                 "meeting_closed_captions": {}
             },
-            websocket_settings=AttendeeWebsocketSettings(
+                websocket_settings=AttendeeWebsocketSettings(
                 audio=AttendeeAudioSettings(
                     url=f"{settings.websocket_url.rstrip('/')}/{request.interview_session_id}",
-                    sample_rate=24000,
-                    receive_audio=True,
-                    listen=True,
-                    events=["realtime_audio.mixed"]
+                    sample_rate=24000
                 )
             )
         )

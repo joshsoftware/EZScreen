@@ -46,6 +46,10 @@ async def attendee_audio_ws(websocket: WebSocket, session_id: str):
         while True:
             raw_ws_message = await websocket.receive()
             
+            if raw_ws_message.get("type") == "websocket.disconnect":
+                logger.info("Attendee WebSocket disconnected gracefully (ASGI disconnect)")
+                break
+                
             if "bytes" in raw_ws_message and raw_ws_message["bytes"]:
                 pcm_bytes = raw_ws_message["bytes"]
                 if messages_received < 5:
