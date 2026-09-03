@@ -5,10 +5,26 @@ from src.api.v1 import parsing
 from src.api.v1 import matching
 from src.api.v1 import question_generation
 from src.api.v1.meeting_bot import router as meeting_bot_router
+from src.screening_pipeline.webhook_handler import router as webhook_router
+from src.screening_pipeline.audio_websocket import router as websocket_router
+
+from contextlib import asynccontextmanager
+from src.screening_pipeline.tts_client import LocalKokoroTTSClient
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Pre-download models on startup if they don't exist in the volume
+    try:
+        await LocalKokoroTTSClient()._ensure_models()
+    except Exception as e:
+        print(f"Failed to pre-download Kokoro models: {e}")
+    yield
+
 app = FastAPI(
     title="EZScreen Service",
     description="Unified AI Microservice hosting Parsing, Matching, Screening, Attendee Bot, and Interview Analysis modules",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -34,3 +50,5 @@ app.include_router(parsing.router, prefix="/internal/v1/parse")
 app.include_router(matching.router, prefix="/internal/v1/match")
 app.include_router(question_generation.router, prefix="/internal/v1/screening/questions")
 app.include_router(meeting_bot_router)
+app.include_router(webhook_router)
+app.include_router(websocket_router)

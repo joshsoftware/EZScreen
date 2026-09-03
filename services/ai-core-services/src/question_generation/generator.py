@@ -1,45 +1,30 @@
 import json
-from typing import Any
+from typing import Any, Optional
 
-from src.llm.client import OllamaClient
 from src.core.logger import logger
+from src.llm.client import OllamaClient
+from src.question_generation.match_context import neutral_job_fit_analysis
+from src.question_generation.prompt_builder import question_prompt_builder
+from src.question_generation.question_parsing import parse_questions
 from src.question_generation.schemas import (
     GenerateQuestionsRequest,
     GenerateQuestionsResponse,
     GeneratedQuestion,
 )
-from src.question_generation.prompt_builder import question_prompt_builder
-from src.question_generation.match_context import neutral_job_fit_analysis
-from src.common.llm_utils import parse_llm_json
-
-
-def _parse_questions(raw: Any) -> list[GeneratedQuestion]:
-    parsed_questions = parse_llm_json(raw) if isinstance(raw, str) else raw
-
-    if isinstance(parsed_questions, dict):
-        for key in ("questions", "generated_questions", "data"):
-            if key in parsed_questions and isinstance(parsed_questions[key], list):
-                parsed_questions = parsed_questions[key]
-                break
-
-    if not isinstance(parsed_questions, list):
-        raise ValueError(f"Expected JSON array, got {type(parsed_questions).__name__}")
-
-    return [GeneratedQuestion(**q) for q in parsed_questions]
 
 
 class QuestionGenerator:
     """Orchestrates the question generation pipeline."""
 
-    def __init__(self):
-        self.llm_client = OllamaClient()
+    def __init__(self, llm_client: Optional[OllamaClient] = None):
+        self.llm_client = llm_client or OllamaClient()
 
     async def _call_llm(self, prompt: str, *, log_extra: dict[str, Any]) -> list[GeneratedQuestion]:
         logger.info("Sending question generation prompt to LLM", extra=log_extra)
         response = await self.llm_client.openai_chat_generate(
             prompt=prompt, temperature=0.3, timeout=120.0
         )
-        return _parse_questions(response.response)
+        return parse_questions(response.response)
 
     async def generate(self, request: GenerateQuestionsRequest) -> GenerateQuestionsResponse:
         """Generate tailored interview questions for a candidate session or job bank."""

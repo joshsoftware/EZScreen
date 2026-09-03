@@ -87,9 +87,12 @@ services:
       CORE_API_BASE_URL: http://core-api:8000
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    environment:
+      CORE_API_URL: "http://core-api:8000"
     volumes:
       - rapidocr_models:/usr/local/lib/python3.11/site-packages/rapidocr/models
       - hf_cache:/root/.cache/huggingface
+      - kokoro_models:/app/.models
     depends_on:
       db:
         condition: service_healthy
@@ -107,6 +110,7 @@ services:
     env_file:
       - ./apps/frontend/.env
     environment:
+      # Vite proxy runs inside this container — use Docker DNS, not localhost
       DEV_API_PROXY_TARGET: http://core-api:8000
     depends_on:
       - core-api
@@ -117,3 +121,4 @@ volumes:
   miniodata:
   rapidocr_models:
   hf_cache:
+  kokoro_models:
