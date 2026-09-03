@@ -23,8 +23,12 @@ class AttendeeBotClient:
         scheduled_at = None
         if session_detail:
             scheduled_at = session_detail.scheduled_at
-            if not meeting_url and session_detail.comment:
-                meeting_url = session_detail.comment
+            if not meeting_url:
+                meta = session_detail.interview_metadata
+                if isinstance(meta, dict):
+                    link = meta.get("gmeet_link")
+                    if isinstance(link, str) and link.strip():
+                        meeting_url = link.strip()
 
         if not meeting_url:
             meeting_url = "https://meet.google.com/ezs-screener-demo"

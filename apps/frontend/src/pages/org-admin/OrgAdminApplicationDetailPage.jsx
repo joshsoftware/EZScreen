@@ -16,6 +16,7 @@ import { ResumePreviewButton } from '../../features/jobs/ResumeActions'
 import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
   canRejectApplication,
+  canRescheduleScreening,
   canScheduleScreening,
   candidateInitials,
   candidateName,
@@ -23,6 +24,7 @@ import {
   fitTone,
   formatApplicationStatus,
   resolveMatchScore,
+  screeningSlotFromTimeline,
 } from '../../features/jobs/applicationFields'
 import { ApiError } from '../../lib/api/client'
 import { ActionMenu } from '../../components/ui/ActionMenu'
@@ -49,6 +51,7 @@ export function OrgAdminApplicationDetailPage() {
   const [rejecting, setRejecting] = useState(false)
   const [showRejectConfirm, setShowRejectConfirm] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
+  const [showReschedule, setShowReschedule] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
 
   const {
@@ -100,6 +103,9 @@ export function OrgAdminApplicationDetailPage() {
     detail?.status !== 'rejected'
   const showScheduleBtn =
     Boolean(detail) && !mismatch && canScheduleScreening(detail, timeline)
+  const showRescheduleBtn =
+    Boolean(detail) && !mismatch && canRescheduleScreening(detail, timeline)
+  const screeningSlot = screeningSlotFromTimeline(timeline, detail?.email)
   const showReject = Boolean(detail) && !mismatch && canRejectApplication(detail, timeline)
 
   async function reload() {
@@ -186,6 +192,15 @@ export function OrgAdminApplicationDetailPage() {
           icon: 'event',
           disabled: busy,
           onSelect: () => setShowSchedule(true),
+        }
+      : null,
+    showRescheduleBtn
+      ? {
+          id: 'reschedule',
+          label: 'Reschedule screening',
+          icon: 'event_repeat',
+          disabled: busy,
+          onSelect: () => setShowReschedule(true),
         }
       : null,
     canRerun || Boolean(detail?.parsed_resume)
@@ -282,15 +297,26 @@ export function OrgAdminApplicationDetailPage() {
           disabled: busy,
           onClick: () => setShowSchedule(true),
         }}
+        rescheduleAction={{
+          visible: showRescheduleBtn,
+          disabled: busy,
+          onClick: () => setShowReschedule(true),
+        }}
         onRerunComplete={reload}
       />
 
-      {showSchedule ? (
+      {showSchedule || showReschedule ? (
         <Suspense fallback={null}>
           <ScheduleScreeningModal
-            open={showSchedule}
-            onClose={() => setShowSchedule(false)}
+            open={showSchedule || showReschedule}
+            onClose={() => {
+              setShowSchedule(false)
+              setShowReschedule(false)
+            }}
+            mode={showReschedule ? 'reschedule' : 'schedule'}
             applicationId={detail.id}
+            sessionId={screeningSlot?.sessionId ?? null}
+            initialSlot={showReschedule ? screeningSlot : null}
             candidateLabel={candidateName(detail)}
             candidateEmail={detail.email || null}
             onScheduled={refreshAfterAction}

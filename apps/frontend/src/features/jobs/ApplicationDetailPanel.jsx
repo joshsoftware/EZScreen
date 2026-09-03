@@ -230,6 +230,7 @@ export function ApplicationDetailPanel({
   timelineLoading = false,
   timelineError = null,
   scheduleAction = null,
+  rescheduleAction = null,
 }) {
   const { fitLabels } = useOrgSettings()
   const score = resolveMatchScore(detail)
@@ -395,6 +396,7 @@ export function ApplicationDetailPanel({
             loading={timelineLoading}
             error={timelineError}
             scheduleAction={scheduleAction}
+            rescheduleAction={rescheduleAction}
           />
 
           <Panel title="Candidate">
@@ -417,7 +419,7 @@ export function ApplicationDetailPanel({
 
             <div className="mt-md pt-md border-t border-outline-variant">
               <p className="font-label-md text-label-md text-on-surface-variant tracking-wide mb-sm">
-                Education
+                Education & Certifications
               </p>
               {education.length === 0 ? (
                 <p className="text-body-sm text-on-surface-variant">No education extracted.</p>

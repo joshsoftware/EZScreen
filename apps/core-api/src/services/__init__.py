@@ -11,6 +11,7 @@ from src.services.auth_service import (
 )
 from src.services import (
     application_service,
+    interview_analysis_service,
     interview_session_service,
     job_service,
     organization_service,
@@ -29,6 +30,7 @@ __all__ = [
     "refresh_access_token",
     "revoke_refresh_token",
     "application_service",
+    "interview_analysis_service",
     "interview_session_service",
     "job_service",
     "organization_service",

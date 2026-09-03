@@ -94,6 +94,13 @@ export function scheduleInterviewSessionRequest(body) {
   })
 }
 
+export function rescheduleInterviewSessionRequest(sessionId, body) {
+  return apiRequest(`/api/v1/interview-sessions/${sessionId}/reschedule`, {
+    method: 'POST',
+    body,
+  })
+}
+
 export function getResumeUploadUrlsRequest(jobId, files) {
   return apiRequest(`/api/v1/jobs/${jobId}/applications/upload-urls`, {
     method: 'POST',
@@ -106,6 +113,16 @@ export function enqueueBulkResumesRequest(jobId, resumes) {
     method: 'POST',
     body: { resumes },
   })
+}
+
+export function getResumeIngestErrorsRequest(jobId, { since } = {}) {
+  const search = new URLSearchParams()
+  if (since) search.set('since', since)
+  const query = search.toString()
+  return apiRequest(
+    `/api/v1/jobs/${jobId}/applications/ingest-errors${query ? `?${query}` : ''}`,
+    { method: 'GET' },
+  )
 }
 
 export function rerunJobFitRequest(jobId, applicationId) {

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     # Required. Set in apps/core-api/.env (not committed).
     database_url: str
     jwt_secret: str
+    internal_service_token: str | None = None
 
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
@@ -58,10 +59,12 @@ class Settings(BaseSettings):
     email_mode: str = "console"
     email_from: str = "noreply@ezscreen.io"
 
-    # Google Meet join links (Spaces API only — no Calendar events).
+    # Google Calendar + Meet for screening interviews.
     # mock = placeholder meet.google.com URL (local/dev default)
-    # live = real Meet space via Meet REST API (usually needs Workspace)
+    # live = Calendar event with Meet link + Google attendee invites
     google_meet_mode: str = "mock"
+    google_calendar_id: str = "primary"
+    google_calendar_send_updates: str = "all"
     google_service_account_file: str | None = None
     google_meet_delegated_user: str | None = None
     google_oauth_client_id: str | None = None

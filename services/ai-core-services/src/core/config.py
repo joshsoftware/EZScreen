@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # Real-time WebSocket Audio Stream Endpoint
     websocket_url: str
 
+    # core-api (screening persistence callbacks)
+    core_api_base_url: str = "http://127.0.0.1:8000"
+    internal_service_token: str | None = None
+
     # Docling: disable OCR for text-based PDF resumes (much faster, lower RAM on CPU).
     docling_do_ocr: bool = False
 

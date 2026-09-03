@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -18,6 +19,7 @@ from src.schemas.application import (
     ApplicantListItem,
     BulkCreateRequest,
     BulkCreateResponse,
+    IngestErrorsResponse,
     JobFitRunResponse,
     TimelineEventResponse,
     UploadUrlsRequest,
@@ -112,6 +114,24 @@ def bulk_create_applications(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+
+
+@router.get(
+    "/ingest-errors",
+    response_model=IngestErrorsResponse,
+    summary="List recent bulk resume ingest failures for this job",
+)
+def list_ingest_errors(
+    job_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+    since: datetime | None = Query(default=None),
+) -> IngestErrorsResponse:
+    job = job_service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+    return application_service.list_ingest_errors(job_id, since=since)
 
 
 @applicant_router.get(

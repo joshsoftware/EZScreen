@@ -1,13 +1,15 @@
-"""Google Meet join links for screening (Spaces API only — no Calendar)."""
+"""Google Calendar events with Meet links for AI screening interviews."""
 
 from __future__ import annotations
 
 import logging
 import secrets
 import string
-from datetime import datetime
-from typing import TypedDict
+from datetime import datetime, timedelta, timezone
+from typing import Any, TypedDict
+from urllib.parse import quote
 from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -20,9 +22,14 @@ __all__ = [
     "create_screening_meet",
 ]
 
-_SCOPES = ("https://www.googleapis.com/auth/meetings.space.created",)
-_MEET_SPACES_URL = "https://meet.googleapis.com/v2/spaces"
+_SCOPES = ("https://www.googleapis.com/auth/calendar.events",)
+_CALENDAR_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
 _MEET_CODE_ALPHABET = string.ascii_lowercase
+
+# Browser/OS legacy names not always present in Python tzdata.
+_TIMEZONE_ALIASES: dict[str, str] = {
+    "Asia/Calcutta": "Asia/Kolkata",
+}
 
 
 class ScreeningMeetResult(TypedDict, total=False):
@@ -34,6 +41,8 @@ class ScreeningMeetResult(TypedDict, total=False):
     scheduled_at: str
     provider: str
     attendees: list[str]
+    calendar_event_id: str | None
+    calendar_html_link: str | None
 
 
 def _meet_mode() -> str:
@@ -71,6 +80,8 @@ def _create_mock_meet(
         "scheduled_at": scheduled_at.isoformat(),
         "provider": "mock",
         "attendees": guest_emails,
+        "calendar_event_id": None,
+        "calendar_html_link": None,
     }
 
 
@@ -84,8 +95,12 @@ def _build_credentials():
             scopes=_SCOPES,
         )
         delegated = (settings.google_meet_delegated_user or "").strip()
-        if delegated:
-            creds = creds.with_subject(delegated)
+        if not delegated:
+            raise ValueError(
+                "GOOGLE_MEET_DELEGATED_USER is required when using "
+                "GOOGLE_SERVICE_ACCOUNT_FILE with Google Calendar"
+            )
+        creds = creds.with_subject(delegated)
         return creds
 
     client_id = (settings.google_oauth_client_id or "").strip()
@@ -105,7 +120,7 @@ def _build_credentials():
 
     raise ValueError(
         "GOOGLE_MEET_MODE=live requires either GOOGLE_SERVICE_ACCOUNT_FILE "
-        "(+ optional GOOGLE_MEET_DELEGATED_USER) or "
+        "+ GOOGLE_MEET_DELEGATED_USER or "
         "GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / "
         "GOOGLE_OAUTH_REFRESH_TOKEN"
     )
@@ -119,29 +134,114 @@ def _access_token() -> str:
         creds.refresh(Request())
     token = getattr(creds, "token", None)
     if not token:
-        raise ValueError("Failed to obtain Google access token for Meet API")
+        raise ValueError("Failed to obtain Google access token for Calendar API")
     return str(token)
 
 
-def _create_live_meet(
+def _resolve_timezone_name(time_zone: str | None) -> str:
+    cleaned = (time_zone or "UTC").strip() or "UTC"
+    cleaned = _TIMEZONE_ALIASES.get(cleaned, cleaned)
+    try:
+        ZoneInfo(cleaned)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Invalid time_zone: {cleaned}") from exc
+    return cleaned
+
+
+def _local_event_bounds(
+    *,
+    scheduled_at: datetime,
+    duration_minutes: int,
+    time_zone: str,
+) -> tuple[str, str]:
+    start = scheduled_at
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    local_start = start.astimezone(ZoneInfo(time_zone))
+    local_end = local_start + timedelta(minutes=duration_minutes)
+    fmt = "%Y-%m-%dT%H:%M:%S"
+    return local_start.strftime(fmt), local_end.strftime(fmt)
+
+
+def _extract_meet_link(event: dict[str, Any]) -> str | None:
+    hangout = event.get("hangoutLink")
+    if isinstance(hangout, str) and hangout.strip():
+        return hangout.strip()
+
+    conference = event.get("conferenceData")
+    if isinstance(conference, dict):
+        entry_points = conference.get("entryPoints")
+        if isinstance(entry_points, list):
+            for entry in entry_points:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("entryPointType") == "video":
+                    uri = entry.get("uri")
+                    if isinstance(uri, str) and uri.strip():
+                        return uri.strip()
+    return None
+
+
+def _extract_meeting_code(meet_link: str) -> str | None:
+    prefix = "https://meet.google.com/"
+    if meet_link.startswith(prefix):
+        code = meet_link[len(prefix) :].strip("/")
+        return code or None
+    return None
+
+
+def _calendar_events_url(calendar_id: str) -> str:
+    encoded = quote(calendar_id, safe="")
+    return _CALENDAR_EVENTS_URL.format(calendar_id=encoded)
+
+
+def _create_live_calendar_event(
     *,
     scheduled_at: datetime,
     duration_minutes: int,
     time_zone: str | None,
     attendees: list[str] | None = None,
+    event_summary: str | None = None,
+    event_description: str | None = None,
 ) -> ScreeningMeetResult:
     guest_emails = list(dict.fromkeys(attendees or []))
-    token = _access_token()
-    payload = {
-        "config": {
-            "accessType": "OPEN",
-            "entryPointAccess": "ALL",
-        }
+    tz_name = _resolve_timezone_name(time_zone)
+    start_str, end_str = _local_event_bounds(
+        scheduled_at=scheduled_at,
+        duration_minutes=duration_minutes,
+        time_zone=tz_name,
+    )
+
+    calendar_id = (settings.google_calendar_id or "primary").strip() or "primary"
+    send_updates = (settings.google_calendar_send_updates or "all").strip() or "all"
+    if send_updates not in {"all", "externalOnly", "none"}:
+        raise ValueError(
+            "GOOGLE_CALENDAR_SEND_UPDATES must be one of: all, externalOnly, none"
+        )
+
+    payload: dict[str, Any] = {
+        "summary": (event_summary or "EZScreen AI Screening").strip(),
+        "description": (event_description or "").strip(),
+        "start": {"dateTime": start_str, "timeZone": tz_name},
+        "end": {"dateTime": end_str, "timeZone": tz_name},
+        "attendees": [{"email": email} for email in guest_emails],
+        "conferenceData": {
+            "createRequest": {
+                "requestId": f"ezscreen-{uuid4()}",
+                "conferenceSolutionKey": {"type": "hangoutsMeet"},
+            }
+        },
+        "reminders": {"useDefault": True},
     }
+
+    token = _access_token()
+    url = _calendar_events_url(calendar_id)
+    params = {"conferenceDataVersion": "1", "sendUpdates": send_updates}
 
     try:
         response = httpx.post(
-            _MEET_SPACES_URL,
+            url,
+            params=params,
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
@@ -153,33 +253,43 @@ def _create_live_meet(
     except httpx.HTTPStatusError as exc:
         body = (exc.response.text or "").strip()[:2000]
         raise ValueError(
-            f"Google Meet API error: {exc.response.status_code} {body}"
+            f"Google Calendar API error: {exc.response.status_code} {body}"
         ) from exc
     except httpx.HTTPError as exc:
-        raise ValueError(f"Google Meet API unavailable: {exc}") from exc
+        raise ValueError(f"Google Calendar API unavailable: {exc}") from exc
 
     data = response.json()
     if not isinstance(data, dict):
-        raise ValueError("Invalid response from Google Meet API")
+        raise ValueError("Invalid response from Google Calendar API")
 
-    meet_link = data.get("meetingUri")
-    if not isinstance(meet_link, str) or not meet_link.strip():
+    meet_link = _extract_meet_link(data)
+    if not meet_link:
         raise ValueError(
-            "Google Meet space was created but no meetingUri was returned. "
-            "Meet Spaces API usually requires a Google Workspace account."
+            "Calendar event was created but no Google Meet link was returned. "
+            "Ensure the organizer account has Google Meet enabled (Workspace)."
         )
 
+    event_id = data.get("id") if isinstance(data.get("id"), str) else None
+    html_link = data.get("htmlLink") if isinstance(data.get("htmlLink"), str) else None
+
+    logger.info(
+        "Created Google Calendar screening event id=%s meet=%s attendees=%s",
+        event_id,
+        meet_link,
+        guest_emails,
+    )
+
     return {
-        "gmeet_link": meet_link.strip(),
-        "meet_space_name": data.get("name") if isinstance(data.get("name"), str) else None,
-        "meeting_code": (
-            data.get("meetingCode") if isinstance(data.get("meetingCode"), str) else None
-        ),
+        "gmeet_link": meet_link,
+        "meet_space_name": event_id,
+        "meeting_code": _extract_meeting_code(meet_link),
         "duration_minutes": duration_minutes,
-        "time_zone": (time_zone or "UTC").strip() or "UTC",
+        "time_zone": tz_name,
         "scheduled_at": scheduled_at.isoformat(),
-        "provider": "google_meet",
+        "provider": "google_calendar",
         "attendees": guest_emails,
+        "calendar_event_id": event_id,
+        "calendar_html_link": html_link,
     }
 
 
@@ -189,12 +299,14 @@ def create_screening_meet(
     duration_minutes: int = 30,
     time_zone: str | None = None,
     attendees: list[str] | None = None,
+    event_summary: str | None = None,
+    event_description: str | None = None,
 ) -> ScreeningMeetResult:
     """
-    Generate a Google Meet join link (no Calendar event).
+    Schedule screening via Google Calendar (live) or placeholder link (mock).
 
     mock → placeholder meet.google.com URL (local/dev)
-    live → real space via Meet Spaces API
+    live → Calendar event with auto-generated Meet link + attendee invites
     """
     mode = _meet_mode()
     if mode not in {"mock", "live"}:
@@ -210,9 +322,11 @@ def create_screening_meet(
             attendees=attendees,
         )
 
-    return _create_live_meet(
+    return _create_live_calendar_event(
         scheduled_at=scheduled_at,
         duration_minutes=duration_minutes,
         time_zone=time_zone,
         attendees=attendees,
+        event_summary=event_summary,
+        event_description=event_description,
     )

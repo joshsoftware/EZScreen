@@ -36,19 +36,26 @@ def _coerce_score(value: object) -> float | None:
     return None
 
 
+def _normalize_match_score(score: float) -> float:
+    """Fit UI expects 0–10 on one decimal; guard against legacy 0–100 values."""
+    if score > 10:
+        score = score / 10.0
+    return round(score, 1)
+
+
 def _extract_resume_score(fit: dict) -> float | None:
     """Read resume/match score from AI response (top-level or nested analysis)."""
     for key in ("resume_score", "match_score"):
         score = _coerce_score(fit.get(key))
         if score is not None:
-            return score
+            return _normalize_match_score(score)
 
     analysis = fit.get("job_fit_analysis")
     if isinstance(analysis, dict):
         for key in ("match_score", "resume_score"):
             score = _coerce_score(analysis.get(key))
             if score is not None:
-                return score
+                return _normalize_match_score(score)
 
     return None
 

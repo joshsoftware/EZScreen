@@ -6,7 +6,7 @@ import { JobSkillsEditor } from '../../features/jobs/JobSkillsEditor'
 import { createJobRequest, getJobRequest, updateJobRequest } from '../../features/jobs/api'
 import { useJobQueryClient } from '../../features/jobs/useJobQueries'
 import { jobToFormValues } from '../../features/jobs/jobFields'
-import { skillsFromJob } from '../../features/jobs/jobParsedFields'
+import { syncSkillsAfterReparse } from '../../features/jobs/jobParsedFields'
 import { ApiError } from '../../lib/api/client'
 import { PageHeader, Panel } from '../../components/ui/PageHeader'
 
@@ -30,6 +30,7 @@ export function OrgAdminJobCreatePage() {
   async function onDetailsSubmit(payload) {
     setSubmitting(true)
     try {
+      const previousParsed = job?.parsed_jd ?? null
       const saved = job
         ? await updateJobRequest(job.id, payload)
         : await createJobRequest(payload)
@@ -37,7 +38,9 @@ export function OrgAdminJobCreatePage() {
       const full = await getJobRequest(saved.id)
       setJobData(full.id, full)
       setJob(full)
-      setSkills(skillsFromJob({ parsed_jd: full.parsed_jd }))
+      setSkills((current) =>
+        syncSkillsAfterReparse(current, previousParsed, full.parsed_jd),
+      )
       setStep(2)
     } catch (err) {
       throw err instanceof ApiError ? err : new Error('Failed to parse job details')

@@ -70,6 +70,69 @@ export function skillsFromJob(job) {
   return normalizeJobSkills(job?.parsed_jd)
 }
 
+function skillKey(name) {
+  return String(name || '').trim().toLowerCase()
+}
+
+function parsedSkillKeys(parsedJd) {
+  if (!parsedJd) return new Set()
+  const norm = normalizeJobSkills(parsedJd)
+  return new Set(
+    [...norm.must_have, ...norm.good_to_have]
+      .map((item) => skillKey(item.skill))
+      .filter(Boolean),
+  )
+}
+
+function syncSkillList(currentList, newList, previousParsedKeys, newParsedKeys) {
+  const result = []
+  const seen = new Set()
+
+  for (const item of currentList) {
+    const key = skillKey(item.skill)
+    if (!key) continue
+    const wasFromParse = previousParsedKeys.has(key)
+    if (wasFromParse && !newParsedKeys.has(key)) continue
+    result.push(item)
+    seen.add(key)
+  }
+
+  for (const item of newList) {
+    const key = skillKey(item.skill)
+    if (!key || seen.has(key)) continue
+    result.push({ ...item })
+    seen.add(key)
+  }
+
+  return result
+}
+
+/**
+ * After JD re-parse: drop parse-sourced skills no longer in the JD,
+ * keep manually added skills, append newly parsed skills.
+ */
+export function syncSkillsAfterReparse(current, previousParsedJd, newParsedJd) {
+  const currentNorm = normalizeJobSkills(current)
+  const newNorm = normalizeJobSkills(newParsedJd)
+  const prevKeys = parsedSkillKeys(previousParsedJd)
+  const newKeys = parsedSkillKeys(newParsedJd)
+
+  return {
+    must_have: syncSkillList(
+      currentNorm.must_have,
+      newNorm.must_have,
+      prevKeys,
+      newKeys,
+    ),
+    good_to_have: syncSkillList(
+      currentNorm.good_to_have,
+      newNorm.good_to_have,
+      prevKeys,
+      newKeys,
+    ),
+  }
+}
+
 export function jdExperienceRange(parsedJd) {
   const exp = parsedJd?.experience_required
   if (!exp || typeof exp !== 'object') return null

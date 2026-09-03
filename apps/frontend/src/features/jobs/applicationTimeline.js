@@ -103,8 +103,14 @@ function stepTitle(step, source, matchingEvents) {
   return step.title
 }
 
-function stepExtra(step, matchingEvents) {
-  const last = lastMatching(matchingEvents)
+function stepExtra(step, matchingEvents, allEvents) {
+  let last = lastMatching(matchingEvents)
+  if (step.id === 'screening_scheduled') {
+    const rescheduled = (allEvents || []).filter(
+      (event) => event.event_type === 'screening_rescheduled',
+    )
+    last = lastMatching([...matchingEvents, ...rescheduled])
+  }
   if (!last?.metadata || typeof last.metadata !== 'object') return null
   if (step.id === 'screening_scheduled') {
     const meet = last.metadata.gmeet_link
@@ -129,10 +135,8 @@ function stepExtra(step, matchingEvents) {
     const recipients = Array.isArray(last.metadata.recipients)
       ? last.metadata.recipients.filter((email) => typeof email === 'string')
       : []
-    const meet = last.metadata.gmeet_link
     return {
       attendees: recipients,
-      gmeetLink: typeof meet === 'string' && meet ? meet : null,
     }
   }
   return null
@@ -158,7 +162,7 @@ export function buildTimelineSteps(events, source) {
       foundCurrent = true
     }
 
-    const extra = stepExtra(step, matching)
+    const extra = stepExtra(step, matching, list)
 
     return {
       id: step.id,

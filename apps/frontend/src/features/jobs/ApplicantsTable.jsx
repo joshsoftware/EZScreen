@@ -18,7 +18,7 @@ import {
   matchesFitFilter,
   scoreTextClass,
 } from './applicationFields'
-import { formatDate } from './jobFields'
+import { formatDateTime } from './jobFields'
 
 export function ApplicantsTable({
   jobId,
@@ -190,7 +190,7 @@ export function ApplicantsTable({
                       {formatApplicationStatus(applicant.status, applicant.source)}
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
-                      {formatDate(applicant.created_at)}
+                      {formatDateTime(applicant.created_at)}
                     </td>
                   </tr>
                 )
