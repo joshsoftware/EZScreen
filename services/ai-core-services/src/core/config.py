@@ -33,6 +33,27 @@ class Settings(BaseSettings):
 
     # Real-time WebSocket Audio Stream Endpoint
     websocket_url: str
+    
+    # Webhook callback URL for Attendee to post lifecycle events to
+    webhook_url: str
+    
+    # Internal URL for Core API (to update DB state)
+    core_api_url: str
+    
+    # Whisper STT (Cloud API)
+    whisper_api_url: str | None = None
+    whisper_api_key: str | None = None
+    
+    # Kokoro TTS (Cloud API)
+    kokoro_api_url: str | None = None
+    kokoro_api_key: str | None = None
+
+    # Docling: disable OCR for text-based PDF resumes (much faster, lower RAM on CPU).
+    docling_do_ocr: bool = False
+
+    # core-api (screening persistence callbacks)
+    core_api_base_url: str = "http://127.0.0.1:8000"
+    internal_service_token: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),

@@ -36,5 +36,24 @@ class InterviewSessionRepository:
             )
             return None
 
+    async def get_by_bot_id(self, bot_id: str) -> Optional[InterviewSessionDetailResponse]:
+        """Fetch session by bot_id inside interview_metadata."""
+        try:
+            db_obj = None
+            session = AsyncSessionLocal()
+            async with session:
+                query = select(DBInterviewSession).where(
+                    DBInterviewSession.interview_metadata['bot_id'].astext == bot_id
+                )
+                result = await session.execute(query)
+                db_obj = result.scalar_one_or_none()
+
+            if not db_obj:
+                return None
+            return db_obj.to_response()
+        except Exception as err:
+            logger.error("Repository failed to fetch session by bot_id", extra={"bot_id": bot_id, "error": str(err)})
+            return None
+
 
 interview_session_repo = InterviewSessionRepository()

@@ -27,6 +27,8 @@ from src.models.user import User
 from src.schemas.application import (
     BulkCreateRequest,
     BulkCreateResponse,
+    IngestErrorItem,
+    IngestErrorsResponse,
     UploadFileRequest,
     UploadUrlItem,
     UploadUrlsResponse,
@@ -35,6 +37,10 @@ from src.services import storage_service
 from src.services.application_ai_service import call_parse_resume
 from src.services.application_job_fit_service import apply_job_fit
 from src.services.application_timeline_service import append_timeline_event
+from src.services.application_ingest_error_store import (
+    list_ingest_errors as list_stored_ingest_errors,
+    record_ingest_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +48,7 @@ __all__ = [
     "assert_job_accepts_applications",
     "create_upload_urls",
     "enqueue_bulk_resumes",
+    "list_ingest_errors",
 ]
 
 
@@ -101,6 +108,25 @@ def enqueue_bulk_resumes(
         thread.start()
 
     return BulkCreateResponse(job_id=job.id, queued=len(body.resumes))
+
+
+def list_ingest_errors(
+    job_id: UUID,
+    *,
+    since: datetime | None = None,
+) -> IngestErrorsResponse:
+    raw_items = list_stored_ingest_errors(job_id, since=since)
+    errors = [
+        IngestErrorItem(
+            id=item["id"],
+            file_name=item["file_name"],
+            error_code=item["error_code"],
+            message=item["message"],
+            created_at=item["created_at"],
+        )
+        for item in raw_items
+    ]
+    return IngestErrorsResponse(errors=errors)
 
 
 def _process_resume(
@@ -164,11 +190,46 @@ def _process_resume(
             file_name,
             application.id,
         )
-    except Exception:
+    except Exception as exc:
+        error_code, _ = _classify_ingest_error(exc)
+        record_ingest_error(
+            job_id,
+            file_name=file_name,
+            error_code=error_code,
+            message=_ingest_error_message(error_code, exc),
+        )
         logger.exception("Failed processing resume %s for job %s", file_name, job_id)
         db.rollback()
     finally:
         db.close()
+
+
+def _classify_ingest_error(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, ValueError):
+        text = str(exc).strip()
+        lowered = text.lower()
+        if "already applied" in lowered:
+            return "duplicate_application", text
+        if "non-candidate user" in lowered:
+            return "invalid_candidate", text
+        if "could not extract candidate email" in lowered:
+            return "invalid_candidate", text
+        if "parse" in lowered or "parsed_resume" in lowered:
+            return "parse_failed", text
+        return "processing_failed", text or "Resume processing failed"
+    return "processing_failed", "Resume processing failed"
+
+
+def _ingest_error_message(error_code: str, exc: Exception) -> str:
+    if error_code == "duplicate_application":
+        return "This candidate has already applied to this job."
+    if error_code == "invalid_candidate":
+        return str(exc).strip() or "Could not create a candidate from this resume."
+    if error_code == "parse_failed":
+        return str(exc).strip() or "Resume parsing failed."
+    if isinstance(exc, ValueError) and str(exc).strip():
+        return str(exc).strip()
+    return "Resume processing failed."
 
 
 def _find_or_create_candidate(

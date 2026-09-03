@@ -30,30 +30,42 @@ The microservice follows a **modular domain structure** with **shared generic fu
 services/ai-core-services/src/
 ├── main.py                     # Central FastAPI application entrypoint
 ├── core/                       # Configuration, settings loader, & environment variables
+│   ├── config.py
+│   ├── logger.py
+│   └── storage.py              # MinIO object storage client
 │
-├── common/                     # SHARED GENERIC UTILITIES & FUNCTIONS
-│   ├── llm_client.py           # Shared Gemma4:31b LLM engine wrapper & JSON repair parser
-│   ├── file_extractor.py       # Shared PDF / DOCX text extraction helper
-│   ├── storage.py              # Shared MinIO object storage client
-│   └── logger.py               # Shared structured logging utility
+├── common/                     # Shared generic utilities
+│   └── llm_utils.py            # LLM JSON parsing helpers
 │
-├── api/                        # ABSTRACTED API CONTROLLERS (/internal/v1/*)
-│   ├── router.py               # Master API router aggregating all internal routes
-│   └── v1/                     # Clean HTTP request controllers & Pydantic DTO validation
+├── llm/                        # Ollama / Gemma4 LLM client wrapper
+│   └── client.py
+│
+├── api/                        # API controllers (/internal/v1/*)
+│   └── v1/
 │       ├── parsing.py
 │       ├── matching.py
-│       ├── screening.py
-│       ├── bot.py
-│       └── analysis.py
+│       ├── question_generation.py
+│       └── meeting_bot.py
 │
-└── DOMAIN MODULES (Self-Contained Implementation):
-    ├── parsing/                # 1. Direct In-Memory JD & Resume Parsing logic
-    ├── matching_result/        # 2. Custom Candidate-JD Weighted Scoring calculation
-    ├── question_generation/    # 3. Pre-Call Candidate-Tailored Question Generator
-    ├── screening_pipeline/     # 4. Real-Time Audio STT & TTS Pipelines
-    ├── meeting_bot/            # 5. Attendee.dev Meeting Bot Dispatcher & WebSockets
-    └── interview_analysis/     # 6. Candidate Interview Transcript Evaluator
+└── DOMAIN MODULES:
+    ├── parsing/                # JD & resume parsing
+    ├── job_fit_analysis/       # Resume-JD matching & scoring
+    ├── question_generation/    # Pre-call interview question generator
+    ├── screening_pipeline/     # Real-time STT & TTS pipelines
+    ├── meeting_bot/            # Attendee.dev bot dispatcher & WebSockets
+    └── interview_analysis/     # Post-call transcript evaluator
 ```
+
+---
+
+## Agent Skills & Cursor Rules
+
+Python conventions for AI-assisted development live in:
+
+- **Skills**: `.agents/skills/` (design patterns, project structure, testing)
+- **Compiled guide**: `.agents/AGENTS.md`
+
+Run tests: `cd services/ai-core-services && uv run pytest`
 
 ---
 
@@ -67,8 +79,12 @@ All endpoints are private inter-service APIs (`/internal/v1/*`) invoked internal
 | **Parsing** | `/internal/v1/parse/resume` | `POST` | Parses candidate resume binary $\rightarrow$ `parsed_resume` JSON. |
 | **Matching** | `/internal/v1/match/resume-jd` | `POST` | Calculates `resume_score` (0-100) & `matching_result` JSONB. |
 | **Question Gen** | `/internal/v1/screening/questions/generate` | `POST` | Auto-generates static `generated_questions` array. |
-| **Meeting Bot** | `/internal/v1/screening/bot/dispatch` | `POST` | Dispatches Attendee meeting bot to Google Meet URL. |
-| **Interview Analysis** | `/internal/v1/screening/analysis/evaluate` | `POST` | Evaluates call transcript via `gemma4:31b` $\rightarrow$ `interview_analysis`. |
+| **Meeting Bot** | `/screening/bot/dispatch` | `POST` | Dispatches Attendee meeting bot to Google Meet URL. |
+| **Meeting Bot** | `/screening/bot/{bot_id}` | `GET` | Fetch bot status. |
+| **Meeting Bot** | `/screening/bot/{bot_id}/leave` | `POST` | Instruct bot to leave the meeting. |
+| **Meeting Bot** | `/screening/bot/{bot_id}` | `DELETE` | Delete bot record (204 on success). |
+| **Live Screening** | `/screening/webhook` | `POST` | Attendee.dev lifecycle / participant webhooks. |
+| **Live Screening** | `/attendee-websocket/{session_id}` | `WS` | Dual-channel audio stream for STT/TTS interview. |
 
 ---
 

@@ -6,9 +6,11 @@ from src.core.logger import logger
 from src.meeting_bot.schemas import (
     AttendeeAudioSettings,
     AttendeeWebsocketSettings,
+    AttendeeWebhookConfig,
     AttendeeScheduleBotRequest,
     AttendeeScheduleBotResponse,
     AttendeeBotStatusResponse,
+    LeaveBotResponse,
 )
 
 
@@ -34,6 +36,11 @@ class AttendeeApiClient:
                     sample_rate=24000
                 )
             )
+            
+        if not request.webhooks and hasattr(settings, "webhook_url") and settings.webhook_url:
+            request.webhooks = [
+                AttendeeWebhookConfig(url=settings.webhook_url)
+            ]
 
         bot_payload = request.model_dump(exclude_none=True)
 
@@ -109,6 +116,47 @@ class AttendeeApiClient:
             logger.warning("Could not fetch bot details from Attendee API", extra={"bot_id": bot_id, "error": str(err)})
 
         return fallback_response
+
+    async def leave_bot(self, bot_id: str) -> LeaveBotResponse:
+        """Instruct the bot to gracefully leave the meeting."""
+        if not self.api_key:
+            return LeaveBotResponse(bot_id=bot_id, status="leaving")
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{self.api_url}/api/v1/bots/{bot_id}/leave",
+                    headers=self._get_headers()
+                )
+                if resp.status_code in (200, 202):
+                    return LeaveBotResponse(bot_id=bot_id, status="leaving")
+                else:
+                    logger.warning("Failed to instruct bot to leave", extra={"bot_id": bot_id, "status": resp.status_code})
+        except Exception as err:
+            logger.error("Error communicating with Attendee API for leave_bot", extra={"error": str(err)})
+            
+        return LeaveBotResponse(
+            bot_id=bot_id,
+            status="error",
+            error_message="Failed to instruct bot to leave",
+        )
+
+    async def delete_bot(self, bot_id: str) -> bool:
+        """Delete the bot record from Attendee."""
+        if not self.api_key:
+            return True
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.delete(
+                    f"{self.api_url}/api/v1/bots/{bot_id}",
+                    headers=self._get_headers()
+                )
+                return resp.status_code in (200, 204)
+        except Exception as err:
+            logger.error("Error communicating with Attendee API for delete_bot", extra={"error": str(err)})
+            
+        return False
 
 
 attendee_client = AttendeeApiClient()

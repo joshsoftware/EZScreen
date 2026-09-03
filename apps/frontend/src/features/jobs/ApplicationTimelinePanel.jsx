@@ -71,6 +71,7 @@ export function ApplicationTimelinePanel({
   loading,
   error,
   scheduleAction = null,
+  rescheduleAction = null,
 }) {
   if (loading) {
     return (
@@ -110,6 +111,10 @@ export function ApplicationTimelinePanel({
             step.state === 'current' &&
             step.actionId === 'screening_scheduled' &&
             scheduleAction?.visible
+          const showRescheduleCta =
+            step.actionId === 'screening_scheduled' &&
+            step.state === 'done' &&
+            rescheduleAction?.visible
 
           return (
             <li key={step.id} className="flex gap-md">
@@ -150,6 +155,20 @@ export function ApplicationTimelinePanel({
                       onClick={scheduleAction.onClick}
                     >
                       Schedule screening
+                    </Button>
+                  </div>
+                ) : null}
+                {showRescheduleCta ? (
+                  <div className="mt-sm">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="event_repeat"
+                      className="whitespace-nowrap"
+                      disabled={rescheduleAction.disabled}
+                      onClick={rescheduleAction.onClick}
+                    >
+                      Reschedule
                     </Button>
                   </div>
                 ) : null}

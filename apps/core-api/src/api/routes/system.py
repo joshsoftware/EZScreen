@@ -12,6 +12,7 @@ from src.models.enums import UserRole
 from src.models.user import User
 from src.schemas.platform import (
     HealthDetailedResponse,
+    HealthStatusResponse,
     PlatformSettings,
     PlatformSettingsUpdate,
 )
@@ -20,6 +21,16 @@ from src.services import platform_service
 router = APIRouter(prefix="/system", tags=["System"])
 
 SuperAdmin = Annotated[User, Depends(require_roles(UserRole.super_admin))]
+OrgWorkspaceUser = Annotated[
+    User,
+    Depends(
+        require_roles(
+            UserRole.organization_admin,
+            UserRole.hr,
+            UserRole.super_admin,
+        )
+    ),
+]
 
 
 @router.get("/health", summary="Service health check")
@@ -30,6 +41,15 @@ def health_check() -> dict:
         "database_url_configured": bool(settings.database_url),
         "jwt_configured": bool(settings.jwt_secret),
     }
+
+
+@router.get(
+    "/health/status",
+    response_model=HealthStatusResponse,
+    summary="Workspace service health (Org Admin / HR)",
+)
+def health_status(db: DbSession, _user: OrgWorkspaceUser) -> HealthStatusResponse:
+    return platform_service.get_workspace_health(db)
 
 
 @router.get(

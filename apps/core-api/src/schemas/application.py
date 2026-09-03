@@ -75,6 +75,18 @@ class BulkCreateResponse(BaseModel):
     queued: int
 
 
+class IngestErrorItem(BaseModel):
+    id: UUID
+    file_name: str
+    error_code: str
+    message: str
+    created_at: datetime
+
+
+class IngestErrorsResponse(BaseModel):
+    errors: list[IngestErrorItem]
+
+
 class ApplicantListItem(BaseModel):
     id: UUID
     job_description_id: UUID

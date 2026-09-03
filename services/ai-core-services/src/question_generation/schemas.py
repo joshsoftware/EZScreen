@@ -4,9 +4,15 @@ from src.parsing.schemas import ParsedJDData
 
 
 class GenerateQuestionsRequest(BaseModel):
-    interview_session_id: str = Field(..., description="UUID of the interview session")
+    interview_session_id: str = Field(
+        ...,
+        description="UUID of the interview session, or job id for job-level banks",
+    )
     parsed_jd: ParsedJDData = Field(..., description="Parsed JD JSON from Pipeline A")
-    job_fit_analysis: Dict[str, Any] = Field(..., description="Full match analysis JSON from the matching endpoint")
+    job_fit_analysis: Dict[str, Any] | None = Field(
+        default=None,
+        description="Full match analysis JSON from matching; omitted for job-level banks",
+    )
 
 
 class GeneratedQuestion(BaseModel):
@@ -19,7 +25,7 @@ class GeneratedQuestion(BaseModel):
 
 
 class GenerateQuestionsResponse(BaseModel):
-    interview_session_id: str
+    interview_session_id: str | None = None
     status: str = "success"
     questions: Optional[List[GeneratedQuestion]] = None
     count: int = 0

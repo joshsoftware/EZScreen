@@ -155,6 +155,8 @@ activemq-data/
 
 # Local-only
 apps/core-api/scripts
+apps/core-api/secrets/
+apps/core-api/.venv-oauth/
 
 # Local platform settings file (Super Admin editable defaults)
 apps/core-api/data/

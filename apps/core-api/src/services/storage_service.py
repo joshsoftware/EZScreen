@@ -36,13 +36,21 @@ class ResumeObjectPayload(TypedDict):
     content_length: int | None
 
 
-def _s3_client():
+def _s3_client(*, internal: bool = False):
+    endpoint = (
+        settings.s3_internal_endpoint_url if internal else settings.s3_endpoint_url
+    )
     return boto3.client(
         "s3",
-        endpoint_url=settings.s3_endpoint_url,
+        endpoint_url=endpoint,
         aws_access_key_id=settings.minio_access_key,
         aws_secret_access_key=settings.minio_secret_key,
-        config=Config(signature_version="s3v4"),
+        config=Config(
+            signature_version="s3v4",
+            connect_timeout=5,
+            read_timeout=60,
+            retries={"max_attempts": 2},
+        ),
         region_name="us-east-1",
     )
 
@@ -149,7 +157,7 @@ def create_presigned_download_url(
 
 def get_resume_object(s3_key: str) -> ResumeObjectPayload:
     """Fetch resume bytes from object storage for same-origin proxying."""
-    client = _s3_client()
+    client = _s3_client(internal=True)
     try:
         obj = client.get_object(
             Bucket=settings.minio_bucket_resumes,

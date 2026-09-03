@@ -111,7 +111,7 @@ def call_parse_resume(*, s3_key: str, file_name: str) -> dict:
         "resume_path": s3_key,
     }
     try:
-        with httpx.Client(timeout=120.0) as client:
+        with httpx.Client(timeout=300.0) as client:
             response = client.post(_ai_url("parse/resume"), json=payload)
             response.raise_for_status()
     except httpx.HTTPError as exc:

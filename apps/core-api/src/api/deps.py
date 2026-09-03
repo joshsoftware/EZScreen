@@ -6,10 +6,11 @@ from collections.abc import Callable, Generator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from src.config.settings import settings
 from src.core.jwt import TokenError, decode_access_token
 from src.db.session import SessionLocal
 from src.models.enums import UserRole, UserStatus
@@ -22,6 +23,7 @@ __all__ = [
     "get_db",
     "get_current_user",
     "require_roles",
+    "verify_internal_service",
 ]
 
 _bearer = HTTPBearer(auto_error=False)
@@ -88,3 +90,17 @@ def require_roles(*roles: UserRole) -> Callable[[User], User]:
         return user
 
     return _checker
+
+
+def verify_internal_service(
+    x_internal_service_token: Annotated[str | None, Header()] = None,
+) -> None:
+    """Guard screening pipeline callbacks from ai-core-services."""
+    expected = settings.internal_service_token
+    if not expected:
+        return
+    if x_internal_service_token != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid internal service token",
+        )

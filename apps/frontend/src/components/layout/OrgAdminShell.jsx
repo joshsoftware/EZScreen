@@ -3,6 +3,10 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { LogoMark } from '../brand/LogoMark'
 import { useAuth } from '../../features/auth/AuthContext'
 import { OrgSettingsProvider } from '../../features/org-admin/OrgSettingsContext'
+import { WorkspaceHealthProvider } from '../../features/system/WorkspaceHealthContext'
+import { useWorkspaceHealthContext } from '../../features/system/WorkspaceHealthContext'
+import { statusDotClass, statusSummary } from '../../features/system/healthUtils'
+import { ServiceHealthBanner } from '../system/ServiceHealthBanner'
 import { PageTransition } from '../motion/Motion'
 import { cn } from '../../lib/cn'
 
@@ -16,9 +20,20 @@ function navClass({ isActive }) {
 }
 
 export function OrgAdminShell() {
+  return (
+    <OrgSettingsProvider>
+      <WorkspaceHealthProvider>
+        <OrgAdminShellLayout />
+      </WorkspaceHealthProvider>
+    </OrgSettingsProvider>
+  )
+}
+
+function OrgAdminShellLayout() {
   const { user, logout } = useAuth()
   const location = useLocation()
   const reduceMotion = useReducedMotion()
+  const { health, status, services } = useWorkspaceHealthContext()
   const displayName =
     [user?.first_name, user?.last_name].filter(Boolean).join(' ') ||
     'Organization user'
@@ -36,8 +51,7 @@ export function OrgAdminShell() {
       }
 
   return (
-    <OrgSettingsProvider>
-      <div className="flex min-h-screen text-on-surface">
+    <div className="flex min-h-screen text-on-surface">
         <motion.aside
           className="hidden md:flex w-sidebar-width shrink-0 flex-col h-screen sticky top-0 border-r border-outline-variant/70 bg-surface-container-lowest/85 backdrop-blur-xl"
           {...asideProps}
@@ -95,8 +109,17 @@ export function OrgAdminShell() {
               <LogoMark subtitle="Workspace" />
             </div>
             <div className="hidden md:flex items-center gap-sm text-body-sm text-on-surface-variant">
-              <span className="inline-flex h-2 w-2 rounded-full bg-primary" />
+              <span
+                className={cn(
+                  'inline-flex h-2 w-2 rounded-full',
+                  status ? statusDotClass(status) : 'bg-primary',
+                )}
+                title={status ? statusSummary(status) : 'Checking services…'}
+              />
               Screening workspace
+              {status && status !== 'healthy' ? (
+                <span className="text-amber-800">· {statusSummary(status)}</span>
+              ) : null}
             </div>
             <nav className="md:hidden flex items-center gap-xs">
               <NavLink
@@ -115,6 +138,11 @@ export function OrgAdminShell() {
             </nav>
           </header>
           <main className="flex-1 p-margin-mobile md:p-margin-desktop max-w-[1440px] w-full mx-auto">
+            {health ? (
+              <div className="mb-lg">
+                <ServiceHealthBanner status={status} services={services} />
+              </div>
+            ) : null}
             <AnimatePresence mode="wait">
               <PageTransition key={location.pathname}>
                 <Outlet />
@@ -122,7 +150,6 @@ export function OrgAdminShell() {
             </AnimatePresence>
           </main>
         </div>
-      </div>
-    </OrgSettingsProvider>
+    </div>
   )
 }

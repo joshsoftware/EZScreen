@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '../../components/ui/Button'
 import { Input, Select, TextArea } from '../../components/ui/Input'
 import { Modal } from '../../components/ui/Modal'
 import { ApiError } from '../../lib/api/client'
-import { scheduleInterviewSessionRequest } from './api'
+import {
+  rescheduleInterviewSessionRequest,
+  scheduleInterviewSessionRequest,
+} from './api'
 
 function pad(n) {
   return String(n).padStart(2, '0')
@@ -16,6 +19,13 @@ function defaultLocalSlot() {
   d.setDate(d.getDate() + 1)
   d.setHours(10, 0, 0, 0)
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function isoToLocalDatetimeInput(iso) {
+  if (!iso) return defaultLocalSlot()
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return defaultLocalSlot()
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 function localDatetimeToIso(value) {
@@ -34,32 +44,48 @@ function parseEmailList(raw) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+/** Normalize legacy IANA names from Intl (e.g. Asia/Calcutta → Asia/Kolkata). */
+function normalizeTimeZone(tz) {
+  if (!tz) return undefined
+  if (tz === 'Asia/Calcutta') return 'Asia/Kolkata'
+  return tz
+}
+
 export function ScheduleScreeningModal({
   open,
   onClose,
+  mode = 'schedule',
   applicationId,
+  sessionId = null,
+  initialSlot = null,
   candidateLabel,
   candidateEmail,
   onScheduled,
 }) {
+  const isReschedule = mode === 'reschedule'
   const [scheduledLocal, setScheduledLocal] = useState(defaultLocalSlot)
   const [durationMinutes, setDurationMinutes] = useState('30')
-  const [gmeetLink, setGmeetLink] = useState('')
   const [additionalEmails, setAdditionalEmails] = useState('')
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  function resetFields() {
+  useEffect(() => {
+    if (!open) return
+    if (isReschedule && initialSlot) {
+      setScheduledLocal(isoToLocalDatetimeInput(initialSlot.scheduledAt))
+      setDurationMinutes(String(initialSlot.durationMinutes ?? 30))
+      setAdditionalEmails((initialSlot.additionalEmails || []).join(', '))
+      setComment('')
+      return
+    }
     setScheduledLocal(defaultLocalSlot())
     setDurationMinutes('30')
-    setGmeetLink('')
     setAdditionalEmails('')
     setComment('')
-  }
+  }, [open, isReschedule, initialSlot])
 
   function resetAndClose() {
     if (submitting) return
-    resetFields()
     onClose?.()
   }
 
@@ -75,12 +101,6 @@ export function ScheduleScreeningModal({
       return
     }
 
-    const link = gmeetLink.trim()
-    if (link && !link.toLowerCase().startsWith('https://')) {
-      toast.error('Meet link must start with https://')
-      return
-    }
-
     const emails = parseEmailList(additionalEmails)
     if (emails.length > 20) {
       toast.error('You can add up to 20 additional emails')
@@ -92,27 +112,39 @@ export function ScheduleScreeningModal({
       return
     }
 
+    const payload = {
+      scheduled_at: scheduledAt,
+      duration_minutes: Number(durationMinutes),
+      additional_emails: emails,
+      comment: comment.trim() || undefined,
+      time_zone: normalizeTimeZone(
+        Intl.DateTimeFormat().resolvedOptions().timeZone,
+      ),
+    }
+
     setSubmitting(true)
     try {
-      const session = await scheduleInterviewSessionRequest({
-        application_id: applicationId,
-        interview_type: 'screening_ai',
-        scheduled_at: scheduledAt,
-        duration_minutes: Number(durationMinutes),
-        gmeet_link: link || undefined,
-        additional_emails: emails,
-        comment: comment.trim() || undefined,
-        time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
-      })
-      toast.success('Screening scheduled · invite sent')
-      resetFields()
+      const session = isReschedule
+        ? await rescheduleInterviewSessionRequest(sessionId, payload)
+        : await scheduleInterviewSessionRequest({
+            application_id: applicationId,
+            interview_type: 'screening_ai',
+            ...payload,
+          })
+      toast.success(
+        isReschedule
+          ? 'Screening rescheduled · updated invite sent'
+          : 'Screening scheduled · invite sent',
+      )
       onClose?.()
       await onScheduled?.(session)
     } catch (err) {
       toast.error(
         err instanceof ApiError || err instanceof Error
           ? err.message
-          : 'Failed to schedule screening',
+          : isReschedule
+            ? 'Failed to reschedule screening'
+            : 'Failed to schedule screening',
       )
     } finally {
       setSubmitting(false)
@@ -120,17 +152,21 @@ export function ScheduleScreeningModal({
   }
 
   return (
-    <Modal open={open} onClose={resetAndClose} title="Schedule screening">
+    <Modal
+      open={open}
+      onClose={resetAndClose}
+      title={isReschedule ? 'Reschedule screening' : 'Schedule screening'}
+    >
       <p className="text-body-sm text-on-surface-variant mb-md">
-        Book an AI screening slot
+        {isReschedule ? 'Pick a new slot' : 'Book an AI screening slot'}
         {candidateLabel ? (
           <>
             {' '}
             for <span className="text-on-surface font-medium">{candidateLabel}</span>
           </>
         ) : null}
-        . Paste a Meet link or leave it blank to generate one. The invite is sent
-        automatically.
+        . A Google Meet link and calendar invite are{' '}
+        {isReschedule ? 'updated' : 'created'} automatically.
         {candidateEmail ? (
           <>
             {' '}
@@ -158,17 +194,6 @@ export function ScheduleScreeningModal({
           <option value="45">45 min</option>
           <option value="60">60 min</option>
         </Select>
-        <Input
-          id="screening-gmeet"
-          label="Meet link (optional)"
-          type="url"
-          value={gmeetLink}
-          onChange={(event) => setGmeetLink(event.target.value)}
-          placeholder="https://meet.google.com/…"
-        />
-        <p className="text-label-md text-on-surface-variant -mt-sm">
-          Leave blank to auto-generate a join link.
-        </p>
         <TextArea
           id="screening-additional-emails"
           label="Additional emails (optional)"
@@ -199,7 +224,7 @@ export function ScheduleScreeningModal({
           loading={submitting}
           onClick={() => void onSubmit()}
         >
-          Schedule screening
+          {isReschedule ? 'Reschedule screening' : 'Schedule screening'}
         </Button>
       </div>
     </Modal>

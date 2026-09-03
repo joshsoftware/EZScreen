@@ -7,6 +7,14 @@ export function numericScore(value) {
   return null
 }
 
+/** Fit bands use 0–10; legacy rows may store 0–100. Round to 1 dp so display matches band lookup. */
+export function normalizeMatchScore(score) {
+  const value = numericScore(score)
+  if (value == null) return null
+  const onTenScale = value > 10 ? value / 10 : value
+  return Math.round(onTenScale * 10) / 10
+}
+
 export const DEFAULT_FIT_LABELS = Object.freeze([
   Object.freeze({ id: 'strong', name: 'Strong', min_score: 8, max_score: 10 }),
   Object.freeze({ id: 'moderate', name: 'Moderate', min_score: 6, max_score: 7.9 }),
@@ -98,11 +106,11 @@ function toneForBand(band, labels) {
 }
 
 export function isPendingApplicant(applicant) {
-  return numericScore(applicant?.resume_score) == null
+  return applicantScore(applicant) == null
 }
 
 export function applicantScore(applicant) {
-  return numericScore(applicant?.resume_score)
+  return normalizeMatchScore(applicant?.resume_score)
 }
 
 export function fitLabel(score, labels = DEFAULT_FIT_LABELS) {
@@ -211,6 +219,57 @@ export function canScheduleScreening(detail, timeline) {
   return types.has('under_hr_review')
 }
 
+export function canRescheduleScreening(detail, timeline) {
+  if (!detail || detail.status !== 'interview_scheduled') return false
+  const types = timelineEventTypes(timeline)
+  if (!types.has('screening_scheduled')) return false
+  if (
+    types.has('screening_completed') ||
+    types.has('screening_in_progress') ||
+    types.has('rejected') ||
+    types.has('shortlisted_for_l1')
+  ) {
+    return false
+  }
+  return Boolean(screeningSlotFromTimeline(timeline)?.sessionId)
+}
+
+/** Latest scheduled/rescheduled slot from timeline metadata. */
+export function screeningSlotFromTimeline(timeline, candidateEmail = null) {
+  const list = Array.isArray(timeline) ? timeline : []
+  let last = null
+  for (const event of list) {
+    if (
+      event.event_type === 'screening_scheduled' ||
+      event.event_type === 'screening_rescheduled'
+    ) {
+      last = event
+    }
+  }
+  if (!last?.metadata || typeof last.metadata !== 'object') return null
+  const meta = last.metadata
+  const candidate = String(candidateEmail || '').trim().toLowerCase()
+  const additional = Array.isArray(meta.additional_emails)
+    ? meta.additional_emails.filter(
+        (email) =>
+          typeof email === 'string' &&
+          email.trim() &&
+          email.trim().toLowerCase() !== candidate,
+      )
+    : []
+  return {
+    sessionId:
+      typeof meta.interview_session_id === 'string'
+        ? meta.interview_session_id
+        : null,
+    scheduledAt:
+      typeof meta.scheduled_at === 'string' ? meta.scheduled_at : null,
+    durationMinutes:
+      typeof meta.duration_minutes === 'number' ? meta.duration_minutes : 30,
+    additionalEmails: additional,
+  }
+}
+
 export function canRejectApplication(detail, timeline) {
   if (!detail) return false
   if (detail.status === 'rejected' || detail.status === 'shortlist_for_l1') return false
@@ -221,11 +280,11 @@ export function canRejectApplication(detail, timeline) {
 }
 
 export function resolveMatchScore(detail) {
-  const direct = numericScore(detail?.resume_score)
+  const direct = normalizeMatchScore(detail?.resume_score)
   if (direct != null) return direct
   const analysis = detail?.job_fit_analysis
   if (analysis && typeof analysis === 'object') {
-    return numericScore(analysis.match_score)
+    return normalizeMatchScore(analysis.match_score)
   }
   return null
 }

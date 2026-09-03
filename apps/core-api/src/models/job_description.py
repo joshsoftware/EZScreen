@@ -56,6 +56,7 @@ class JobDescription(Base):
         server_default=JobStatus.draft.value,
     )
     parsed_jd: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    screening_questions: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
