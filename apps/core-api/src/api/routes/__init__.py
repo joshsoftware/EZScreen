@@ -6,6 +6,7 @@ from src.api.routes import (
     interview_sessions,
     jobs,
     organizations,
+    public_jobs,
     system,
 )
 
@@ -13,6 +14,7 @@ api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
 api_router.include_router(organizations.router)
 api_router.include_router(jobs.router)
+api_router.include_router(public_jobs.router)
 api_router.include_router(applications.router)
 api_router.include_router(applications.applicant_router)
 api_router.include_router(applications.detail_router)
