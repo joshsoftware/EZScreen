@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import secrets
+import socket
 import string
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, TypedDict
+from typing import Any, Iterator, TypedDict
 from urllib.parse import quote
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -30,6 +32,27 @@ _MEET_CODE_ALPHABET = string.ascii_lowercase
 _TIMEZONE_ALIASES: dict[str, str] = {
     "Asia/Calcutta": "Asia/Kolkata",
 }
+
+
+@contextmanager
+def _prefer_ipv4() -> Iterator[None]:
+    """Prefer IPv4 for outbound calls (Docker often has no IPv6 route → Errno 101)."""
+    import urllib3.util.connection as urllib3_cn
+
+    previous = urllib3_cn.allowed_gai_family
+    urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
+    try:
+        yield
+    finally:
+        urllib3_cn.allowed_gai_family = previous
+
+
+def _google_http_client(*, timeout: float = 30.0) -> httpx.Client:
+    # Bind to IPv4 so httpx does not try unreachable AAAA addresses.
+    return httpx.Client(
+        timeout=timeout,
+        transport=httpx.HTTPTransport(local_address="0.0.0.0"),
+    )
 
 
 class ScreeningMeetResult(TypedDict, total=False):
@@ -131,7 +154,8 @@ def _access_token() -> str:
 
     creds = _build_credentials()
     if not getattr(creds, "valid", False) or not getattr(creds, "token", None):
-        creds.refresh(Request())
+        with _prefer_ipv4():
+            creds.refresh(Request())
     token = getattr(creds, "token", None)
     if not token:
         raise ValueError("Failed to obtain Google access token for Calendar API")
@@ -239,17 +263,18 @@ def _create_live_calendar_event(
     params = {"conferenceDataVersion": "1", "sendUpdates": send_updates}
 
     try:
-        response = httpx.post(
-            url,
-            params=params,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=30.0,
-        )
-        response.raise_for_status()
+        with _google_http_client(timeout=30.0) as client:
+            response = client.post(
+                url,
+                params=params,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
     except httpx.HTTPStatusError as exc:
         body = (exc.response.text or "").strip()[:2000]
         raise ValueError(
@@ -257,8 +282,6 @@ def _create_live_calendar_event(
         ) from exc
     except httpx.HTTPError as exc:
         raise ValueError(f"Google Calendar API unavailable: {exc}") from exc
-
-    data = response.json()
     if not isinstance(data, dict):
         raise ValueError("Invalid response from Google Calendar API")
 
