@@ -165,7 +165,7 @@ class InterviewOrchestrator:
             ai_response = "Okay, sounds good."
 
         if self.transcript_log:
-            self.transcript_log[-1].setdefault("follow_ups", []).append(
+            self.transcript_log[-1].setdefault("conversational_turns", []).append(
                 {
                     "candidate_speech": transcript,
                     "ai_response": ai_response,
@@ -180,10 +180,10 @@ class InterviewOrchestrator:
         if self.transcript_log:
             self.transcript_log[-1]["candidate_answer"] = transcript
 
-        qa_entry = AnswerEvaluator.build_qa_entry(question_obj, current_q, transcript)
+        qa_entry = AnswerEvaluator.build_qa_entry(question_obj, current_q, transcript, self.current_question_idx + 1)
         await self.api_client.save_transcript(qa_entry)
 
-        skip_eval = AnswerEvaluator.build_skip_evaluation(question_obj, transcript)
+        skip_eval = AnswerEvaluator.build_skip_evaluation(question_obj, transcript, self.current_question_idx + 1)
         self.analysis_evaluations.append(skip_eval)
         await self.api_client.save_evaluation(skip_eval)
 
@@ -280,6 +280,7 @@ class InterviewOrchestrator:
             transcript=transcript,
             primary_eval=primary_eval,
             current_eval=current_eval,
+            question_number=self.current_question_idx + 1,
             follow_ups=follow_ups,
         )
 
