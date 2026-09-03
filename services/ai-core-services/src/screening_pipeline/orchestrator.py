@@ -228,6 +228,7 @@ class InterviewOrchestrator:
             logger.info("Follow-up limit reached, forcing completion")
             is_complete = True
             follow_up_question = ""
+            eval_data["decision"] = "NEXT_QUESTION"
 
         if not is_complete and follow_up_question:
             if self.transcript_log:
