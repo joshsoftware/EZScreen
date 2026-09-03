@@ -1,4 +1,3 @@
-from fastapi import HTTPException
 from datetime import datetime, timezone, timedelta
 from src.core.logger import logger
 from src.core.config import settings
@@ -21,35 +20,34 @@ class AttendeeBotClient:
     async def dispatch_bot(self, request: DispatchBotRequest) -> DispatchBotResponse:
         """Schedule an Attendee meeting bot for the specified interview session's scheduled_at time."""
         session_detail = await interview_session_repo.get_by_id(request.interview_session_id)
-        
+
         meeting_url = request.meeting_url
         scheduled_at = None
         if session_detail:
             scheduled_at = session_detail.scheduled_at
             if scheduled_at:
                 try:
-                    # The calendar saves IST but marks it as UTC. 
+                    # The calendar saves IST but marks it as UTC.
                     # We subtract 5:30 to get the TRUE UTC time for Attendee.dev
                     dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
                     dt = dt - timedelta(hours=5, minutes=30)
-                    
-                    # If it's already past the start time, block it and return an error to the user
+
                     if dt < datetime.now(timezone.utc):
-                        raise HTTPException(status_code=400, detail="Cannot dispatch bot. The scheduled interview time is in the past.")
-                    else:
-                        scheduled_at = dt.isoformat()
-                except HTTPException:
-                    raise # Re-raise the 400 error so Postman sees it
+                        raise ValueError(
+                            "Cannot dispatch bot. The scheduled interview time is in the past."
+                        )
+                    scheduled_at = dt.isoformat()
+                except ValueError:
+                    raise
                 except Exception as e:
                     logger.warning(f"Failed to adjust scheduled_at for IST: {e}")
-                    
+
             if not meeting_url and session_detail.comment:
                 meeting_url = session_detail.comment
 
         if not meeting_url:
             meeting_url = "https://meet.google.com/ezs-screener-demo"
 
-        # Construct strongly-typed AttendeeScheduleBotRequest
         attendee_req = AttendeeScheduleBotRequest(
             meeting_url=meeting_url,
             bot_name="ezscreener",
@@ -57,7 +55,7 @@ class AttendeeBotClient:
             transcription_settings={
                 "meeting_closed_captions": {}
             },
-                websocket_settings=AttendeeWebsocketSettings(
+            websocket_settings=AttendeeWebsocketSettings(
                 audio=AttendeeAudioSettings(
                     url=f"{settings.websocket_url.rstrip('/')}/{request.interview_session_id}",
                     sample_rate=24000
@@ -65,11 +63,9 @@ class AttendeeBotClient:
             )
         )
 
-        # Execute external Attendee API call using typed request & response
         attendee_res = await attendee_client.schedule_bot(attendee_req)
-
         dispatched_at = datetime.now(timezone.utc).isoformat()
-        
+
         return DispatchBotResponse(
             bot_id=attendee_res.id,
             interview_session_id=request.interview_session_id,

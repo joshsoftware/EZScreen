@@ -23,20 +23,26 @@ src/
 ├── job_fit_analysis/    # Resume-JD matching & scoring
 ├── question_generation/ # Interview question generation
 ├── meeting_bot/         # Attendee.dev integration
-├── screening_pipeline/  # STT/TTS (planned)
+├── screening_pipeline/  # Live interview: STT/TTS, evaluator, orchestrator
 └── interview_analysis/  # Post-call evaluation (planned)
 ```
 
 ## Layering rules
 
 1. **API layer** (`api/v1/`) — request/response only; no LLM prompts or business formulas
-2. **Domain layer** — orchestration (`matcher.py`, parsers); accepts injected clients
-3. **Pure logic** — `score_calculator.py`, schema validation; no I/O, fully unit-testable
+2. **Domain layer** — orchestration (`matcher.py`, parsers, `InterviewOrchestrator`); accepts injected clients
+3. **Pure logic** — `score_calculator.py`, `experience_calculator.py`, `speech_filter.py`; no I/O
 4. **Prompts** — `prompt_builder.py` per domain; large templates stay out of orchestrators
+
+## API error pattern
+
+Domain failures return HTTP 200 with `{ "status": "error", "error_message": "..." }` (parsing, matching, question generation, meeting bot). Prefer this over `HTTPException` for business/domain errors. Delete-bot success remains `204`; delete failures use the structured error body.
 
 ## Testing strategy
 
-- `tests/job_fit_analysis/test_score_calculator.py` — deterministic scoring math
-- `tests/parsing/test_schemas.py` — Pydantic model validation
+- `tests/job_fit_analysis/` — deterministic scoring math
+- `tests/parsing/` — schemas + experience calculator
+- `tests/question_generation/` — match context, question parsing, generator with mocked LLM
+- `tests/screening_pipeline/` — evaluator builders, summary calculator, persistence, webhook, orchestrator mocks
 - `tests/api/v1/` — route tests with mocked domain services
 - Never hit real Ollama/MinIO/Attendee in unit tests

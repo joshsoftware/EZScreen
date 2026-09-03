@@ -2,23 +2,33 @@
 Interview Orchestrator — Main state machine for the AI screening interview.
 Controls the flow: Greeting → Questions → Evaluation → Follow-up → Closing.
 """
+
+from __future__ import annotations
+
 import asyncio
 import random
-import json
-from typing import Any
-from src.core.logger import logger
+from typing import TYPE_CHECKING, Any, Optional
+
 from src.core.config import settings
+from src.core.logger import logger
+from src.llm.client import OllamaClient
 from src.meeting_bot.repository import interview_session_repo
-from src.screening_pipeline.stt_client import WhisperCloudSTTClient
-from src.screening_pipeline.tts_client import LocalKokoroTTSClient
 from src.screening_pipeline.evaluator import AnswerEvaluator
-from src.screening_pipeline.session_api import SessionApiClient
+from src.screening_pipeline.persistence import (
+    persist_completed_question,
+    persist_interview_close,
+)
 from src.screening_pipeline.prompts import (
-    GREETING_TEXT,
     CLOSING_TEXT,
+    GREETING_TEXT,
     MAX_FOLLOW_UPS_PER_QUESTION,
 )
-from src.llm.client import OllamaClient
+from src.screening_pipeline.session_api import SessionApiClient
+from src.screening_pipeline.speech_filter import is_probable_hallucination
+from src.screening_pipeline.tts_client import LocalKokoroTTSClient
+
+if TYPE_CHECKING:
+    from src.screening_pipeline.stt_client import WhisperCloudSTTClient
 
 
 class InterviewOrchestrator:
@@ -27,7 +37,17 @@ class InterviewOrchestrator:
     Coordinates STT, Intent Router, LLM Evaluator, TTS, and Core-API persistence.
     """
 
-    def __init__(self, session_id: str, websocket):
+    def __init__(
+        self,
+        session_id: str,
+        websocket,
+        *,
+        stt_client: Optional[WhisperCloudSTTClient] = None,
+        tts_client: Optional[LocalKokoroTTSClient] = None,
+        evaluator: Optional[AnswerEvaluator] = None,
+        llm_client: Optional[OllamaClient] = None,
+        api_client: Optional[SessionApiClient] = None,
+    ):
         self.session_id = session_id
         self.websocket = websocket
         self.session: Any = None
@@ -35,20 +55,22 @@ class InterviewOrchestrator:
         self.current_question_idx = 0
         self.is_active = False
 
-        # Audio clients
-        self.stt_client = WhisperCloudSTTClient(
-            api_url=settings.whisper_api_url,
-            api_key=settings.whisper_api_key,
-            on_transcript=self.handle_candidate_speech
-        )
-        self.tts_client = LocalKokoroTTSClient()
+        if stt_client is not None:
+            self.stt_client = stt_client
+        else:
+            from src.screening_pipeline.stt_client import WhisperCloudSTTClient as _STT
 
-        # AI modules
-        llm_client = OllamaClient()
-        self.evaluator = AnswerEvaluator(llm_client)
-        self.api_client: SessionApiClient = None  # Initialized after session is loaded
+            self.stt_client = _STT(
+                api_url=settings.whisper_api_url,
+                api_key=settings.whisper_api_key,
+                on_transcript=self.handle_candidate_speech,
+            )
+        self.tts_client = tts_client or LocalKokoroTTSClient()
 
-        # State tracking
+        resolved_llm = llm_client or OllamaClient()
+        self.evaluator = evaluator or AnswerEvaluator(resolved_llm)
+        self.api_client = api_client  # Usually set after session load
+
         self.current_interaction_state = "idle"  # idle, speaking, listening, evaluating
         self.transcript_log: list = []
         self.analysis_evaluations: list = []
@@ -58,31 +80,33 @@ class InterviewOrchestrator:
     async def start(self):
         """Initializes the interview session and speaks the greeting."""
         logger.info("Orchestrator starting", extra={"session_id": self.session_id})
-        
-        # The websocket path parameter (self.session_id) actually contains the interview_session_id
-        # because the true bot_id isn't known at the time the websocket URL is generated.
+
+        # Path param is interview_session_id (bot_id unknown when WS URL is built).
         self.session = await interview_session_repo.get_by_id(self.session_id)
 
         if not self.session:
-            logger.error("No session found for bot. Cannot start interview.", extra={"session_id": self.session_id})
+            logger.error(
+                "No session found for bot. Cannot start interview.",
+                extra={"session_id": self.session_id},
+            )
             return
 
-        # Initialize the API client with the real session ID
-        self.api_client = SessionApiClient(session_id=str(self.session.id))
+        if self.api_client is None:
+            self.api_client = SessionApiClient(session_id=str(self.session.id))
 
-        # Fetch questions and randomize their order
         self.questions = self.session.generated_questions or []
         random.shuffle(self.questions)
         self.is_active = True
 
         await self.stt_client.connect()
 
-        # Greeting
-        self.transcript_log.append({
-            "interaction_type": "greeting",
-            "bot_speech": GREETING_TEXT,
-            "candidate_answer": ""
-        })
+        self.transcript_log.append(
+            {
+                "interaction_type": "greeting",
+                "bot_speech": GREETING_TEXT,
+                "candidate_answer": "",
+            }
+        )
         await self.speak(GREETING_TEXT)
         self.current_interaction_state = "listening"
 
@@ -97,20 +121,12 @@ class InterviewOrchestrator:
         """Callback from STT when the candidate finishes speaking."""
         if not self.is_active or self.current_interaction_state != "listening":
             return
-            
-        # Ignore common Whisper hallucinations caused by background noise or silence
-        cleaned = transcript.strip().lower()
-        import re
-        cleaned = re.sub(r'[^\w\s]', '', cleaned)
-        
-        hallucinations = {
-            "thank you", "thanks", "you", "okay", "ok", "yeah",
-            "thank you for watching", "thanks for watching", "subscribe",
-            "no i dont know", "okay i dont know", "i dont know"
-        }
-        
-        if cleaned in hallucinations or len(cleaned) < 2:
-            logger.info("Ignored probable Whisper hallucination or noise", extra={"transcript": transcript})
+
+        if is_probable_hallucination(transcript):
+            logger.info(
+                "Ignored probable Whisper hallucination or noise",
+                extra={"transcript": transcript},
+            )
             return
 
         logger.info("Candidate speech received", extra={"transcript": transcript})
@@ -121,8 +137,6 @@ class InterviewOrchestrator:
 
     async def _process_speech(self, transcript: str):
         """Routes the candidate's speech through intent detection and evaluation."""
-
-        # If candidate is responding to the greeting, just move to first question
         if self.transcript_log and self.transcript_log[-1].get("interaction_type") == "greeting":
             self.transcript_log[-1]["candidate_answer"] = transcript
             await self._ask_next_question()
@@ -131,7 +145,6 @@ class InterviewOrchestrator:
         question_obj = self.questions[self.current_question_idx]
         current_q = question_obj.get("question", "")
 
-        # ── Step 1: Intent Routing ──
         intent, ai_response = await self.evaluator.route_intent(current_q, transcript)
 
         if intent in ["CLARIFICATION", "SMALL_TALK"]:
@@ -142,7 +155,6 @@ class InterviewOrchestrator:
             await self._handle_skip(question_obj, current_q, transcript)
             return
 
-        # ── Step 2: Answer Evaluation ──
         await self._handle_answer(question_obj, current_q, transcript)
 
     # ──────────────────────────── INTENT HANDLERS ────────────────────────────
@@ -153,10 +165,12 @@ class InterviewOrchestrator:
             ai_response = "Okay, sounds good."
 
         if self.transcript_log:
-            self.transcript_log[-1].setdefault("follow_ups", []).append({
-                "candidate_speech": transcript,
-                "ai_response": ai_response
-            })
+            self.transcript_log[-1].setdefault("follow_ups", []).append(
+                {
+                    "candidate_speech": transcript,
+                    "ai_response": ai_response,
+                }
+            )
 
         await self.speak(ai_response)
         self.current_interaction_state = "listening"
@@ -166,11 +180,9 @@ class InterviewOrchestrator:
         if self.transcript_log:
             self.transcript_log[-1]["candidate_answer"] = transcript
 
-        # Save clean Q&A transcript
         qa_entry = AnswerEvaluator.build_qa_entry(question_obj, current_q, transcript)
         await self.api_client.save_transcript(qa_entry)
 
-        # Save 0-score evaluation
         skip_eval = AnswerEvaluator.build_skip_evaluation(question_obj, transcript)
         self.analysis_evaluations.append(skip_eval)
         await self.api_client.save_evaluation(skip_eval)
@@ -180,8 +192,6 @@ class InterviewOrchestrator:
 
     async def _handle_answer(self, question_obj: dict, current_q: str, transcript: str):
         """Handles ANSWERING intent — evaluates and decides follow-up or next question."""
-
-        # Determine keywords: use missing keywords from primary eval for follow-up
         primary_eval_data = None
         if self.transcript_log and self.transcript_log[-1].get("primary_eval"):
             primary_eval_data = self.transcript_log[-1]["primary_eval"]
@@ -191,52 +201,57 @@ class InterviewOrchestrator:
             expected_keywords = ", ".join(question_obj.get("expected_keywords", []))
             answer_depth = question_obj.get("answer_depth", "partial_depth")
 
-        # Get follow-up context if exists
         follow_up_context = None
         if self.transcript_log and self.transcript_log[-1].get("follow_ups"):
             follow_up_context = self.transcript_log[-1]["follow_ups"]
 
-        # Evaluate answer via LLM
         eval_data = await self.evaluator.evaluate_answer(
             current_question=current_q,
             transcript=transcript,
             expected_keywords=expected_keywords,
             answer_depth=answer_depth,
-            follow_up_context=follow_up_context
+            follow_up_context=follow_up_context,
         )
 
         decision = eval_data.get("decision", "NEXT_QUESTION")
-        is_complete = (decision == "NEXT_QUESTION")
+        is_complete = decision == "NEXT_QUESTION"
         follow_up_question = eval_data.get("suggested_follow_up", "")
 
         if decision == "REPEAT_QUESTION":
             is_complete = False
             follow_up_question = "I'm sorry, could you please repeat your answer?"
 
-        # Enforce follow-up limit
-        current_follow_ups = self.transcript_log[-1].get("follow_ups", []) if self.transcript_log else []
+        current_follow_ups = (
+            self.transcript_log[-1].get("follow_ups", []) if self.transcript_log else []
+        )
         if len(current_follow_ups) >= MAX_FOLLOW_UPS_PER_QUESTION and not is_complete:
             logger.info("Follow-up limit reached, forcing completion")
             is_complete = True
             follow_up_question = ""
 
         if not is_complete and follow_up_question:
-            # Ask follow-up question
             if self.transcript_log:
                 self.transcript_log[-1]["primary_eval"] = eval_data
-                self.transcript_log[-1].setdefault("follow_ups", []).append({
-                    "candidate_speech": transcript,
-                    "ai_response": follow_up_question
-                })
+                self.transcript_log[-1].setdefault("follow_ups", []).append(
+                    {
+                        "candidate_speech": transcript,
+                        "ai_response": follow_up_question,
+                    }
+                )
             await self.speak(follow_up_question)
             self.current_interaction_state = "listening"
         else:
-            # Question complete — persist to DB
-            await self._complete_question(question_obj, current_q, transcript, primary_eval_data, eval_data)
+            await self._complete_question(
+                question_obj, current_q, transcript, primary_eval_data, eval_data
+            )
 
     async def _complete_question(
-        self, question_obj: dict, current_q: str, transcript: str,
-        primary_eval: dict, current_eval: dict
+        self,
+        question_obj: dict,
+        current_q: str,
+        transcript: str,
+        primary_eval: dict,
+        current_eval: dict,
     ):
         """Saves the completed question's transcript and evaluation to core-api."""
         if self.transcript_log:
@@ -244,17 +259,16 @@ class InterviewOrchestrator:
 
         follow_ups = self.transcript_log[-1].get("follow_ups") if self.transcript_log else None
 
-        # Save clean Q&A transcript (with nested follow-ups)
-        qa_entry = AnswerEvaluator.build_qa_entry(question_obj, current_q, transcript, follow_ups)
-        await self.api_client.save_transcript(qa_entry)
-
-        # Save evaluation (with nested follow-up scores)
-        evaluation = AnswerEvaluator.build_evaluation_block(
-            question_obj, current_q, transcript,
-            primary_eval, current_eval, follow_ups
+        await persist_completed_question(
+            self.api_client,
+            self.analysis_evaluations,
+            question_obj=question_obj,
+            current_q=current_q,
+            transcript=transcript,
+            primary_eval=primary_eval,
+            current_eval=current_eval,
+            follow_ups=follow_ups,
         )
-        self.analysis_evaluations.append(evaluation)
-        await self.api_client.save_evaluation(evaluation)
 
         self.current_question_idx += 1
         await self._ask_next_question()
@@ -270,30 +284,34 @@ class InterviewOrchestrator:
         question_obj = self.questions[self.current_question_idx]
         q_text = question_obj.get("question", "")
 
-        self.transcript_log.append({
-            "interaction_type": "question",
-            "question_id": question_obj.get("id"),
-            "bot_speech": q_text,
-            "candidate_answer": "",
-            "follow_ups": []
-        })
+        self.transcript_log.append(
+            {
+                "interaction_type": "question",
+                "question_id": question_obj.get("id"),
+                "bot_speech": q_text,
+                "candidate_answer": "",
+                "follow_ups": [],
+            }
+        )
 
         await self.speak(q_text)
         self.current_interaction_state = "listening"
 
     async def _close_interview(self):
         """Speaks closing message and saves the final summary."""
-        self.transcript_log.append({
-            "interaction_type": "closing",
-            "bot_speech": CLOSING_TEXT,
-            "candidate_answer": ""
-        })
+        self.transcript_log.append(
+            {
+                "interaction_type": "closing",
+                "bot_speech": CLOSING_TEXT,
+                "candidate_answer": "",
+            }
+        )
 
-        # Calculate and persist final_summary
-        await self.api_client.save_final_summary(self.analysis_evaluations)
-        
-        # Persist the complete conversational transcript
-        await self.api_client.save_interview_metadata(self.transcript_log)
+        await persist_interview_close(
+            self.api_client,
+            self.analysis_evaluations,
+            self.transcript_log,
+        )
 
         await self.speak(CLOSING_TEXT)
         self.current_interaction_state = "closing"

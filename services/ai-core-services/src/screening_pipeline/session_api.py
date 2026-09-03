@@ -7,7 +7,7 @@ import httpx
 from typing import Dict, Any, List
 from src.core.config import settings
 from src.core.logger import logger
-from src.screening_pipeline.prompts import RECOMMENDATION_THRESHOLD
+from src.screening_pipeline.summary_calculator import compute_final_summary
 
 
 class SessionApiClient:
@@ -55,40 +55,14 @@ class SessionApiClient:
 
     async def save_final_summary(self, evaluations: List[Dict[str, Any]]):
         """Calculates the final_summary from all evaluations and sends it to core-api."""
-        total_questions = len(evaluations)
-        if total_questions == 0:
+        final_summary = compute_final_summary(evaluations)
+        if final_summary is None:
             return
-
-        # Topic Score Resolution (AI_PROCESSING.md Section 5.4)
-        total_score = 0.0
-        for ev in evaluations:
-            primary_score = ev.get("score", 0)
-            follow_ups = ev.get("follow_ups", [])
-            if follow_ups and follow_ups[0].get("score") is not None:
-                topic_score = (primary_score + follow_ups[0]["score"]) / 2
-            else:
-                topic_score = primary_score
-            total_score += topic_score
-
-        max_possible_score = total_questions * 10
-        overall_score = round((total_score / max_possible_score) * 10, 1)
-
-        if overall_score >= RECOMMENDATION_THRESHOLD:
-            final_recommendation = "shortlist_for_l1"
-        else:
-            final_recommendation = "reject"
-
-        final_summary = {
-            "total_score": total_score,
-            "max_possible_score": max_possible_score,
-            "overall_score": overall_score,
-            "final_recommendation": final_recommendation
-        }
 
         logger.info("Saving final summary to core-api", extra={
             "session_id": self.session_id,
-            "overall_score": overall_score,
-            "recommendation": final_recommendation
+            "overall_score": final_summary["overall_score"],
+            "recommendation": final_summary["final_recommendation"]
         })
 
         try:

@@ -135,7 +135,11 @@ class AttendeeApiClient:
         except Exception as err:
             logger.error("Error communicating with Attendee API for leave_bot", extra={"error": str(err)})
             
-        return LeaveBotResponse(bot_id=bot_id, status="error")
+        return LeaveBotResponse(
+            bot_id=bot_id,
+            status="error",
+            error_message="Failed to instruct bot to leave",
+        )
 
     async def delete_bot(self, bot_id: str) -> bool:
         """Delete the bot record from Attendee."""

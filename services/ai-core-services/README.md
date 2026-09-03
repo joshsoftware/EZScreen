@@ -79,8 +79,12 @@ All endpoints are private inter-service APIs (`/internal/v1/*`) invoked internal
 | **Parsing** | `/internal/v1/parse/resume` | `POST` | Parses candidate resume binary $\rightarrow$ `parsed_resume` JSON. |
 | **Matching** | `/internal/v1/match/resume-jd` | `POST` | Calculates `resume_score` (0-100) & `matching_result` JSONB. |
 | **Question Gen** | `/internal/v1/screening/questions/generate` | `POST` | Auto-generates static `generated_questions` array. |
-| **Meeting Bot** | `/internal/v1/screening/bot/dispatch` | `POST` | Dispatches Attendee meeting bot to Google Meet URL. |
-| **Interview Analysis** | `/internal/v1/screening/analysis/evaluate` | `POST` | Evaluates call transcript via `gemma4:31b` $\rightarrow$ `interview_analysis`. |
+| **Meeting Bot** | `/screening/bot/dispatch` | `POST` | Dispatches Attendee meeting bot to Google Meet URL. |
+| **Meeting Bot** | `/screening/bot/{bot_id}` | `GET` | Fetch bot status. |
+| **Meeting Bot** | `/screening/bot/{bot_id}/leave` | `POST` | Instruct bot to leave the meeting. |
+| **Meeting Bot** | `/screening/bot/{bot_id}` | `DELETE` | Delete bot record (204 on success). |
+| **Live Screening** | `/screening/webhook` | `POST` | Attendee.dev lifecycle / participant webhooks. |
+| **Live Screening** | `/attendee-websocket/{session_id}` | `WS` | Dual-channel audio stream for STT/TTS interview. |
 
 ---
 

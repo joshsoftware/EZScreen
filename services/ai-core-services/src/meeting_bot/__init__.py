@@ -1,9 +1,7 @@
-from src.meeting_bot.attendee import attendee_client, AttendeeApiClient
-from src.meeting_bot.client import bot_client, AttendeeBotClient
+"""Meeting bot domain package.
 
-__all__ = [
-    "attendee_client",
-    "AttendeeApiClient",
-    "bot_client",
-    "AttendeeBotClient",
-]
+Import clients from `src.meeting_bot.client` / `src.meeting_bot.attendee`
+to avoid loading settings on schema-only imports.
+"""
+
+__all__: list[str] = []

@@ -106,6 +106,9 @@ services:
       - "5173:5173"
     env_file:
       - ./apps/frontend/.env
+    environment:
+      # Vite proxy runs inside this container — use Docker DNS, not localhost
+      DEV_API_PROXY_TARGET: http://core-api:8000
     depends_on:
       - core-api
       - ai-core-services

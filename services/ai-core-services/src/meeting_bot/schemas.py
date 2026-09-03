@@ -28,6 +28,13 @@ class AttendeeScheduleBotRequest(BaseModel):
 class LeaveBotResponse(BaseModel):
     bot_id: str
     status: str = "leaving"
+    error_message: Optional[str] = None
+
+
+class DeleteBotResponse(BaseModel):
+    bot_id: str
+    status: str = "deleted"
+    error_message: Optional[str] = None
 
 
 class AttendeeScheduleBotResponse(BaseModel):
@@ -62,16 +69,18 @@ class InterviewSessionDetailResponse(BaseModel):
 
 
 class DispatchBotResponse(BaseModel):
-    bot_id: str
+    bot_id: Optional[str] = None
     interview_session_id: str
     status: str = "scheduled"
-    meeting_url: str
+    meeting_url: Optional[str] = None
     scheduled_at: Optional[str] = None
-    dispatched_at: str
+    dispatched_at: Optional[str] = None
+    error_message: Optional[str] = None
 
 
 class BotStatusResponse(BaseModel):
-    bot_id: str
+    bot_id: Optional[str] = None
     status: str
-    meeting_url: str
+    meeting_url: Optional[str] = None
     duration_seconds: Optional[int] = None
+    error_message: Optional[str] = None
