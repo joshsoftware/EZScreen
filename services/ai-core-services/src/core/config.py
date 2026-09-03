@@ -55,9 +55,6 @@ class Settings(BaseSettings):
     core_api_base_url: str = "http://127.0.0.1:8000"
     internal_service_token: str | None = None
 
-    # Docling: disable OCR for text-based PDF resumes (much faster, lower RAM on CPU).
-    docling_do_ocr: bool = False
-
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),
         env_file_encoding="utf-8",
