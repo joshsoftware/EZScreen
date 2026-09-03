@@ -161,7 +161,7 @@ class InterviewOrchestrator:
 
     async def _handle_conversational(self, transcript: str, ai_response: str):
         """Handles CLARIFICATION and SMALL_TALK intents."""
-        if not ai_response.strip():
+        if not ai_response or not str(ai_response).strip():
             ai_response = "Okay, sounds good."
 
         if self.transcript_log:
