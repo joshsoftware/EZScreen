@@ -327,6 +327,9 @@ Return ONLY a JSON object in this format:
 ### Extraction Rules:
 - For `must_have` and `good_to_have` skills, if the JD explicitly states a number of years of experience required for that specific skill (e.g., "3 years of Java"), set `required_years` to that number.
 - If no specific years are mentioned for that individual skill, set `required_years` to `null`. Do not automatically assume the global `min_years` applies unless explicitly stated.
+- CRITICAL RULE FOR QUALIFICATIONS: Each qualification entry must be one complete, meaningful requirement as written in the JD. Do NOT split a single sentence at commas. For example, "Bachelor's degree in Computer Science, Information Technology, or related field" is ONE qualification entry, not two or three. Only create separate entries when the JD lists genuinely distinct qualifications (e.g., a degree AND a separate certification).
+- must_have_skills: if description has dedicated must have/required skills block then use that for extraction otherwise use this - Core technical/hard skills explicitly mentioned, including programming languages, frameworks, libraries, databases, cloud platforms, DevOps, infrastructure, APIs, testing, data technologies, and other technical tools.
+- good_to_have_skills: if description has dedicated good to have or nice to have skills blocks then use that for extraction otherwise use this - Supporting technologies, tools, methodologies, soft skills, leadership skills, and less-central technical skills explicitly mentioned.
 
 ### Job Description Text:
 __JD_TEXT__

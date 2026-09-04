@@ -57,14 +57,68 @@ def recalculate_experience(parsed_data: dict) -> None:
         parsed_data["experience"]["total_years"] = 0.0
         return
 
-    intervals.sort(key=lambda x: x[0])
-    merged = [intervals[0]]
-    for current in intervals[1:]:
+    # Create a deep copy for merging so we don't mutate the original intervals mapped to roles
+    sorted_intervals = sorted([[iv[0], iv[1]] for iv in intervals], key=lambda x: x[0])
+    merged = [sorted_intervals[0]]
+    for current in sorted_intervals[1:]:
         last = merged[-1]
         if current[0] <= last[1]:
             last[1] = max(last[1], current[1])
         else:
-            merged.append(current)
+            merged.append([current[0], current[1]])
 
     total_days = sum((iv[1] - iv[0]).days for iv in merged)
     parsed_data["experience"]["total_years"] = round(total_days / 365.25, 1)
+
+    # Now, recalculate skill_experience deterministically
+    skill_exp = parsed_data.get("skill_experience", [])
+    if not skill_exp:
+        return
+
+    for skill_obj in skill_exp:
+        skill_name = skill_obj.get("skill", "")
+        if not skill_name:
+            continue
+
+        skill_name_lower = skill_name.lower()
+        
+        # If the LLM already gave it 0.0, keep it 0.0 (e.g. only in technical skills section)
+        if skill_obj.get("years", 0.0) == 0.0:
+            continue
+
+        skill_intervals = []
+        for role, interval in zip(roles, intervals):
+            # Check if skill is mentioned in this role's highlights
+            highlights = " ".join(role.get("highlights", [])).lower()
+            if skill_name_lower in highlights:
+                # Add a copy of the interval to prevent mutation
+                skill_intervals.append([interval[0], interval[1]])
+
+        if not skill_intervals:
+            # If not found in any highlights, trust the LLM's explicit stated_years fallback
+            continue
+
+        # Merge overlapping intervals for this specific skill
+        skill_intervals.sort(key=lambda x: x[0])
+        merged_skill = [skill_intervals[0]]
+        for current in skill_intervals[1:]:
+            last = merged_skill[-1]
+            if current[0] <= last[1]:
+                last[1] = max(last[1], current[1])
+            else:
+                merged_skill.append([current[0], current[1]])
+
+        skill_days = sum((iv[1] - iv[0]).days for iv in merged_skill)
+        calculated_years = round(skill_days / 365.25, 1)
+        
+        original_years = skill_obj.get("years")
+        
+        # If the LLM's original output is very close (<= 1.0 years diff) to our strict math, 
+        # it means the LLM attempted the role-based calculation but made a mental math error. 
+        # We overwrite it to fix the math.
+        # If the difference is large (> 1.0 years), the LLM likely found an EXPLICIT mention 
+        # (e.g., "Java (10 years)") which overrides the role calculation. We preserve it!
+        if original_years is not None and abs(original_years - calculated_years) > 1.0:
+            continue
+            
+        skill_obj["years"] = calculated_years

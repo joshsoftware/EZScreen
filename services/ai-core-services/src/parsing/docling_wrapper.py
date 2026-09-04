@@ -35,18 +35,20 @@ class DoclingWrapper:
     def __init__(self):
         self.converter = _build_converter()
 
-    def extract_markdown(self, file_path: str) -> str:
+    def extract_markdown(self, file_path: str) -> tuple[str, int]:
         """
-        Parses a local document (e.g. PDF) and returns the extracted Markdown text.
+        Parses a local document (e.g. PDF) and returns the extracted Markdown text
+        along with the number of pages in the document.
         """
         logger.info(f"Docling extracting markdown from: {file_path}")
         result = self.converter.convert(file_path)
         markdown = result.document.export_to_markdown()
+        page_count = result.document.num_pages() if hasattr(result.document, 'num_pages') else 1
         logger.info(
             "Docling extraction complete",
-            extra={"file_path": file_path, "markdown_chars": len(markdown)},
+            extra={"file_path": file_path, "markdown_chars": len(markdown), "pages": page_count},
         )
-        return markdown
+        return markdown, page_count
 
 
 docling_wrapper = DoclingWrapper()

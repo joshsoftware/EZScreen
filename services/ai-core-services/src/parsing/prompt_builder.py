@@ -106,6 +106,7 @@ WORK EXPERIENCE:
 
 * Extract every distinct professional role separately.
 * CRITICAL RULE - INTERNSHIPS: If a role title or description contains the word "Intern" or "Internship", you MUST skip it entirely. DO NOT extract it. DO NOT add its duration to `total_years`. DO NOT add its duration to any skill. Treat the internship as if it does not exist.
+* CRITICAL RULE - TRAINEES: Roles containing the word "Trainee" (e.g., "Engineer Trainee") MUST BE EXTRACTED. They are valid professional experience. Do NOT skip them.
 * For every role, extract title, company, start_date, end_date, years, and highlights.
 * Extract dates only from information explicitly associated with that role.
 * If a date is unavailable, use null. Never infer a missing date from another role.
@@ -149,6 +150,7 @@ PERSONAL INFORMATION:
 * Extract first_name, last_name, phone_number, email, linkedin_url, github_url, and leetcode_url only when explicitly present.
 * Do not expand initials into full names.
 * Do not infer missing contact information.
+* CRITICAL: Phone numbers and emails may be split across multiple lines or contain spaces due to PDF parsing artifacts (e.g., in sidebars). You MUST actively reconstruct them by removing spaces and newlines (e.g., reconstruct "sourabhkumarsahu030\n496@gmail.com" to "sourabhkumarsahu030496@gmail.com", and "(+91) 913 125 8876" to "+919131258876").
 * Preserve explicitly provided contact information accurately.
 
 NAME PARSING:
