@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import re
 from datetime import datetime, timezone
 from html import unescape
@@ -33,6 +34,7 @@ __all__ = [
     "list_jobs",
     "get_job",
     "create_job",
+    "clone_job",
     "update_job",
     "regenerate_screening_questions",
     "save_screening_questions",
@@ -160,13 +162,24 @@ def _sync_skill_lists(
 ) -> list[dict]:
     result: list[dict] = []
     seen: set[str] = set()
+    new_by_key = {
+        _skill_name_key(item["skill"]): item
+        for item in new
+        if _skill_name_key(item["skill"])
+    }
     for item in current:
         key = _skill_name_key(item["skill"])
         if not key:
             continue
         if key in previous_parsed_keys and key not in new_parsed_keys:
             continue
-        result.append(item)
+        from_new = new_by_key.get(key)
+        if from_new is not None and from_new.get("required_years") is not None:
+            merged = dict(item)
+            merged["required_years"] = from_new["required_years"]
+            result.append(merged)
+        else:
+            result.append(item)
         seen.add(key)
     for item in new:
         key = _skill_name_key(item["skill"])
@@ -175,6 +188,23 @@ def _sync_skill_lists(
         result.append(item)
         seen.add(key)
     return result
+
+
+def _dedupe_prefer_must_have(must_have: list[dict], good_to_have: list[dict]) -> dict:
+    """Same skill must not appear in both buckets; must-have wins."""
+    must_keys = {
+        _skill_name_key(item["skill"])
+        for item in must_have
+        if _skill_name_key(item["skill"])
+    }
+    return {
+        "must_have": must_have,
+        "good_to_have": [
+            item
+            for item in good_to_have
+            if _skill_name_key(item["skill"]) not in must_keys
+        ],
+    }
 
 
 def _sync_skills_after_reparse(
@@ -187,20 +217,20 @@ def _sync_skills_after_reparse(
     new_parsed = _skills_from_parsed_jd(new_parsed_jd)
     prev_keys = _parsed_skill_keys(previous_parsed_jd)
     new_keys = _parsed_skill_keys(new_parsed_jd)
-    return {
-        "must_have": _sync_skill_lists(
+    return _dedupe_prefer_must_have(
+        _sync_skill_lists(
             _coerce_skill_items(base.get("must_have")),
             _coerce_skill_items(new_parsed.get("must_have")),
             previous_parsed_keys=prev_keys,
             new_parsed_keys=new_keys,
         ),
-        "good_to_have": _sync_skill_lists(
+        _sync_skill_lists(
             _coerce_skill_items(base.get("good_to_have")),
             _coerce_skill_items(new_parsed.get("good_to_have")),
             previous_parsed_keys=prev_keys,
             new_parsed_keys=new_keys,
         ),
-    }
+    )
 
 
 def _apply_skills(job: JobDescription, skills: JobSkills | dict | None) -> None:
@@ -253,6 +283,45 @@ def create_job(
     db.commit()
     db.refresh(job)
     return job
+
+
+def _clone_title(title: str | None) -> str:
+    base = (title or "").strip() or "Untitled job"
+    suffix = " (Copy)"
+    if base.endswith(suffix):
+        return base
+    return f"{base}{suffix}"
+
+
+def clone_job(
+    db: Session,
+    source: JobDescription,
+    *,
+    created_by: UUID,
+) -> JobDescription:
+    """Duplicate JD fields + skills as a new draft. Does not copy applicants or questions."""
+    _assert_org_active(db, source.organization_id)
+    cloned = JobDescription(
+        organization_id=source.organization_id,
+        created_by=created_by,
+        title=_clone_title(source.title),
+        description=source.description,
+        job_type=source.job_type,
+        work_type=source.work_type,
+        location=source.location,
+        experience_min=source.experience_min,
+        experience_max=source.experience_max,
+        skills=copy.deepcopy(source.skills) if source.skills is not None else None,
+        status=JobStatus.draft,
+        parsed_jd=copy.deepcopy(source.parsed_jd) if source.parsed_jd is not None else None,
+        screening_questions=None,
+        published_at=None,
+        closed_at=None,
+    )
+    db.add(cloned)
+    db.commit()
+    db.refresh(cloned)
+    return cloned
 
 
 def update_job(db: Session, job: JobDescription, data: JobUpdate) -> JobDescription:

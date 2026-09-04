@@ -4,6 +4,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Input, Select } from '../../components/ui/Input'
 import { EmptyState } from '../../components/ui/EmptyState'
+import { Spinner } from '../../components/ui/Spinner'
 import { TableSkeleton } from '../../components/ui/Skeleton'
 import { Alert } from '../../components/ui/Alert'
 import { useOrgSettings } from '../org-admin/OrgSettingsContext'
@@ -20,6 +21,27 @@ import {
 } from './applicationFields'
 import { formatDateTime } from './jobFields'
 
+const TABLE_HEADERS = ['Candidate', 'Score', 'Fit', 'YOE', 'Status', 'Created']
+
+function ApplicantsTableShell({ children }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-outline-variant/80 bg-surface-container-lowest/60">
+      <table className="w-full text-left">
+        <thead>
+          <tr className="bg-surface-container-low/60 border-b border-outline-variant/80">
+            {TABLE_HEADERS.map((label) => (
+              <th key={label} className="ez-table-head">
+                {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-outline-variant/70">{children}</tbody>
+      </table>
+    </div>
+  )
+}
+
 export function ApplicantsTable({
   jobId,
   applicants,
@@ -30,6 +52,7 @@ export function ApplicantsTable({
   fitFilter = 'all',
   onFitFilterChange,
   processing = false,
+  processingRemaining = 0,
 }) {
   const navigate = useNavigate()
   const { fitLabels } = useOrgSettings()
@@ -64,16 +87,39 @@ export function ApplicantsTable({
     return <TableSkeleton rows={5} cols={6} />
   }
 
+  const remainingLabel =
+    processingRemaining > 0
+      ? `${processingRemaining} resume${processingRemaining === 1 ? '' : 's'} remaining`
+      : 'Queued files are being parsed'
+
+  if (applicants.length === 0 && processing) {
+    return (
+      <ApplicantsTableShell>
+        <tr>
+          <td colSpan={TABLE_HEADERS.length} className="py-2xl px-md">
+            <div
+              className="flex flex-col items-center justify-center gap-sm text-center"
+              role="status"
+              aria-live="polite"
+            >
+              <Spinner className="h-8 w-8 text-primary" />
+              <p className="font-medium text-on-surface">Processing resumes</p>
+              <p className="text-body-sm text-on-surface-variant max-w-sm">
+                {remainingLabel}. New applicants will appear here as each file finishes.
+              </p>
+            </div>
+          </td>
+        </tr>
+      </ApplicantsTableShell>
+    )
+  }
+
   if (applicants.length === 0) {
     return (
       <EmptyState
         icon="person_search"
-        title={processing ? 'Processing resumes' : 'No applicants yet'}
-        description={
-          processing
-            ? 'Queued files are being parsed. New applicants will appear here as processing completes.'
-            : 'Upload resumes for this job to start screening candidates.'
-        }
+        title="No applicants yet"
+        description="Upload resumes for this job to start screening candidates."
       />
     )
   }
@@ -128,76 +174,79 @@ export function ApplicantsTable({
           description="Try another fit level, clear search, or refresh after processing completes."
         />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-outline-variant/80 bg-surface-container-lowest/60">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-surface-container-low/60 border-b border-outline-variant/80">
-                <th className="ez-table-head">Candidate</th>
-                <th className="ez-table-head">Score</th>
-                <th className="ez-table-head">Fit</th>
-                <th className="ez-table-head">YOE</th>
-                <th className="ez-table-head">Status</th>
-                <th className="ez-table-head">Created</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-outline-variant/70">
-              {filteredApplicants.map((applicant) => {
-                const score = applicantScore(applicant)
-                const name = candidateName(applicant)
-                const href = `/org-admin/jobs/${jobId}/applicants/${applicant.id}`
-                const initial = (name?.[0] || '?').toUpperCase()
+        <ApplicantsTableShell>
+          {processing ? (
+            <tr className="bg-primary-container/20">
+              <td colSpan={TABLE_HEADERS.length} className="py-md px-md">
+                <div
+                  className="flex items-center justify-center gap-sm text-body-sm text-on-surface"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Spinner className="h-5 w-5 text-primary" />
+                  <span>
+                    Processing resumes — {remainingLabel}. New applicants will appear as each
+                    file finishes.
+                  </span>
+                </div>
+              </td>
+            </tr>
+          ) : null}
+          {filteredApplicants.map((applicant) => {
+            const score = applicantScore(applicant)
+            const name = candidateName(applicant)
+            const href = `/org-admin/jobs/${jobId}/applicants/${applicant.id}`
+            const initial = (name?.[0] || '?').toUpperCase()
 
-                return (
-                  <tr
-                    key={applicant.id}
-                    role="link"
-                    tabIndex={0}
-                    onClick={() => navigate(href)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        navigate(href)
-                      }
-                    }}
-                    className={`ez-table-row cursor-pointer border-l-[3px] ${fitBorderClass(score, fitLabels)}`}
-                  >
-                    <td className="py-md px-md text-body-sm">
-                      <div className="flex items-center gap-sm">
-                        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-container text-label-md font-label-md text-on-primary-container">
-                          {initial}
-                        </span>
-                        <div className="min-w-0">
-                          <span className="font-medium text-on-surface">{name}</span>
-                          <p className="text-on-surface-variant truncate">
-                            {applicant.email || 'No email'}
-                            {applicant.phone ? ` · ${applicant.phone}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className={`py-md px-md text-body-sm font-medium ${scoreTextClass(score, fitLabels)}`}>
-                      {score == null ? '—' : score.toFixed(1)}
-                    </td>
-                    <td className="py-md px-md">
-                      <Badge tone={fitTone(score, fitLabels)}>
-                        {fitLabel(score, fitLabels)}
-                      </Badge>
-                    </td>
-                    <td className="py-md px-md text-body-sm text-on-surface-variant">
-                      {applicant.candidate_yoe == null ? '—' : applicant.candidate_yoe}
-                    </td>
-                    <td className="py-md px-md text-body-sm text-on-surface-variant">
-                      {formatApplicationStatus(applicant.status, applicant.source)}
-                    </td>
-                    <td className="py-md px-md text-body-sm text-on-surface-variant">
-                      {formatDateTime(applicant.created_at)}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+            return (
+              <tr
+                key={applicant.id}
+                role="link"
+                tabIndex={0}
+                onClick={() => navigate(href)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    navigate(href)
+                  }
+                }}
+                className={`ez-table-row cursor-pointer border-l-[3px] ${fitBorderClass(score, fitLabels)}`}
+              >
+                <td className="py-md px-md text-body-sm">
+                  <div className="flex items-center gap-sm">
+                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-container text-label-md font-label-md text-on-primary-container">
+                      {initial}
+                    </span>
+                    <div className="min-w-0">
+                      <span className="font-medium text-on-surface">{name}</span>
+                      <p className="text-on-surface-variant truncate">
+                        {applicant.email || 'No email'}
+                        {applicant.phone ? ` · ${applicant.phone}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+                <td className={`py-md px-md text-body-sm font-medium ${scoreTextClass(score, fitLabels)}`}>
+                  {score == null ? '—' : score.toFixed(1)}
+                </td>
+                <td className="py-md px-md">
+                  <Badge tone={fitTone(score, fitLabels)}>
+                    {fitLabel(score, fitLabels)}
+                  </Badge>
+                </td>
+                <td className="py-md px-md text-body-sm text-on-surface-variant">
+                  {applicant.candidate_yoe == null ? '—' : applicant.candidate_yoe}
+                </td>
+                <td className="py-md px-md text-body-sm text-on-surface-variant">
+                  {formatApplicationStatus(applicant.status, applicant.source)}
+                </td>
+                <td className="py-md px-md text-body-sm text-on-surface-variant">
+                  {formatDateTime(applicant.created_at)}
+                </td>
+              </tr>
+            )
+          })}
+        </ApplicantsTableShell>
       )}
     </div>
   )

@@ -119,6 +119,34 @@ def create_job(
     return JobResponse.model_validate(job)
 
 
+@router.post(
+    "/{job_id}/clone",
+    response_model=JobResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Clone a job as a new draft (same details, no applicants)",
+)
+def clone_job(
+    job_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+) -> JobResponse:
+    source = job_service.get_job(db, job_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, source)
+    try:
+        job = job_service.clone_job(db, source, created_by=current_user.id)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return JobResponse.model_validate(job)
+
+
 @router.get(
     "/{job_id}",
     response_model=JobResponse,

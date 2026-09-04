@@ -23,6 +23,12 @@ export function createJobRequest(body) {
   })
 }
 
+export function cloneJobRequest(jobId) {
+  return apiRequest(`/api/v1/jobs/${jobId}/clone`, {
+    method: 'POST',
+  })
+}
+
 export function updateJobRequest(jobId, body) {
   return apiRequest(`/api/v1/jobs/${jobId}`, {
     method: 'PUT',

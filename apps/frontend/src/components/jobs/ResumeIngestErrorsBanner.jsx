@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Alert } from '../ui/Alert'
+
+const DEFAULT_DISMISS_MS = 10000
 
 function formatIngestErrorSummary(errors) {
   if (!errors.length) return ''
@@ -9,8 +12,34 @@ function formatIngestErrorSummary(errors) {
   return errors.map((item) => `${item.file_name}: ${item.message}`).join(' · ')
 }
 
-export function ResumeIngestErrorsBanner({ errors = [] }) {
-  if (!errors.length) return null
+function errorsSignature(errors) {
+  return errors
+    .map((item) => `${item.file_name ?? ''}|${item.message ?? ''}|${item.created_at ?? ''}`)
+    .join(';')
+}
+
+export function ResumeIngestErrorsBanner({
+  errors = [],
+  dismissAfterMs = DEFAULT_DISMISS_MS,
+}) {
+  const signature = errorsSignature(errors)
+  const [dismissedSignature, setDismissedSignature] = useState(null)
+
+  useEffect(() => {
+    if (!errors.length) {
+      setDismissedSignature(null)
+      return undefined
+    }
+
+    setDismissedSignature(null)
+    const id = window.setTimeout(() => {
+      setDismissedSignature(signature)
+    }, dismissAfterMs)
+
+    return () => window.clearTimeout(id)
+  }, [signature, dismissAfterMs, errors.length])
+
+  if (!errors.length || dismissedSignature === signature) return null
 
   return (
     <Alert tone="warning">
