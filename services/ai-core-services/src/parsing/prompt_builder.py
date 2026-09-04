@@ -142,7 +142,7 @@ ROLE HIGHLIGHTS:
 * Do not copy technologies from another role into the current role.
 * Do not copy the entire global skills section into every role.
 * Do not infer technologies from the job title. For example, "DevOps Engineer" does not automatically mean AWS, Docker, Kubernetes, or Jenkins.
-* Keep highlights concise and information-dense.
+* Keep highlights concise, BUT you MUST ensure that EVERY technology, skill, and methodology (e.g., SDLC, Agile, Jira,any other language ,framework,softskill, and may more like these ) mentioned in the original role description is preserved in the highlights. Do not omit bullet points that contain skills.
 * If no role-specific details are available, return [].
 
 PERSONAL INFORMATION:
