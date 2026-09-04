@@ -81,7 +81,7 @@ class ResumeParser:
                 if isinstance(parsed_data, dict) and "parsed_resume" in parsed_data:
                     parsed_data = parsed_data["parsed_resume"]
 
-                recalculate_experience(parsed_data)
+                recalculate_experience(parsed_data, resume_text=markdown_text)
                 return parsed_data
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse LLM JSON output: {e}\nRaw Output: {response.response}")
