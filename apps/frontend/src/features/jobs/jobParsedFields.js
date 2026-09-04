@@ -87,13 +87,23 @@ function parsedSkillKeys(parsedJd) {
 function syncSkillList(currentList, newList, previousParsedKeys, newParsedKeys) {
   const result = []
   const seen = new Set()
+  const newByKey = new Map(
+    newList
+      .map((item) => [skillKey(item.skill), item])
+      .filter(([key]) => Boolean(key)),
+  )
 
   for (const item of currentList) {
     const key = skillKey(item.skill)
     if (!key) continue
     const wasFromParse = previousParsedKeys.has(key)
     if (wasFromParse && !newParsedKeys.has(key)) continue
-    result.push(item)
+    const fromNew = newByKey.get(key)
+    if (fromNew?.required_years != null) {
+      result.push({ ...item, required_years: fromNew.required_years })
+    } else {
+      result.push(item)
+    }
     seen.add(key)
   }
 
@@ -107,9 +117,21 @@ function syncSkillList(currentList, newList, previousParsedKeys, newParsedKeys) 
   return result
 }
 
+/** Same skill must not appear in both buckets; must-have wins. */
+function dedupePreferMustHave(mustHave, goodToHave) {
+  const mustKeys = new Set(
+    mustHave.map((item) => skillKey(item.skill)).filter(Boolean),
+  )
+  return {
+    must_have: mustHave,
+    good_to_have: goodToHave.filter((item) => !mustKeys.has(skillKey(item.skill))),
+  }
+}
+
 /**
  * After JD re-parse: drop parse-sourced skills no longer in the JD,
- * keep manually added skills, append newly parsed skills.
+ * keep manually added skills, append newly parsed skills,
+ * merge years from parse, and avoid duplicates across buckets.
  */
 export function syncSkillsAfterReparse(current, previousParsedJd, newParsedJd) {
   const currentNorm = normalizeJobSkills(current)
@@ -117,20 +139,20 @@ export function syncSkillsAfterReparse(current, previousParsedJd, newParsedJd) {
   const prevKeys = parsedSkillKeys(previousParsedJd)
   const newKeys = parsedSkillKeys(newParsedJd)
 
-  return {
-    must_have: syncSkillList(
+  return dedupePreferMustHave(
+    syncSkillList(
       currentNorm.must_have,
       newNorm.must_have,
       prevKeys,
       newKeys,
     ),
-    good_to_have: syncSkillList(
+    syncSkillList(
       currentNorm.good_to_have,
       newNorm.good_to_have,
       prevKeys,
       newKeys,
     ),
-  }
+  )
 }
 
 export function jdExperienceRange(parsedJd) {

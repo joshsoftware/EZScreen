@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { JobForm } from '../../features/jobs/JobForm'
 import { JobSkillsEditor } from '../../features/jobs/JobSkillsEditor'
-import { updateJobRequest, regenerateJobScreeningQuestionsRequest, updateJobScreeningQuestionsRequest, getResumeIngestErrorsRequest, getJobRequest } from '../../features/jobs/api'
+import {
+  updateJobRequest,
+  regenerateJobScreeningQuestionsRequest,
+  updateJobScreeningQuestionsRequest,
+  getResumeIngestErrorsRequest,
+  getJobRequest,
+} from '../../features/jobs/api'
 import {
   useJobApplicantsQuery,
   useJobQuery,
@@ -23,6 +29,7 @@ import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
   formatJobStatus,
   jobStatusTone,
+  jobToCloneFormValues,
   jobToFormValues,
 } from '../../features/jobs/jobFields'
 import { syncSkillsAfterReparse, skillsFromJob } from '../../features/jobs/jobParsedFields'
@@ -45,6 +52,7 @@ const POLL_TIMEOUT_MS = 120000
 
 export function OrgAdminJobDetailPage() {
   const { jobId = '' } = useParams()
+  const navigate = useNavigate()
   const { fitLabels } = useOrgSettings()
   const topLabelId = topFitLabelId(fitLabels)
   const { invalidateJob, invalidateJobApplicants } = useJobQueryClient()
@@ -291,6 +299,12 @@ export function OrgAdminJobDetailPage() {
     }
   }
 
+  function onCloneJob() {
+    navigate('/org-admin/jobs/new', {
+      state: { cloneInitialValues: jobToCloneFormValues(job) },
+    })
+  }
+
   async function onSaveQuestions(questions) {
     setSavingQuestions(true)
     try {
@@ -390,6 +404,9 @@ export function OrgAdminJobDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-sm">
             <Badge tone={jobStatusTone(job.status)}>{formatJobStatus(job.status)}</Badge>
+            <Button variant="secondary" icon="content_copy" onClick={onCloneJob}>
+              Clone
+            </Button>
             {canUploadResumes ? (
               <Button icon="upload_file" onClick={() => setShowUploadModal(true)}>
                 Upload resumes
@@ -421,13 +438,6 @@ export function OrgAdminJobDetailPage() {
           </div>
         }
       />
-
-      {isProcessingResumes ? (
-        <Alert tone="info">
-          Processing resumes — {processingRemaining} remaining. New applicants will appear as
-          each file finishes.
-        </Alert>
-      ) : null}
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-md">
         <StatCard
@@ -467,6 +477,7 @@ export function OrgAdminJobDetailPage() {
             fitFilter={fitFilter}
             onFitFilterChange={setFitFilter}
             processing={isProcessingResumes}
+            processingRemaining={processingRemaining}
             onRefresh={() => {
               void refetchApplicants()
             }}

@@ -121,6 +121,33 @@ function openPicker({ apiKey, accessToken }) {
       })
       .build()
 
+    // Sit above app modals (z-50) and stay viewport-centered.
+    // Default Picker CSS uses absolute top/left and often clips under the
+    // browser chrome when the page has a fixed overlay + body scroll lock.
+    const styleId = 'ezscreen-google-picker-z'
+    let style = document.getElementById(styleId)
+    if (!style) {
+      style = document.createElement('style')
+      style.id = styleId
+      document.head.appendChild(style)
+    }
+    style.textContent = `
+      .picker-dialog-bg {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 100000 !important;
+      }
+      .picker-dialog {
+        position: fixed !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        margin: 0 !important;
+        max-height: min(720px, calc(100vh - 48px)) !important;
+        z-index: 100001 !important;
+      }
+    `
+
     picker.setVisible(true)
   })
 }

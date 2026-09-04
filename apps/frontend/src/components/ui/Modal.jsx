@@ -1,54 +1,46 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '../../lib/cn'
 
 export function Modal({ open, onClose, title, children, className }) {
-  const dialogRef = useRef(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
-
   useEffect(() => {
-    const el = dialogRef.current
-    if (!el) return
-    if (open && !el.open) {
-      el.showModal()
-    } else if (!open && el.open) {
-      el.close()
+    if (!open) return undefined
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previous
     }
   }, [open])
 
   useEffect(() => {
-    const el = dialogRef.current
-    if (!el) return
-    function handleClose() {
-      onCloseRef.current?.()
+    if (!open) return undefined
+    function onKeyDown(event) {
+      if (event.key === 'Escape') onClose?.()
     }
-    el.addEventListener('close', handleClose)
-    return () => el.removeEventListener('close', handleClose)
-  }, [])
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, onClose])
 
-  function handleBackdropClick(event) {
-    if (event.target === dialogRef.current) {
-      onCloseRef.current?.()
-    }
-  }
+  if (!open || typeof document === 'undefined') return null
 
-  return (
-    <dialog
-      ref={dialogRef}
-      onClick={handleBackdropClick}
-      className={cn(
-        'fixed inset-0 z-50 m-0 h-full max-h-none w-full max-w-none border-0 bg-transparent p-0',
-        'open:flex open:items-center open:justify-center open:pb-[8vh]',
-        'backdrop:bg-on-surface/40 backdrop:backdrop-blur-sm',
-      )}
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/40 p-md pb-[8vh] backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose?.()
+      }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={typeof title === 'string' ? title : undefined}
         className={cn(
-          'flex max-h-[85vh] w-[calc(100%-2rem)] max-w-2xl flex-col overflow-hidden',
+          'flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden',
           'rounded-2xl border border-outline-variant/80 bg-surface-container-lowest shadow-lift',
           className,
         )}
-        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between px-lg pt-lg pb-sm">
           <h2 className="min-w-0 truncate font-headline-sm text-headline-sm text-on-surface tracking-tight">
@@ -56,7 +48,7 @@ export function Modal({ open, onClose, title, children, className }) {
           </h2>
           <button
             type="button"
-            onClick={() => onCloseRef.current?.()}
+            onClick={() => onClose?.()}
             className="shrink-0 rounded-lg p-xs text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-on-surface"
           >
             <span className="material-symbols-outlined text-[20px]">close</span>
@@ -64,6 +56,7 @@ export function Modal({ open, onClose, title, children, className }) {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-lg pb-lg">{children}</div>
       </div>
-    </dialog>
+    </div>,
+    document.body,
   )
 }

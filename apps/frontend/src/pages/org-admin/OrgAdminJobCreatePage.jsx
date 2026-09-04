@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { JobForm } from '../../features/jobs/JobForm'
 import { JobSkillsEditor } from '../../features/jobs/JobSkillsEditor'
 import { createJobRequest, getJobRequest, updateJobRequest } from '../../features/jobs/api'
 import { useJobQueryClient } from '../../features/jobs/useJobQueries'
-import { jobToFormValues } from '../../features/jobs/jobFields'
+import { EMPTY_JOB_FORM, jobToFormValues } from '../../features/jobs/jobFields'
 import { syncSkillsAfterReparse } from '../../features/jobs/jobParsedFields'
 import { ApiError } from '../../lib/api/client'
 import { PageHeader, Panel } from '../../components/ui/PageHeader'
@@ -20,12 +20,20 @@ function StepLabel({ n, label, active }) {
 
 export function OrgAdminJobCreatePage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { setJobData } = useJobQueryClient()
+  const cloneInitialValues = location.state?.cloneInitialValues
+  const isClone = Boolean(cloneInitialValues)
   const [step, setStep] = useState(1)
   const [submitting, setSubmitting] = useState(false)
   const [skillsError, setSkillsError] = useState(null)
   const [job, setJob] = useState(null)
   const [skills, setSkills] = useState({ must_have: [], good_to_have: [] })
+  const [detailsInitial] = useState(() =>
+    cloneInitialValues && typeof cloneInitialValues === 'object'
+      ? { ...EMPTY_JOB_FORM, ...cloneInitialValues, status: 'draft' }
+      : undefined,
+  )
 
   async function onDetailsSubmit(payload) {
     setSubmitting(true)
@@ -72,11 +80,25 @@ export function OrgAdminJobCreatePage() {
             <Link to="/org-admin/jobs" className="hover:underline">
               Jobs
             </Link>{' '}
-            / Create
+            / {isClone ? 'Clone' : 'Create'}
           </p>
         }
-        title="Create job"
-        description="Step 1 captures the opening. Step 2 lets you edit, add, or remove skills and set expected years."
+        title={isClone ? 'Clone job' : 'Create job'}
+        description={
+          isClone ? (
+            <>
+              Step 1 is prefilled from the source job.
+              <br />
+              Review details, then continue to skills.
+            </>
+          ) : (
+            <>
+              Step 1 captures the opening.
+              <br />
+              Step 2 lets you edit, add, or remove skills and set expected years.
+            </>
+          )
+        }
       />
       <p className="text-label-md mb-md">
         <StepLabel n="1." label="Details" active={step === 1} />
@@ -86,8 +108,10 @@ export function OrgAdminJobCreatePage() {
       <Panel>
         {step === 1 ? (
           <JobForm
-            key={job?.id ?? 'new'}
-            initialValues={job ? jobToFormValues(job) : undefined}
+            key={detailsInitial ? 'clone' : job?.id ?? 'new'}
+            initialValues={
+              job ? jobToFormValues(job) : detailsInitial ?? undefined
+            }
             onSubmit={onDetailsSubmit}
             submitting={submitting}
             submitLabel="Continue"

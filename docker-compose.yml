@@ -1,4 +1,9 @@
 services:
+  # Shared compose for local + staging.
+  # Host ports: POSTGRES_HOST_PORT (core-api .env), MINIO_*_HOST_PORT (ai-core .env).
+  # Compose substitutes from project-root `.env` OR:
+  #   docker compose --env-file apps/core-api/.env --env-file services/ai-core-services/.env up -d
+  # Staging MinIO public URL: MINIO_SERVER_URL in services/ai-core-services/.env
   db:
     image: postgres:15-alpine
     container_name: ezscreen-db
@@ -6,7 +11,7 @@ services:
     env_file:
       - ./apps/core-api/.env
     ports:
-      - "5434:5432"   # host 5434 avoids conflict with local PostgreSQL on 5432
+      - "${POSTGRES_HOST_PORT:-5434}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,8 +27,8 @@ services:
     env_file:
       - ./services/ai-core-services/.env
     ports:
-      - "9002:9000"      # API (host 9002 — avoids conflict if 9000 is taken)
-      - "9003:9001"      # Console
+      - "${MINIO_API_HOST_PORT:-9002}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-9003}:9001"
     environment:
       MINIO_API_CORS_ALLOW_ORIGIN: "*"
     volumes:

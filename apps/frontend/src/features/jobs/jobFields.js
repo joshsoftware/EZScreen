@@ -105,6 +105,18 @@ export function jobToFormValues(job) {
   }
 }
 
+/** Prefill Create Job step 1 from an existing job (always draft). */
+export function jobToCloneFormValues(job) {
+  const values = jobToFormValues(job)
+  const base = values.title.trim() || 'Untitled job'
+  const suffix = ' (Copy)'
+  return {
+    ...values,
+    title: base.endsWith(suffix) ? base : `${base}${suffix}`,
+    status: 'draft',
+  }
+}
+
 function emptyToNull(value) {
   const trimmed = typeof value === 'string' ? value.trim() : value
   return trimmed ? trimmed : null
