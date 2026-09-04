@@ -8,7 +8,12 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from src.api.deps import DbSession
 from src.models.enums import JobType, WorkType
-from src.schemas.public_job import PublicJobListItem, PublicJobResponse
+from src.schemas.public_job import (
+    PublicCandidateApplyRequest,
+    PublicCandidateApplyResponse,
+    PublicJobListItem,
+    PublicJobResponse,
+)
 from src.services import public_job_service
 
 router = APIRouter(prefix="/public/jobs", tags=["Public Candidate Portal"])
@@ -68,3 +73,39 @@ def get_public_job(
             detail="Job not found or no longer active",
         )
     return job
+
+
+@router.post(
+    "/{id}/apply",
+    response_model=PublicCandidateApplyResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Candidate submit job application",
+)
+def apply_public_job(
+    id: UUID,
+    body: PublicCandidateApplyRequest,
+    db: DbSession,
+) -> PublicCandidateApplyResponse:
+    try:
+        return public_job_service.submit_public_application(
+            db,
+            job_id=id,
+            data=body,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        msg = str(exc)
+        if "ALREADY_APPLIED" in msg or "already applied" in msg.lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="You have already applied for this position",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=msg,
+        ) from exc
+

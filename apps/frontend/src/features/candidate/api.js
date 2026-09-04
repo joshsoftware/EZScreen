@@ -17,3 +17,11 @@ export async function fetchPublicJobs({ orgSubdomain, search, jobType, workType,
 export async function fetchPublicJobDetail(jobId) {
   return apiRequest(`/api/v1/public/jobs/${jobId}`, { method: 'GET' })
 }
+
+export async function submitPublicJobApplication(jobId, payload) {
+  return apiRequest(`/api/v1/public/jobs/${jobId}/apply`, {
+    method: 'POST',
+    body: payload,
+  })
+}
+

@@ -2,19 +2,42 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from src.models.enums import JobStatus, JobType, WorkType
+from src.models.application import Application
+from src.models.enums import (
+    ApplicationSource,
+    ApplicationStatus,
+    JobStatus,
+    JobType,
+    TimelineActorType,
+    TimelineEventType,
+    UserRole,
+    UserStatus,
+    WorkType,
+)
 from src.models.job_description import JobDescription
 from src.models.organization import Organization
-from src.schemas.public_job import PublicJobListItem, PublicJobResponse
+from src.models.user import User
+from src.schemas.public_job import (
+    PublicCandidateApplyRequest,
+    PublicCandidateApplyResponse,
+    PublicJobListItem,
+    PublicJobResponse,
+)
+from src.services import storage_service
+from src.services.application_ingest_service import find_or_create_candidate
+from src.services.application_timeline_service import append_timeline_event
 
 __all__ = [
     "list_public_jobs",
     "get_public_job",
+    "submit_public_application",
     "extract_subdomain_from_host",
 ]
 
@@ -144,3 +167,72 @@ def get_public_job(
         created_at=job.created_at,
         published_at=job.published_at,
     )
+
+
+def submit_public_application(
+    db: Session,
+    *,
+    job_id: UUID,
+    data: PublicCandidateApplyRequest,
+) -> PublicCandidateApplyResponse:
+    job = db.get(JobDescription, job_id)
+    if job is None or job.status != JobStatus.published:
+        raise LookupError("Job not found or no longer accepting applications")
+
+    storage_service.validate_resume_s3_key(
+        data.s3_key,
+        organization_id=job.organization_id,
+        job_id=job.id,
+    )
+
+    personal = {
+        "first_name": data.first_name,
+        "last_name": data.last_name,
+        "phone": data.phone,
+        "email": data.email,
+    }
+    candidate = find_or_create_candidate(db, data.email, personal)
+
+    existing_app = db.scalar(
+        select(Application).where(
+            Application.job_description_id == job.id,
+            Application.candidate_id == candidate.id,
+        )
+    )
+    if existing_app is not None:
+        raise ValueError("ALREADY_APPLIED")
+
+    now = datetime.now(timezone.utc)
+    application = Application(
+        job_description_id=job.id,
+        candidate_id=candidate.id,
+        resume_url=data.s3_key,
+        status=ApplicationStatus.applied,
+        source=ApplicationSource.candidate,
+        applied_at=now,
+    )
+    db.add(application)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        raise ValueError("ALREADY_APPLIED") from exc
+
+    append_timeline_event(
+        db,
+        application=application,
+        event_type=TimelineEventType.applied,
+        actor_type=TimelineActorType.system,
+        to_status=ApplicationStatus.applied,
+    )
+    db.commit()
+    db.refresh(application)
+
+    return PublicCandidateApplyResponse(
+        id=application.id,
+        job_description_id=application.job_description_id,
+        candidate_id=application.candidate_id,
+        status=application.status.value,
+        applied_at=application.applied_at,
+        message="Application submitted successfully",
+    )
+

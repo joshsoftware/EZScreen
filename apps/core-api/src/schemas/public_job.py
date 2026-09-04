@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from src.models.enums import JobType, WorkType
 from src.schemas.job import JobSkills
@@ -48,3 +48,29 @@ class PublicJobResponse(BaseModel):
     skills: JobSkills | dict | str | None = None
     created_at: datetime | None = None
     published_at: datetime | None = None
+
+
+class PublicCandidateApplyRequest(BaseModel):
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    email: EmailStr
+    phone: str | None = Field(default=None, max_length=50)
+    s3_key: str = Field(min_length=1, max_length=1024)
+
+    @field_validator("first_name", "last_name", "email", "phone", "s3_key", mode="before")
+    @classmethod
+    def strip_strings(cls, value: object) -> object:
+        if isinstance(value, str):
+            text = value.strip()
+            return text or None
+        return value
+
+
+class PublicCandidateApplyResponse(BaseModel):
+    id: UUID
+    job_description_id: UUID
+    candidate_id: UUID
+    status: str
+    applied_at: datetime | None = None
+    message: str = "Application submitted successfully"
+

@@ -63,18 +63,16 @@ def _assert_job_access(user: User, job) -> None:
 @router.post(
     "/upload-urls",
     response_model=UploadUrlsResponse,
-    summary="Issue pre-signed S3 PUT URLs for HR bulk resume upload",
+    summary="Issue pre-signed S3 PUT URLs for resume uploads",
 )
 def create_upload_urls(
     job_id: UUID,
     body: UploadUrlsRequest,
     db: DbSession,
-    current_user: JobActor,
 ) -> UploadUrlsResponse:
     job = job_service.get_job(db, job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    _assert_job_access(current_user, job)
     try:
         application_service.assert_job_accepts_applications(job)
     except ValueError as exc:

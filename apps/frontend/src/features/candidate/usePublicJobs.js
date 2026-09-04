@@ -1,5 +1,10 @@
-import { useQuery } from '@tanstack/react-query'
-import { fetchPublicJobDetail, fetchPublicJobs } from './api'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import {
+  fetchPublicJobDetail,
+  fetchPublicJobs,
+  submitPublicJobApplication,
+} from './api'
+import { getResumeUploadUrlsRequest } from '../jobs/api'
 import { queryKeys } from '../../lib/queryKeys'
 
 export function usePublicJobsQuery(params = {}, options = {}) {
@@ -21,3 +26,18 @@ export function usePublicJobDetailQuery(jobId, options = {}) {
     ...options,
   })
 }
+
+export function usePublicUploadUrlsMutation(options = {}) {
+  return useMutation({
+    mutationFn: ({ jobId, files }) => getResumeUploadUrlsRequest(jobId, files),
+    ...options,
+  })
+}
+
+export function useSubmitCandidateApplicationMutation(options = {}) {
+  return useMutation({
+    mutationFn: ({ jobId, payload }) => submitPublicJobApplication(jobId, payload),
+    ...options,
+  })
+}
+
