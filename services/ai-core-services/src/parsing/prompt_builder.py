@@ -97,15 +97,16 @@ SKILL-SPECIFIC EXPERIENCE (skill_experience):
   - CRITICAL: If a candidate states a number of years in a professional summary paragraph (e.g., "7 years of success in DevOps..."), and then lists skills within that SAME summary paragraph (e.g., "... Skilled in Jenkins, Docker"), you MUST apply that exact number of years (e.g., 7.0) to ALL skills mentioned anywhere within that summary block, even if they are in separate sentences.
   - This provides the `stated_years`.
 * STEP 3 - Determine Final Skill Experience:
-  - If a skill has both `stated_years` and `calculated_role_years`, you MUST use the MAXIMUM of the two values. (e.g., if summary says 3 years, but roles add up to 4.5 years, use 4.5 years).
-  - If a skill only has one of the values, use that value.
+  - If a skill has an explicitly `stated_years`, you MUST use that exact value. You CANNOT use the `calculated_role_years` for that skill, even if the calculated years are higher.
+  - If a skill does NOT have an explicitly stated number of years, only then should you fall back to using the `calculated_role_years`.
 * Round the final skill experience to 1 decimal place.
-* If a skill appears ONLY in a "Technical Skills" section or summary but is NOT mentioned in any role highlight or project, assign it 0.0 years.
+* If a skill appears ONLY in a "Technical Skills" section or summary but is NOT mentioned in any role highlight or project, and has no explicit years stated, assign it 0.0 years.
 
 WORK EXPERIENCE:
 
 * Extract every distinct professional role separately.
 * CRITICAL RULE - INTERNSHIPS: If a role title or description contains the word "Intern" or "Internship", you MUST skip it entirely. DO NOT extract it. DO NOT add its duration to `total_years`. DO NOT add its duration to any skill. Treat the internship as if it does not exist.
+* CRITICAL RULE - TRAINEES: Roles containing the word "Trainee" (e.g., "Engineer Trainee") MUST BE EXTRACTED. They are valid professional experience. Do NOT skip them.
 * For every role, extract title, company, start_date, end_date, years, and highlights.
 * Extract dates only from information explicitly associated with that role.
 * If a date is unavailable, use null. Never infer a missing date from another role.
@@ -141,7 +142,7 @@ ROLE HIGHLIGHTS:
 * Do not copy technologies from another role into the current role.
 * Do not copy the entire global skills section into every role.
 * Do not infer technologies from the job title. For example, "DevOps Engineer" does not automatically mean AWS, Docker, Kubernetes, or Jenkins.
-* Keep highlights concise and information-dense.
+* Keep highlights concise, BUT you MUST ensure that EVERY technology, skill, and methodology (e.g., SDLC, Agile, Jira,any other language ,framework,softskill, and may more like these ) mentioned in the original role description is preserved in the highlights. Do not omit bullet points that contain skills.
 * If no role-specific details are available, return [].
 
 PERSONAL INFORMATION:
@@ -149,6 +150,7 @@ PERSONAL INFORMATION:
 * Extract first_name, last_name, phone_number, email, linkedin_url, github_url, and leetcode_url only when explicitly present.
 * Do not expand initials into full names.
 * Do not infer missing contact information.
+* CRITICAL: Phone numbers and emails may be split across multiple lines or contain spaces due to PDF parsing artifacts (e.g., in sidebars). You MUST actively reconstruct them by removing spaces and newlines (e.g., reconstruct "sourabhkumarsahu030\n496@gmail.com" to "sourabhkumarsahu030496@gmail.com", and "(+91) 913 125 8876" to "+919131258876").
 * Preserve explicitly provided contact information accurately.
 
 NAME PARSING:

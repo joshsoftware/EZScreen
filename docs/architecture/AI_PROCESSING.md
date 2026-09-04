@@ -156,10 +156,10 @@ SKILL-SPECIFIC EXPERIENCE (skill_experience):
   - CRITICAL: If a candidate states a number of years in a professional summary paragraph (e.g., "7 years of success in DevOps..."), and then lists skills within that SAME summary paragraph (e.g., "... Skilled in Jenkins, Docker"), you MUST apply that exact number of years (e.g., 7.0) to ALL skills mentioned anywhere within that summary block, even if they are in separate sentences.
   - This provides the `stated_years`.
 * STEP 3 - Determine Final Skill Experience:
-  - If a skill has both `stated_years` and `calculated_role_years`, you MUST use the MAXIMUM of the two values. (e.g., if summary says 3 years, but roles add up to 4.5 years, use 4.5 years).
-  - If a skill only has one of the values, use that value.
+  - If a skill has an explicitly `stated_years`, you MUST use that exact value. You CANNOT use the `calculated_role_years` for that skill, even if the calculated years are higher.
+  - If a skill does NOT have an explicitly stated number of years, only then should you fall back to using the `calculated_role_years`.
 * Round the final skill experience to 1 decimal place.
-* If a skill appears ONLY in a "Technical Skills" section or summary but is NOT mentioned in any role highlight or project, assign it 0.0 years.
+* If a skill appears ONLY in a "Technical Skills" section or summary but is NOT mentioned in any role highlight or project, and has no explicit years stated, assign it 0.0 years.
 
 WORK EXPERIENCE:
 
@@ -200,7 +200,7 @@ ROLE HIGHLIGHTS:
 * Do not copy technologies from another role into the current role.
 * Do not copy the entire global skills section into every role.
 * Do not infer technologies from the job title. For example, "DevOps Engineer" does not automatically mean AWS, Docker, Kubernetes, or Jenkins.
-* Keep highlights concise and information-dense.
+* Keep highlights concise, BUT you MUST ensure that EVERY technology, skill, and methodology (e.g., SDLC, Agile, Jira,any other language ,framework,softskill, and may more like these ) mentioned in the original role description is preserved in the highlights. Do not omit bullet points that contain skills.
 * If no role-specific details are available, return [].
 
 PERSONAL INFORMATION:
@@ -327,6 +327,9 @@ Return ONLY a JSON object in this format:
 ### Extraction Rules:
 - For `must_have` and `good_to_have` skills, if the JD explicitly states a number of years of experience required for that specific skill (e.g., "3 years of Java"), set `required_years` to that number.
 - If no specific years are mentioned for that individual skill, set `required_years` to `null`. Do not automatically assume the global `min_years` applies unless explicitly stated.
+- CRITICAL RULE FOR QUALIFICATIONS: Each qualification entry must be one complete, meaningful requirement as written in the JD. Do NOT split a single sentence at commas. For example, "Bachelor's degree in Computer Science, Information Technology, or related field" is ONE qualification entry, not two or three. Only create separate entries when the JD lists genuinely distinct qualifications (e.g., a degree AND a separate certification).
+- must_have_skills: if description has dedicated must have/required skills block then use that for extraction otherwise use this - Core technical/hard skills explicitly mentioned, including programming languages, frameworks, libraries, databases, cloud platforms, DevOps, infrastructure, APIs, testing, data technologies, and other technical tools.
+- good_to_have_skills: if description has dedicated good to have or nice to have skills blocks then use that for extraction otherwise use this - Supporting technologies, tools, methodologies, soft skills, leadership skills, and less-central technical skills explicitly mentioned.
 
 ### Job Description Text:
 __JD_TEXT__
