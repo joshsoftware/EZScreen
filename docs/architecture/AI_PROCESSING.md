@@ -156,10 +156,10 @@ SKILL-SPECIFIC EXPERIENCE (skill_experience):
   - CRITICAL: If a candidate states a number of years in a professional summary paragraph (e.g., "7 years of success in DevOps..."), and then lists skills within that SAME summary paragraph (e.g., "... Skilled in Jenkins, Docker"), you MUST apply that exact number of years (e.g., 7.0) to ALL skills mentioned anywhere within that summary block, even if they are in separate sentences.
   - This provides the `stated_years`.
 * STEP 3 - Determine Final Skill Experience:
-  - If a skill has both `stated_years` and `calculated_role_years`, you MUST use the MAXIMUM of the two values. (e.g., if summary says 3 years, but roles add up to 4.5 years, use 4.5 years).
-  - If a skill only has one of the values, use that value.
+  - If a skill has an explicitly `stated_years`, you MUST use that exact value. You CANNOT use the `calculated_role_years` for that skill, even if the calculated years are higher.
+  - If a skill does NOT have an explicitly stated number of years, only then should you fall back to using the `calculated_role_years`.
 * Round the final skill experience to 1 decimal place.
-* If a skill appears ONLY in a "Technical Skills" section or summary but is NOT mentioned in any role highlight or project, assign it 0.0 years.
+* If a skill appears ONLY in a "Technical Skills" section or summary but is NOT mentioned in any role highlight or project, and has no explicit years stated, assign it 0.0 years.
 
 WORK EXPERIENCE:
 
