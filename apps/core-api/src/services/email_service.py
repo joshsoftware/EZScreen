@@ -12,10 +12,30 @@ from src.config.settings import settings
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ApplicationConfirmationPayload",
+    "ApplicationConfirmationResult",
     "ScreeningInvitePayload",
     "ScreeningInviteResult",
+    "send_application_confirmation",
     "send_screening_invite",
 ]
+
+
+@dataclass(frozen=True)
+class ApplicationConfirmationPayload:
+    to_email: str
+    candidate_name: str
+    job_title: str
+    organization_name: str | None = None
+
+
+class ApplicationConfirmationResult(TypedDict, total=False):
+    sent: bool
+    mode: str
+    recipients: list[str]
+    subject: str
+    from_email: str
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -69,6 +89,85 @@ def _build_screening_invite_body(payload: ScreeningInvitePayload) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _build_application_confirmation_body(payload: ApplicationConfirmationPayload) -> str:
+    org_line = (
+        f" at {payload.organization_name}"
+        if payload.organization_name
+        else ""
+    )
+    lines = [
+        f"Hi {payload.candidate_name},",
+        "",
+        f"Thank you for applying for {payload.job_title}{org_line}.",
+        "",
+        "We have received your application and resume. Our team will review your "
+        "profile and get back to you with next steps.",
+        "",
+        "— EZScreen",
+    ]
+    return "\n".join(lines)
+
+
+def send_application_confirmation(
+    payload: ApplicationConfirmationPayload,
+) -> ApplicationConfirmationResult:
+
+    """
+    Send application submission confirmation email.
+
+    Dev default: log the message (EMAIL_MODE=console).
+    """
+    recipient = payload.to_email.strip().lower()
+    recipients = [recipient] if recipient else []
+    subject = f"Application received · {payload.job_title}"
+    body = _build_application_confirmation_body(payload)
+    mode = (getattr(settings, "email_mode", None) or "console").strip().lower()
+    from_email = (settings.email_from or "noreply@ezscreen.io").strip()
+
+
+    if not recipients:
+        logger.warning("Application confirmation skipped — no recipient email")
+        return {
+            "sent": False,
+            "mode": mode,
+            "recipients": [],
+            "subject": subject,
+            "from_email": from_email,
+            "reason": "no_recipients",
+        }
+
+    if mode != "console":
+        logger.warning(
+            "EMAIL_MODE=%s is not implemented yet; falling back to console",
+            mode,
+        )
+        mode = "console"
+    
+   
+
+    logger.info(
+        "Application confirmation email (%s)\nFrom: %s\nTo: %s\nSubject: %s\n%s",
+        mode,
+        from_email,
+        ", ".join(recipients),
+        subject,
+        body,
+    )
+    # TODO: Replace print with logger.info() once logging configuration is fixed.
+    print(
+    f"Application confirmation email send successfully "
+    f"for {', '.join(recipients)}"  
+    )
+
+    return {
+        "sent": True,
+        "mode": mode,
+        "recipients": recipients,
+        "subject": subject,
+        "from_email": from_email,
+    }
 
 
 def send_screening_invite(payload: ScreeningInvitePayload) -> ScreeningInviteResult:
