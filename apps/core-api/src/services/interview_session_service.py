@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -36,6 +36,7 @@ from src.services.email_service import (
     send_screening_invite,
 )
 from src.services.meet_link_service import ScreeningMeetResult, create_screening_meet
+from src.services.session_question_service import generate_candidate_screening_questions
 
 __all__ = [
     "schedule_interview_session",
@@ -326,8 +327,11 @@ def _persist_scheduled_session(
     actor_id: UUID,
     body: ScheduleInterviewSessionRequest,
     metadata: dict[str, Any],
+    session_id: UUID,
+    generated_questions: list[dict[str, Any]],
 ) -> InterviewSession:
     session = InterviewSession(
+        id=session_id,
         application_id=application.id,
         scheduled_by=actor_id,
         interview_type=InterviewType.screening_ai,
@@ -335,7 +339,7 @@ def _persist_scheduled_session(
         scheduled_at=body.scheduled_at,
         comment=body.comment,
         interview_metadata=metadata,
-        generated_questions=None,
+        generated_questions=generated_questions,
     )
     db.add(session)
     db.flush()
@@ -448,9 +452,19 @@ def schedule_interview_session(
     _assert_schedulable(db, application=application, scheduled_at=body.scheduled_at)
 
     job = application.job_description
-    job_title = job.title if job is not None else "Role"
+    if job is None:
+        raise ValueError("Job not found for application")
+    job_title = job.title or "Role"
     candidate_name = _candidate_label(application)
     attendees = _attendee_emails(application, list(body.additional_emails))
+
+    # Generate before Meet/invite so a failed LLM call does not leave calendar clutter.
+    session_id = uuid4()
+    generated_questions = generate_candidate_screening_questions(
+        interview_session_id=session_id,
+        job=job,
+        application=application,
+    )
 
     meet = _resolve_meet_from_schedule_body(
         body=body,
@@ -465,6 +479,8 @@ def schedule_interview_session(
         actor_id=actor_id,
         body=body,
         metadata=metadata,
+        session_id=session_id,
+        generated_questions=generated_questions,
     )
     _send_invite_and_timeline(
         db,

@@ -5,8 +5,6 @@ import { JobForm } from '../../features/jobs/JobForm'
 import { JobSkillsEditor } from '../../features/jobs/JobSkillsEditor'
 import {
   updateJobRequest,
-  regenerateJobScreeningQuestionsRequest,
-  updateJobScreeningQuestionsRequest,
   getResumeIngestErrorsRequest,
   getJobRequest,
 } from '../../features/jobs/api'
@@ -18,7 +16,6 @@ import {
 import { ApplicantsTable } from '../../features/jobs/ApplicantsTable'
 import { ResumeBulkUpload } from '../../features/jobs/ResumeBulkUpload'
 import { JobParsedDetailPanel } from '../../features/jobs/JobParsedDetailPanel'
-import { JobScreeningQuestionsPanel } from '../../features/jobs/JobScreeningQuestionsPanel'
 import {
   applicantScore,
   isPendingApplicant,
@@ -59,8 +56,6 @@ export function OrgAdminJobDetailPage() {
   const [submitting, setSubmitting] = useState(false)
   const [closing, setClosing] = useState(false)
   const [publishing, setPublishing] = useState(false)
-  const [regeneratingQuestions, setRegeneratingQuestions] = useState(false)
-  const [savingQuestions, setSavingQuestions] = useState(false)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const [showEditJob, setShowEditJob] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
@@ -280,15 +275,8 @@ export function OrgAdminJobDetailPage() {
     if (publishing) return
     setPublishing(true)
     try {
-      const updated = await updateJobRequest(jobId, { status: 'published' })
-      const questions = updated?.screening_questions
-      if (questions?.status === 'success' && questions.count > 0) {
-        toast.success(`Job published · ${questions.count} screening questions ready`)
-      } else if (questions?.status === 'error') {
-        toast.warning('Job published, but question generation failed. Use Regenerate to retry.')
-      } else {
-        toast.success('Job published')
-      }
+      await updateJobRequest(jobId, { status: 'published' })
+      toast.success('Job published')
       setShowEditJob(false)
       await invalidateJob(jobId)
       await refetchJob()
@@ -303,41 +291,6 @@ export function OrgAdminJobDetailPage() {
     navigate('/org-admin/jobs/new', {
       state: { cloneInitialValues: jobToCloneFormValues(job) },
     })
-  }
-
-  async function onSaveQuestions(questions) {
-    setSavingQuestions(true)
-    try {
-      await updateJobScreeningQuestionsRequest(jobId, questions)
-      toast.success('Screening questions saved')
-      await invalidateJob(jobId)
-      await refetchJob()
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to save questions')
-      throw err
-    } finally {
-      setSavingQuestions(false)
-    }
-  }
-
-  async function onRegenerateQuestions() {
-    if (regeneratingQuestions) return
-    setRegeneratingQuestions(true)
-    try {
-      const updated = await regenerateJobScreeningQuestionsRequest(jobId)
-      const questions = updated?.screening_questions
-      if (questions?.status === 'success' && questions.count > 0) {
-        toast.success(`Generated ${questions.count} screening questions`)
-      } else {
-        toast.error(questions?.error_message || 'Failed to generate questions')
-      }
-      await invalidateJob(jobId)
-      await refetchJob()
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to regenerate questions')
-    } finally {
-      setRegeneratingQuestions(false)
-    }
   }
 
   function handleQueued(queued) {
@@ -484,14 +437,6 @@ export function OrgAdminJobDetailPage() {
           />
         </div>
       </Panel>
-
-      <JobScreeningQuestionsPanel
-        job={job}
-        onRegenerate={job.status === 'published' ? onRegenerateQuestions : undefined}
-        regenerating={regeneratingQuestions}
-        onSave={job.status === 'published' ? onSaveQuestions : undefined}
-        saving={savingQuestions}
-      />
 
       <JobParsedDetailPanel job={job} loading={false} error={null} />
 

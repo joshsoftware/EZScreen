@@ -36,6 +36,7 @@ class QuestionGenerator:
             prompt = question_prompt_builder.build(
                 parsed_jd=request.parsed_jd,
                 match_result=match_result,
+                parsed_resume=request.parsed_resume,
             )
             questions = await self._call_llm(prompt, log_extra=log_extra)
             logger.info(

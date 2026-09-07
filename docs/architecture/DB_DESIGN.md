@@ -2,6 +2,8 @@
 
 > **Source of Truth**: This document is the authoritative reference for database schema, entities, relationships, constraints, indexes, JSONB schemas, and data lifecycle.
 >
+> **dbdiagram.io**: Paste [`dbdiagram.dbml`](./dbdiagram.dbml) into [dbdiagram.io](https://dbdiagram.io/d) for an ER diagram matching the current Alembic head.
+>
 > For architectural decisions explaining *why* the schema is designed this way, see [SYSTEM_DESIGN.md](SYSTEM_DESIGN.md) §4 Key Design Decisions.
 
 ---

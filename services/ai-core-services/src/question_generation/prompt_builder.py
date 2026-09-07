@@ -1,19 +1,55 @@
 import json
-from src.parsing.schemas import ParsedJDData
+from src.parsing.schemas import ParsedJDData, ParsedResumeData
 
 
 class QuestionPromptBuilder:
     """Builds the LLM prompt for generating tailored interview questions.
 
-    Injects parsed JD, parsed resume, skill-specific experience, and the full
-    match analysis JSON into the question generation prompt template defined
-    in AI_PROCESSING.md §5.2.
+    Injects parsed JD, optional parsed resume, and the full match analysis JSON.
     """
 
-    def build(self, parsed_jd: ParsedJDData, match_result: dict) -> str:
-        """Construct the question generation prompt with JD and match context injected."""
+    def _resume_section(self, parsed_resume: ParsedResumeData | None) -> str:
+        if parsed_resume is None:
+            return (
+                "═══ CANDIDATE RESUME ═══\n"
+                "No structured resume payload provided. Rely on the match analysis only.\n"
+            )
 
-        # Extract JD fields
+        experience = parsed_resume.experience
+        roles = [
+            {
+                "title": role.title,
+                "company": role.company,
+                "years": role.years,
+                "highlights": role.highlights[:3],
+            }
+            for role in (experience.roles or [])[:5]
+        ]
+        payload = {
+            "primary_skills": parsed_resume.primary_skills,
+            "secondary_skills": parsed_resume.secondary_skills,
+            "domain_expertise": parsed_resume.domain_expertise,
+            "total_years": experience.total_years,
+            "roles": roles,
+            "skill_experience": [
+                item.model_dump() for item in (parsed_resume.skill_experience or [])[:20]
+            ],
+        }
+        return (
+            "═══ CANDIDATE RESUME (structured) ═══\n"
+            f"{json.dumps(payload, indent=2)}\n\n"
+            "Use resume roles/highlights to personalize wording and pick concrete scenarios "
+            "when the match analysis says the candidate has the skill.\n"
+        )
+
+    def build(
+        self,
+        parsed_jd: ParsedJDData,
+        match_result: dict,
+        parsed_resume: ParsedResumeData | None = None,
+    ) -> str:
+        """Construct the question generation prompt with JD, resume, and match context."""
+
         title = parsed_jd.title or "Unknown Role"
         company = parsed_jd.company or "Unknown Company"
         experience_required = json.dumps(parsed_jd.experience_required.model_dump())
@@ -21,8 +57,8 @@ class QuestionPromptBuilder:
         good_to_have_skills = json.dumps([s.model_dump() for s in parsed_jd.skills.good_to_have])
         responsibilities = json.dumps(parsed_jd.responsibilities)
 
-        # Full match JSON
         match_json = json.dumps(match_result, indent=2)
+        resume_section = self._resume_section(parsed_resume)
 
         return f"""You are an expert technical AI preparing tailored interview questions for a candidate.
 
@@ -33,6 +69,7 @@ JD Must-Have Skills: {must_have_skills}
 JD Good-to-Have Skills: {good_to_have_skills}
 JD Responsibilities: {responsibilities}
 
+{resume_section}
 ═══ FULL MATCH ANALYSIS JSON — use this to decide question focus ═══
 {match_json}
 

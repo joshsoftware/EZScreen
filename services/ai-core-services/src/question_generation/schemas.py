@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from src.parsing.schemas import ParsedJDData
+from src.parsing.schemas import ParsedJDData, ParsedResumeData
 
 
 class GenerateQuestionsRequest(BaseModel):
@@ -11,7 +11,11 @@ class GenerateQuestionsRequest(BaseModel):
     parsed_jd: ParsedJDData = Field(..., description="Parsed JD JSON from Pipeline A")
     job_fit_analysis: Dict[str, Any] | None = Field(
         default=None,
-        description="Full match analysis JSON from matching; omitted for job-level banks",
+        description="Full match analysis JSON from matching; required for candidate sessions",
+    )
+    parsed_resume: ParsedResumeData | None = Field(
+        default=None,
+        description="Parsed resume JSON; used with job_fit for candidate-specific questions",
     )
 
 
