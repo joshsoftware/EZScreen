@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { usePublicJobDetailQuery } from '../../features/candidate/usePublicJobs'
+import { ORG_URL_SLUG } from '../../features/candidate/constants'
 import { CandidateApplyModal } from '../../features/candidate/components/CandidateApplyModal'
 import { CandidateJobHeader } from '../../features/candidate/components/CandidateJobHeader'
 import { CandidateJobSkills } from '../../features/candidate/components/CandidateJobSkills'
@@ -8,10 +9,11 @@ import { CandidateJobSummarySidebar } from '../../features/candidate/components/
 import { PageSkeleton } from '../../components/ui/Skeleton'
 
 export function CandidateJobDetailPage() {
-  const { jobId } = useParams()
+  const { org = ORG_URL_SLUG, jobId } = useParams()
   const [isApplyModalOpen, setIsApplyModalOpen] = useState(false)
+  const jobsPath = `/${org}/jobs`
 
-  const { data: job, isLoading, isError, error } = usePublicJobDetailQuery(jobId)
+  const { data: job, isLoading, isError, error } = usePublicJobDetailQuery(jobId, org)
 
   if (isLoading) {
     return (
@@ -30,7 +32,7 @@ export function CandidateJobDetailPage() {
             {error?.message || 'This job opening is no longer accepting applications.'}
           </p>
           <Link
-            to="/jobs"
+            to={jobsPath}
             className="mt-lg inline-flex items-center gap-xs rounded-xl bg-primary px-lg py-sm text-body-sm font-medium text-on-primary shadow-soft hover:bg-primary/90 transition-colors"
           >
             <span>Back to Open Roles</span>
@@ -44,7 +46,7 @@ export function CandidateJobDetailPage() {
     <div className="mx-auto max-w-6xl px-margin-mobile py-lg md:px-lg md:py-xl">
       {/* Back Navigation */}
       <Link
-        to="/jobs"
+        to={jobsPath}
         className="inline-flex items-center gap-xs text-body-sm font-medium text-on-surface-variant hover:text-primary transition-colors mb-md"
       >
         <span className="material-symbols-outlined text-[18px]">arrow_back</span>

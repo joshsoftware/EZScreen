@@ -1,22 +1,25 @@
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import { Link, Outlet, useLocation, useParams } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { LogoMark } from '../brand/LogoMark'
 import { PageTransition } from '../motion/Motion'
+import { ORG_URL_SLUG } from '../../features/candidate/constants'
 
 export function CandidateShell() {
   const location = useLocation()
+  const { org = ORG_URL_SLUG } = useParams()
+  const jobsPath = `/${org}/jobs`
 
   return (
     <div className="flex min-h-screen flex-col text-on-surface bg-surface">
       <header className="sticky top-0 z-30 shrink-0 border-b border-outline-variant/70 bg-surface-container-lowest/85 backdrop-blur-xl shadow-soft">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-margin-mobile md:px-lg">
-          <Link to="/jobs" className="flex items-center gap-sm transition-opacity hover:opacity-90">
+          <Link to={jobsPath} className="flex items-center gap-sm transition-opacity hover:opacity-90">
             <LogoMark subtitle="Career Portal" />
           </Link>
 
           <nav className="flex items-center gap-md">
             <Link
-              to="/jobs"
+              to={jobsPath}
               className="text-body-sm font-medium text-on-surface hover:text-primary transition-colors"
             >
               Open Roles

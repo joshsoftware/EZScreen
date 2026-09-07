@@ -18,10 +18,10 @@ export function usePublicJobsQuery(params = {}, options = {}) {
   })
 }
 
-export function usePublicJobDetailQuery(jobId, options = {}) {
+export function usePublicJobDetailQuery(jobId, orgName, options = {}) {
   return useQuery({
-    queryKey: queryKeys.publicJob(jobId),
-    queryFn: () => fetchPublicJobDetail(jobId),
+    queryKey: queryKeys.publicJob(jobId, orgName),
+    queryFn: () => fetchPublicJobDetail(jobId, orgName),
     enabled: Boolean(jobId),
     ...options,
   })
@@ -36,7 +36,8 @@ export function usePublicUploadUrlsMutation(options = {}) {
 
 export function useSubmitCandidateApplicationMutation(options = {}) {
   return useMutation({
-    mutationFn: ({ jobId, payload }) => submitPublicJobApplication(jobId, payload),
+    mutationFn: ({ jobId, payload, orgName }) =>
+      submitPublicJobApplication(jobId, payload, orgName),
     ...options,
   })
 }

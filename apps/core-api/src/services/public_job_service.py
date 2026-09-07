@@ -17,13 +17,10 @@ from src.models.enums import (
     JobType,
     TimelineActorType,
     TimelineEventType,
-    UserRole,
-    UserStatus,
     WorkType,
 )
 from src.models.job_description import JobDescription
 from src.models.organization import Organization
-from src.models.user import User
 from src.schemas.public_job import (
     PublicCandidateApplyRequest,
     PublicCandidateApplyResponse,
@@ -38,29 +35,23 @@ __all__ = [
     "list_public_jobs",
     "get_public_job",
     "submit_public_application",
-    "extract_subdomain_from_host",
 ]
 
-_RESERVED_SUBDOMAINS = {"www", "api", "app", "localhost", "admin", "dashboard", "127"}
+
+def _normalize_org_name(value: str) -> str:
+    """Normalize org slug or name for case-insensitive comparison (hyphens → spaces)."""
+    return " ".join(value.strip().lower().replace("-", " ").split())
 
 
-def extract_subdomain_from_host(host_header: str | None) -> str | None:
-    """Extract organization subdomain from HTTP Host or X-Forwarded-Host header."""
-    if not host_header:
-        return None
-    hostname = host_header.split(":")[0].strip().lower()
-    parts = hostname.split(".")
-    if len(parts) >= 2:
-        subdomain = parts[0]
-        if subdomain not in _RESERVED_SUBDOMAINS and not subdomain.isdigit():
-            return subdomain
-    return None
+def _org_name_filter(org_name: str):
+    normalized = _normalize_org_name(org_name)
+    return func.lower(Organization.name) == normalized
 
 
 def list_public_jobs(
     db: Session,
     *,
-    org_subdomain: str | None = None,
+    org_name: str,
     search: str | None = None,
     job_type: JobType | None = None,
     work_type: WorkType | None = None,
@@ -80,8 +71,7 @@ def list_public_jobs(
         )
     )
 
-    if org_subdomain:
-        stmt = stmt.where(func.lower(Organization.domain) == org_subdomain.strip().lower())
+    stmt = stmt.where(_org_name_filter(org_name))
 
     if search:
         pattern = f"%{search.strip()}%"
@@ -129,7 +119,7 @@ def get_public_job(
     db: Session,
     *,
     job_id: UUID,
-    org_subdomain: str | None = None,
+    org_name: str,
 ) -> PublicJobResponse | None:
     stmt = (
         select(JobDescription, Organization)
@@ -141,8 +131,7 @@ def get_public_job(
         )
     )
 
-    if org_subdomain:
-        stmt = stmt.where(func.lower(Organization.domain) == org_subdomain.strip().lower())
+    stmt = stmt.where(_org_name_filter(org_name))
 
     row = db.execute(stmt).first()
     if row is None:

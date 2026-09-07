@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
+import { ORG_URL_SLUG } from '../constants'
 
-export function JobCard({ job }) {
+export function JobCard({ job, org = ORG_URL_SLUG }) {
   const formatBadge = (str) =>
     str ? str.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase()) : ''
 
@@ -79,7 +80,7 @@ export function JobCard({ job }) {
             : 'Active role'}
         </span>
         <Link
-          to={`/jobs/${job.id}`}
+          to={`/${org}/jobs/${job.id}`}
           className="inline-flex items-center gap-xs text-body-sm font-medium text-primary group-hover:translate-x-1 transition-transform"
         >
           <span>View Role</span>

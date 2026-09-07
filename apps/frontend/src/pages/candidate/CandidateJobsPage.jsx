@@ -1,14 +1,15 @@
 import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { usePublicJobsQuery } from '../../features/candidate/usePublicJobs'
+import { ORG_URL_SLUG } from '../../features/candidate/constants'
 import { JobCard } from '../../features/candidate/components/JobCard'
 import { JobFilters } from '../../features/candidate/components/JobFilters'
 import { PageSkeleton } from '../../components/ui/Skeleton'
 
 export function CandidateJobsPage() {
+  const { org = ORG_URL_SLUG } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const orgSubdomain = searchParams.get('org_subdomain') || ''
   const search = searchParams.get('search') || ''
   const jobType = searchParams.get('job_type') || ''
   const workType = searchParams.get('work_type') || ''
@@ -16,7 +17,7 @@ export function CandidateJobsPage() {
   const [searchInput, setSearchInput] = useState(search)
 
   const { data: jobs = [], isLoading, isError, error } = usePublicJobsQuery({
-    orgSubdomain,
+    orgName: org,
     search,
     jobType,
     workType,
@@ -43,9 +44,9 @@ export function CandidateJobsPage() {
   }
 
   const firstOrg = jobs[0]
-  const orgName = firstOrg?.organization_name || (orgSubdomain ? orgSubdomain.toUpperCase() : null)
+  const orgName = firstOrg?.organization_name || org
   const orgLogo = firstOrg?.organization_logo_url
-  const hasActiveFilters = Boolean(search || jobType || workType || orgSubdomain)
+  const hasActiveFilters = Boolean(search || jobType || workType)
 
   return (
     <div className="mx-auto max-w-7xl px-margin-mobile py-lg md:px-lg md:py-xl">
@@ -118,7 +119,7 @@ export function CandidateJobsPage() {
       ) : (
         <div className="grid gap-md md:grid-cols-2 lg:grid-cols-3">
           {jobs.map((job) => (
-            <JobCard key={job.id} job={job} />
+            <JobCard key={job.id} job={job} org={org} />
           ))}
         </div>
       )}

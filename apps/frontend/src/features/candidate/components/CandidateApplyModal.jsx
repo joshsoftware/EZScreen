@@ -1,10 +1,13 @@
 import { useState } from 'react'
+import { useParams } from 'react-router-dom'
 import {
   usePublicUploadUrlsMutation,
   useSubmitCandidateApplicationMutation,
 } from '../usePublicJobs'
+import { ORG_URL_SLUG } from '../constants'
 
 export function CandidateApplyModal({ job, onClose }) {
+  const { org = ORG_URL_SLUG } = useParams()
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -126,6 +129,7 @@ export function CandidateApplyModal({ job, onClose }) {
       // 3. Register application
       const res = await submitApplicationMutation.mutateAsync({
         jobId: job.id,
+        orgName: org,
         payload: {
           first_name: formData.firstName.trim(),
           last_name: formData.lastName.trim(),
