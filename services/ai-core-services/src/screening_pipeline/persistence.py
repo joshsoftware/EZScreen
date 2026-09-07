@@ -17,11 +17,12 @@ async def persist_completed_question(
     transcript: str,
     primary_eval: dict,
     current_eval: dict,
+    question_number: int,
     follow_ups: Optional[list],
 ) -> Dict[str, Any]:
     """Save Q&A transcript + evaluation block; append evaluation to in-memory list."""
     qa_entry = AnswerEvaluator.build_qa_entry(
-        question_obj, current_q, transcript, follow_ups
+        question_obj, current_q, transcript, question_number, follow_ups
     )
     await api_client.save_transcript(qa_entry)
 
@@ -31,6 +32,7 @@ async def persist_completed_question(
         transcript,
         primary_eval,
         current_eval,
+        question_number,
         follow_ups,
     )
     analysis_evaluations.append(evaluation)

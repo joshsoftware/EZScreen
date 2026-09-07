@@ -161,11 +161,11 @@ class InterviewOrchestrator:
 
     async def _handle_conversational(self, transcript: str, ai_response: str):
         """Handles CLARIFICATION and SMALL_TALK intents."""
-        if not ai_response.strip():
+        if not ai_response or not str(ai_response).strip():
             ai_response = "Okay, sounds good."
 
         if self.transcript_log:
-            self.transcript_log[-1].setdefault("follow_ups", []).append(
+            self.transcript_log[-1].setdefault("conversational_turns", []).append(
                 {
                     "candidate_speech": transcript,
                     "ai_response": ai_response,
@@ -180,10 +180,10 @@ class InterviewOrchestrator:
         if self.transcript_log:
             self.transcript_log[-1]["candidate_answer"] = transcript
 
-        qa_entry = AnswerEvaluator.build_qa_entry(question_obj, current_q, transcript)
+        qa_entry = AnswerEvaluator.build_qa_entry(question_obj, current_q, transcript, self.current_question_idx + 1)
         await self.api_client.save_transcript(qa_entry)
 
-        skip_eval = AnswerEvaluator.build_skip_evaluation(question_obj, transcript)
+        skip_eval = AnswerEvaluator.build_skip_evaluation(question_obj, transcript, self.current_question_idx + 1)
         self.analysis_evaluations.append(skip_eval)
         await self.api_client.save_evaluation(skip_eval)
 
@@ -205,13 +205,25 @@ class InterviewOrchestrator:
         if self.transcript_log and self.transcript_log[-1].get("follow_ups"):
             follow_up_context = self.transcript_log[-1]["follow_ups"]
 
-        eval_data = await self.evaluator.evaluate_answer(
-            current_question=current_q,
-            transcript=transcript,
-            expected_keywords=expected_keywords,
-            answer_depth=answer_depth,
-            follow_up_context=follow_up_context,
+        filler = "Thank you for answering the question, we will now move onto a new question."
+        
+        # Start evaluation in the background so it runs concurrently with TTS
+        import asyncio
+        eval_task = asyncio.create_task(
+            self.evaluator.evaluate_answer(
+                current_question=current_q,
+                transcript=transcript,
+                expected_keywords=expected_keywords,
+                answer_depth=answer_depth,
+                follow_up_context=follow_up_context,
+            )
         )
+
+        # Speak the filler to avoid awkward silence
+        await self.speak(filler)
+
+        # Wait for the LLM evaluation to finish
+        eval_data = await eval_task
 
         decision = eval_data.get("decision", "NEXT_QUESTION")
         is_complete = decision == "NEXT_QUESTION"
@@ -268,6 +280,7 @@ class InterviewOrchestrator:
             transcript=transcript,
             primary_eval=primary_eval,
             current_eval=current_eval,
+            question_number=self.current_question_idx + 1,
             follow_ups=follow_ups,
         )
 

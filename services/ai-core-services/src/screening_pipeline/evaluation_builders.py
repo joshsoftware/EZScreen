@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 
-def build_skip_evaluation(question_obj: Dict, transcript: str) -> Dict[str, Any]:
+def build_skip_evaluation(question_obj: Dict, transcript: str, question_number: int) -> Dict[str, Any]:
     """Build a 0-score evaluation for skipped questions."""
     return {
-        "question_id": question_obj.get("id"),
+        "question_id": question_number,
         "question": question_obj.get("question", ""),
         "candidate_answer": transcript,
         "score": 0,
@@ -26,13 +26,14 @@ def build_evaluation_block(
     transcript: str,
     primary_eval: Optional[Dict],
     current_eval: Dict,
+    question_number: int,
     follow_ups: Optional[List[Dict]] = None,
 ) -> Dict[str, Any]:
     """Build the final evaluation block for analysis_result.evaluations[]."""
     source = primary_eval if primary_eval else current_eval
 
     evaluation = {
-        "question_id": question_obj.get("id"),
+        "question_id": question_number,
         "question": current_q,
         "candidate_answer": transcript,
         "score": source.get("score", 0),
@@ -67,11 +68,12 @@ def build_qa_entry(
     question_obj: Dict,
     current_q: str,
     transcript: str,
+    question_number: int,
     follow_ups: Optional[List[Dict]] = None,
 ) -> Dict[str, Any]:
     """Build the clean Q&A entry for question_answer column."""
     qa_entry = {
-        "question_id": question_obj.get("id"),
+        "question_id": question_number,
         "bot_speech": current_q,
         "candidate_answer": transcript,
     }
