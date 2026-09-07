@@ -48,8 +48,12 @@ class Settings(BaseSettings):
     kokoro_api_url: str | None = None
     kokoro_api_key: str | None = None
 
-    # Docling: disable OCR for text-based PDF resumes (much faster, lower RAM on CPU).
-    docling_do_ocr: bool = False
+    # Docling
+    docling_do_ocr: bool = True
+
+    # RapidOCR settings for PDF page rendering
+    ocr_scale: float = 3.0
+    ocr_max_pages: int = 20
 
     # core-api (screening persistence callbacks)
     core_api_base_url: str = "http://127.0.0.1:8000"

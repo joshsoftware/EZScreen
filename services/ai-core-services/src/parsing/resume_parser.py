@@ -10,6 +10,8 @@ from src.core.storage import storage_client
 from src.llm.client import OllamaClient
 from src.parsing.docling_wrapper import docling_wrapper
 from src.parsing.experience_calculator import recalculate_experience
+from src.parsing.ocr.pdf_ocr import extract_all_pages_ocr
+from src.parsing.pdf_merge import merge_pdf_extractions
 from src.parsing.prompt_builder import resume_prompt_builder
 
 # Restrict OCR to a single concurrent thread to prevent PyTorch OpenMP thread deadlocks,
@@ -27,7 +29,22 @@ class ResumeParser:
 
         try:
             async with ocr_semaphore:
-                markdown_text = await asyncio.to_thread(docling_wrapper.extract_markdown, tmp_path)
+                ext = os.path.splitext(tmp_path)[1].lower()
+                if ext != ".pdf":
+                    raise ValueError(f"Unsupported resume format: {ext or 'unknown'}. Only PDF resumes are supported.")
+
+                docling_md, page_count = await asyncio.to_thread(
+                    docling_wrapper.extract_markdown, tmp_path
+                )
+                ocr_pages = await asyncio.to_thread(extract_all_pages_ocr, tmp_path)
+                markdown_text = merge_pdf_extractions(docling_md, ocr_pages)
+                logger.info(
+                    "PDF hybrid extraction complete",
+                    extra={"page_count": page_count, "ocr_pages": len(ocr_pages)},
+                )
+
+                if not markdown_text.strip():
+                    raise ValueError("No text extracted from PDF resume")
 
             current_date = datetime.now().strftime("%Y-%m-%d")
             prompt = resume_prompt_builder.build(markdown_text, current_date)
@@ -42,7 +59,7 @@ class ResumeParser:
                 if isinstance(parsed_data, dict) and "parsed_resume" in parsed_data:
                     parsed_data = parsed_data["parsed_resume"]
 
-                recalculate_experience(parsed_data)
+                recalculate_experience(parsed_data, resume_text=markdown_text)
                 return parsed_data
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse LLM JSON output: {e}\nRaw Output: {response.response}")
