@@ -185,6 +185,14 @@ Before returning the JSON, verify that:
 * The output exactly matches the provided schema.
 * The output is valid JSON.
 
+INPUT TEXT FORMAT:
+
+* The RESUME TEXT below contains TWO separate extractions of the SAME resume: one from a text-layer parser ("=== DOCLING EXTRACTION ===") and one from an OCR engine run independently on every page ("=== RAPID OCR (ALL PAGES) ==="), included as a per-page fallback in case the text-layer parser missed something.
+* These two sections describe the same document and WILL overlap or repeat the same content — this is expected, not an error, and is not itself information to extract.
+* Treat both sections as one combined source of truth about the candidate. Cross-reference them to recover any detail present in only one section (e.g. text missed by the text-layer parser but captured by OCR, or vice versa).
+* Do NOT extract or output the same skill, role, or detail twice because it appears in both sections — reconcile overlapping/duplicate mentions into a single entry per the schema's deduplication rules above.
+* If the two sections disagree on a specific detail (e.g. slightly different spelling of a date or name due to OCR error), prefer the clearer/more complete version and use your judgment; do not output both conflicting values.
+
 SCHEMA:
 __RESUME_SCHEMA__
 
