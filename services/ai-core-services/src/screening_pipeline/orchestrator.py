@@ -31,6 +31,18 @@ if TYPE_CHECKING:
     from src.screening_pipeline.stt_client import WhisperCloudSTTClient
 
 
+def _coerce_questions_list(raw: Any) -> list[dict]:
+    """Normalize session.generated_questions to a list of question dicts."""
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, dict):
+        nested = raw.get("questions")
+        items = nested if isinstance(nested, list) else []
+    else:
+        items = []
+    return [item for item in items if isinstance(item, dict) and item.get("question")]
+
+
 class InterviewOrchestrator:
     """
     Manages the state machine for the AI interview.
@@ -94,7 +106,7 @@ class InterviewOrchestrator:
         if self.api_client is None:
             self.api_client = SessionApiClient(session_id=str(self.session.id))
 
-        self.questions = self.session.generated_questions or []
+        self.questions = _coerce_questions_list(self.session.generated_questions)
         random.shuffle(self.questions)
         self.is_active = True
 

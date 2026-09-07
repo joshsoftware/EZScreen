@@ -11,8 +11,8 @@ async def generate_questions_endpoint(request: GenerateQuestionsRequest):
     """
     Generates tailored interview screening questions.
 
-    For candidate sessions, Core API sends parsed_jd and job_fit_analysis.
-    For job publish banks, send parsed_jd only (job id as interview_session_id).
+    Candidate sessions: Core API sends parsed_jd, job_fit_analysis, and optional parsed_resume.
+    Job-level banks (legacy): send parsed_jd only (job id as interview_session_id).
     """
     logger.info(
         f"Received question generation request for session: {request.interview_session_id}"

@@ -248,11 +248,9 @@ def _maybe_generate_screening_questions(
     previous_status: JobStatus,
     new_status: JobStatus | None,
 ) -> None:
-    if new_status != JobStatus.published:
-        return
-    if previous_status == JobStatus.published:
-        return
-    job.screening_questions = job_question_service.generate_job_screening_questions(job)
+    """No-op: screening questions are generated per candidate at schedule time."""
+    _ = (job, previous_status, new_status)
+    return
 
 
 def create_job(

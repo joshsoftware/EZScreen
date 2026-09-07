@@ -134,7 +134,11 @@ export function ScheduleScreeningModal({
       toast.success(
         isReschedule
           ? 'Screening rescheduled · updated invite sent'
-          : 'Screening scheduled · invite sent',
+          : `Screening scheduled · ${
+              Array.isArray(session?.generated_questions)
+                ? `${session.generated_questions.length} tailored questions · `
+                : ''
+            }invite sent`,
       )
       onClose?.()
       await onScheduled?.(session)
@@ -167,6 +171,13 @@ export function ScheduleScreeningModal({
         ) : null}
         . A Google Meet link and calendar invite are{' '}
         {isReschedule ? 'updated' : 'created'} automatically.
+        {!isReschedule ? (
+          <>
+            {' '}
+            Screening questions are generated from the job description and this
+            candidate&apos;s resume before the invite is sent.
+          </>
+        ) : null}
         {candidateEmail ? (
           <>
             {' '}
@@ -224,7 +235,13 @@ export function ScheduleScreeningModal({
           loading={submitting}
           onClick={() => void onSubmit()}
         >
-          {isReschedule ? 'Reschedule screening' : 'Schedule screening'}
+          {submitting
+            ? isReschedule
+              ? 'Rescheduling…'
+              : 'Generating questions…'
+            : isReschedule
+              ? 'Reschedule screening'
+              : 'Schedule screening'}
         </Button>
       </div>
     </Modal>

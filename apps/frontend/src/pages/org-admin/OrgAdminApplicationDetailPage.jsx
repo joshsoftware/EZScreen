@@ -8,10 +8,12 @@ import {
 import {
   useApplicationQuery,
   useApplicationTimelineQuery,
+  useInterviewSessionQuery,
   useJobQuery,
   useJobQueryClient,
 } from '../../features/jobs/useJobQueries'
 import { ApplicationDetailPanel } from '../../features/jobs/ApplicationDetailPanel'
+import { CandidateScreeningQuestionsPanel } from '../../features/jobs/CandidateScreeningQuestionsPanel'
 import { ResumePreviewButton } from '../../features/jobs/ResumeActions'
 import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
@@ -45,7 +47,7 @@ const ScheduleScreeningModal = lazy(() =>
 export function OrgAdminApplicationDetailPage() {
   const { jobId = '', applicationId = '' } = useParams()
   const { fitLabels } = useOrgSettings()
-  const { invalidateApplication, invalidateApplicationTimeline, invalidateJobApplicants } =
+  const { invalidateApplication, invalidateApplicationTimeline, invalidateInterviewSession, invalidateJobApplicants } =
     useJobQueryClient()
   const [rerunning, setRerunning] = useState(false)
   const [rejecting, setRejecting] = useState(false)
@@ -107,16 +109,25 @@ export function OrgAdminApplicationDetailPage() {
     Boolean(detail) && !mismatch && canRescheduleScreening(detail, timeline)
   const screeningSlot = screeningSlotFromTimeline(timeline, detail?.email)
   const showReject = Boolean(detail) && !mismatch && canRejectApplication(detail, timeline)
+  const sessionId = screeningSlot?.sessionId ?? null
+
+  const {
+    data: interviewSession,
+    isLoading: sessionLoading,
+    error: sessionError,
+  } = useInterviewSessionQuery(sessionId)
 
   async function reload() {
     await Promise.all([refetchDetail(), refetchTimeline()])
   }
 
-  async function refreshAfterAction() {
+  async function refreshAfterAction(session) {
+    const nextSessionId = session?.id || sessionId
     await Promise.all([
       invalidateApplication(applicationId),
       invalidateApplicationTimeline(applicationId),
       invalidateJobApplicants(jobId),
+      nextSessionId ? invalidateInterviewSession(nextSessionId) : Promise.resolve(),
     ])
     await reload()
   }
@@ -303,6 +314,19 @@ export function OrgAdminApplicationDetailPage() {
           onClick: () => setShowReschedule(true),
         }}
         onRerunComplete={reload}
+      />
+
+      <CandidateScreeningQuestionsPanel
+        scheduled={Boolean(sessionId)}
+        questions={interviewSession?.generated_questions}
+        loading={Boolean(sessionId) && sessionLoading}
+        error={
+          sessionError
+            ? sessionError instanceof ApiError
+              ? sessionError.message
+              : 'Failed to load screening questions'
+            : null
+        }
       />
 
       {showSchedule || showReschedule ? (
