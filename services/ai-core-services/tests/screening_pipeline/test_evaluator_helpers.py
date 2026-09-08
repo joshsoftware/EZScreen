@@ -4,6 +4,7 @@ from src.screening_pipeline.evaluation_builders import (
     build_skip_evaluation,
 )
 from src.screening_pipeline.prompt_builder import screening_prompt_builder
+from src.screening_pipeline.prompts import ANSWER_EVALUATION_SYSTEM
 from src.screening_pipeline.speech_filter import is_probable_hallucination
 
 
@@ -13,7 +14,7 @@ def test_build_skip_evaluation():
         "question": "What is Docker?",
         "expected_keywords": ["container", "image"],
     }
-    result = build_skip_evaluation(question, "I don't know")
+    result = build_skip_evaluation(question, "I don't know", question_number=1)
 
     assert result["score"] == 0
     assert result["question_id"] == 1
@@ -27,7 +28,11 @@ def test_build_qa_entry_with_follow_ups():
         {"ai_response": "Can you elaborate?", "candidate_speech": "Containers isolate apps"}
     ]
     result = build_qa_entry(
-        question, "What is Docker?", "It runs containers", follow_ups
+        question,
+        "What is Docker?",
+        "It runs containers",
+        question_number=2,
+        follow_ups=follow_ups,
     )
 
     assert result["bot_speech"] == "What is Docker?"
@@ -59,7 +64,13 @@ def test_build_evaluation_block_uses_primary_eval_when_present():
     ]
 
     result = build_evaluation_block(
-        question, "What is Docker?", "Images and containers", primary, current, follow_ups
+        question,
+        "What is Docker?",
+        "Images and containers",
+        primary,
+        current,
+        question_number=3,
+        follow_ups=follow_ups,
     )
 
     assert result["score"] == 4
@@ -84,6 +95,18 @@ def test_build_evaluation_prompt_marks_follow_up():
     )
     assert "FOLLOW-UP evaluation" in prompt
     assert "partial_depth" in prompt
+
+
+def test_evaluation_system_uses_equal_keyword_and_quality_weights():
+    assert "MANDATORY 50/50 SPLIT" in ANSWER_EVALUATION_SYSTEM
+    assert "Each component contributes exactly 50%" in ANSWER_EVALUATION_SYSTEM
+    assert "round((keyword_match_score + answer_quality_score) / 2)" in ANSWER_EVALUATION_SYSTEM
+    assert "Strictness changes only the ANSWER QUALITY SCORE" in ANSWER_EVALUATION_SYSTEM
+    assert '"keyword_match_score"' in ANSWER_EVALUATION_SYSTEM
+    assert '"answer_quality_score"' in ANSWER_EVALUATION_SYSTEM
+    assert '"aware": Score 10 when the answer shows initial/basic' in ANSWER_EVALUATION_SYSTEM
+    assert '"partial_depth": Score 6-7 when the answer shows initial/basic' in ANSWER_EVALUATION_SYSTEM
+    assert '"full_depth": Score 3-4 when the answer shows only initial/basic' in ANSWER_EVALUATION_SYSTEM
 
 
 def test_is_probable_hallucination_filters_noise():

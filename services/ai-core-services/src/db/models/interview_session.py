@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -5,6 +6,27 @@ from sqlalchemy import String, DateTime, Index, text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.db.base import Base
+from src.core.logger import logger
+
+
+def _normalize_interview_metadata(value: Any) -> Optional[Dict[str, Any]]:
+    """Support legacy JSONB values that were saved as JSON-encoded strings."""
+    if value is None or isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            logger.warning("Ignoring malformed interview metadata JSON")
+            return None
+        if isinstance(parsed, dict):
+            return parsed
+
+    logger.warning(
+        "Ignoring interview metadata with unsupported type",
+        extra={"metadata_type": type(value).__name__},
+    )
+    return None
 
 
 class DBInterviewSession(Base):
@@ -95,6 +117,6 @@ class DBInterviewSession(Base):
             status=self.status,
             scheduled_at=self.scheduled_at.isoformat() if self.scheduled_at else None,
             generated_questions=self.generated_questions,
-            interview_metadata=self.interview_metadata,
+            interview_metadata=_normalize_interview_metadata(self.interview_metadata),
             created_at=self.created_at.isoformat() if self.created_at else None,
         )

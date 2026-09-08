@@ -19,8 +19,8 @@ async def persist_completed_question(
     current_eval: dict,
     question_number: int,
     follow_ups: Optional[list],
-) -> Dict[str, Any]:
-    """Save Q&A transcript + evaluation block; append evaluation to in-memory list."""
+) -> Optional[Dict[str, Any]]:
+    """Save Q&A and evaluation; retain only evaluations saved by Core API."""
     qa_entry = AnswerEvaluator.build_qa_entry(
         question_obj, current_q, transcript, question_number, follow_ups
     )
@@ -35,9 +35,10 @@ async def persist_completed_question(
         question_number,
         follow_ups,
     )
-    analysis_evaluations.append(evaluation)
-    await api_client.save_evaluation(evaluation)
-    return evaluation
+    if await api_client.save_evaluation(evaluation):
+        analysis_evaluations.append(evaluation)
+        return evaluation
+    return None
 
 
 async def persist_interview_close(

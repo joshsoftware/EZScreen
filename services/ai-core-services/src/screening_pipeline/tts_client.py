@@ -72,12 +72,13 @@ class LocalKokoroTTSClient:
             audio_int16 = (samples * 32767).astype(np.int16)
             pcm_bytes = audio_int16.tobytes()
             
-            # Yield in 2400-byte chunks
+            # Yield 2,400-byte frames: 50 ms at 24 kHz, mono, 16-bit PCM.
+            # Pace them at their playback duration so callers enter listening
+            # mode only after the candidate has heard the complete prompt.
             chunk_size = 2400
             for i in range(0, len(pcm_bytes), chunk_size):
                 yield pcm_bytes[i:i+chunk_size]
-                # Small sleep to yield control to the event loop
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.05)
                 
         except Exception as e:
             logger.error(f"Local Kokoro TTS synthesis failed: {e}")

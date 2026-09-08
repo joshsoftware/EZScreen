@@ -9,6 +9,25 @@ router = APIRouter(tags=["Attendee WebSocket"])
 active_sessions: Dict[str, Any] = {}
 seen_triggers = set()
 
+
+def _should_forward_candidate_audio(
+    trigger: str | None,
+    interaction_state: str,
+    has_user_audio_stream: bool,
+) -> bool:
+    """Select user audio, with mixed audio as Attendee-version fallback."""
+    if trigger == "realtime_audio.user":
+        return True
+    # Some Attendee sessions provide only realtime_audio.mixed.  Accept it
+    # only after the bot has finished speaking, so its own TTS is not sent to
+    # STT/VAD. Once a user stream is observed it is always preferred.
+    return (
+        trigger == "realtime_audio.mixed"
+        and not has_user_audio_stream
+        and interaction_state in {"listening", "closing"}
+    )
+
+
 async def speak_to_attendee(websocket: WebSocket, pcm_bytes: bytes):
     """Utility to chunk and send PCM audio to Attendee."""
     # Chunk PCM bytes into 2400-byte frames (50ms at 24kHz)
@@ -42,6 +61,7 @@ async def attendee_audio_ws(websocket: WebSocket, session_id: str):
     asyncio.create_task(orchestrator.start())
     
     messages_received = 0
+    has_user_audio_stream = False
     try:
         while True:
             raw_ws_message = await websocket.receive()
@@ -90,8 +110,14 @@ async def attendee_audio_ws(websocket: WebSocket, session_id: str):
                 seen_triggers.add(trigger)
                 logger.info(f"WebSocket received new trigger: {trigger}", extra={"data_keys": list(data.keys())})
             
-            if trigger in ["realtime_audio.mixed", "realtime_audio.user"]:
-                # Inbound audio from candidate
+            if trigger == "realtime_audio.user":
+                has_user_audio_stream = True
+
+            if _should_forward_candidate_audio(
+                trigger,
+                orchestrator.current_interaction_state,
+                has_user_audio_stream,
+            ):
                 chunk_b64 = data.get("chunk")
                 sample_rate = data.get("sample_rate", 24000)
                 if chunk_b64 and session_id in active_sessions:

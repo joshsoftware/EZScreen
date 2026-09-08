@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.core.config import settings
 from src.core.logger import logger
 from src.llm.client import OllamaClient
+from src.meeting_bot.client import bot_client
 from src.meeting_bot.repository import interview_session_repo
 from src.screening_pipeline.evaluator import AnswerEvaluator
 from src.screening_pipeline.persistence import (
@@ -19,9 +20,12 @@ from src.screening_pipeline.persistence import (
     persist_interview_close,
 )
 from src.screening_pipeline.prompts import (
+    CLOSING_REPLY_TIMEOUT_SECONDS,
     CLOSING_TEXT,
     GREETING_TEXT,
     MAX_FOLLOW_UPS_PER_QUESTION,
+    SILENCE_PROMPT_SECONDS,
+    SILENCE_PROMPT_TEXT,
 )
 from src.screening_pipeline.session_api import SessionApiClient
 from src.screening_pipeline.speech_filter import is_probable_hallucination
@@ -86,6 +90,11 @@ class InterviewOrchestrator:
         self.current_interaction_state = "idle"  # idle, speaking, listening, evaluating
         self.transcript_log: list = []
         self.analysis_evaluations: list = []
+        self._silence_prompt_task: Optional[asyncio.Task] = None
+        self._closing_reply_timeout_task: Optional[asyncio.Task] = None
+        self._awaiting_silence_reply = False
+
+        self.stt_client.on_speech_start = self.handle_candidate_activity
 
     # ──────────────────────────── LIFECYCLE ────────────────────────────
 
@@ -120,35 +129,125 @@ class InterviewOrchestrator:
             }
         )
         await self.speak(GREETING_TEXT)
-        self.current_interaction_state = "listening"
+        self._begin_listening()
 
     async def cleanup(self):
         """Teardown connections."""
         self.is_active = False
+        self._cancel_silence_prompt()
+        self._cancel_closing_reply_timeout()
         await self.stt_client.close()
 
     # ──────────────────────────── STT CALLBACK ────────────────────────────
 
     def handle_candidate_speech(self, transcript: str):
         """Callback from STT when the candidate finishes speaking."""
-        if not self.is_active or self.current_interaction_state != "listening":
+        self._cancel_silence_prompt(reason="candidate transcript received")
+        if self.current_interaction_state == "closing":
+            self._cancel_closing_reply_timeout(reason="closing reply transcript received")
+        if not self.is_active or self.current_interaction_state not in {"listening", "closing"}:
             return
 
-        if is_probable_hallucination(transcript):
+        is_closing_reply = (
+            self.current_interaction_state == "closing"
+            and bool(self.transcript_log)
+            and self.transcript_log[-1].get("interaction_type") == "closing"
+        )
+        if is_probable_hallucination(transcript) and not is_closing_reply:
             logger.info(
                 "Ignored probable Whisper hallucination or noise",
                 extra={"transcript": transcript},
             )
             return
 
+        self._record_silence_reply(transcript)
         logger.info("Candidate speech received", extra={"transcript": transcript})
         self.current_interaction_state = "evaluating"
         asyncio.create_task(self._process_speech(transcript))
+
+    def handle_candidate_activity(self):
+        """Cancel the inactivity prompt as soon as VAD hears candidate speech."""
+        self._cancel_silence_prompt(reason="candidate speech detected by VAD")
+        if self.current_interaction_state == "closing":
+            self._cancel_closing_reply_timeout(reason="closing reply detected by VAD")
+
+    def _begin_listening(self):
+        """Enter listening mode and schedule one inactivity prompt."""
+        self.current_interaction_state = "listening"
+        self._cancel_silence_prompt(reason="new listening turn")
+        self._silence_prompt_task = asyncio.create_task(self._prompt_after_silence())
+        logger.info(
+            "Started 30-second candidate inactivity timer",
+            extra={"session_id": self.session_id},
+        )
+
+    def _cancel_silence_prompt(self, *, reason: str = "session cleanup"):
+        """Stop a pending inactivity prompt, if any."""
+        task = self._silence_prompt_task
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+            logger.info(
+                "Cancelled candidate inactivity timer",
+                extra={"session_id": self.session_id, "reason": reason},
+            )
+        self._silence_prompt_task = None
+
+    def _cancel_closing_reply_timeout(self, *, reason: str = "session cleanup"):
+        """Stop the silent closing-reply timeout, if it is pending."""
+        task = self._closing_reply_timeout_task
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+            logger.info(
+                "Cancelled closing reply timeout",
+                extra={"session_id": self.session_id, "reason": reason},
+            )
+        self._closing_reply_timeout_task = None
+
+    def _record_silence_reply(self, transcript: str):
+        """Attach the reply to the most recent "Are you there?" prompt."""
+        if not self._awaiting_silence_reply:
+            return
+
+        self._awaiting_silence_reply = False
+        if not self.transcript_log:
+            return
+
+        silence_prompts = self.transcript_log[-1].get("silence_prompts", [])
+        if silence_prompts and isinstance(silence_prompts[-1], dict):
+            silence_prompts[-1]["candidate_reply"] = transcript
+
+    async def _prompt_after_silence(self):
+        """Ask once whether the candidate is still present after 30 seconds."""
+        await asyncio.sleep(SILENCE_PROMPT_SECONDS)
+        if not self.is_active or self.current_interaction_state != "listening":
+            return
+
+        logger.info(
+            "Candidate inactive; sending silence prompt",
+            extra={"session_id": self.session_id},
+        )
+        if self.transcript_log:
+            self.transcript_log[-1].setdefault("silence_prompts", []).append(
+                {
+                    "bot_speech": SILENCE_PROMPT_TEXT,
+                    "candidate_reply": "",
+                }
+            )
+        self._awaiting_silence_reply = True
+        await self.speak(SILENCE_PROMPT_TEXT)
+        self.current_interaction_state = "listening"
 
     # ──────────────────────────── MAIN PROCESSING ────────────────────────────
 
     async def _process_speech(self, transcript: str):
         """Routes the candidate's speech through intent detection and evaluation."""
+        if self.transcript_log and self.transcript_log[-1].get("interaction_type") == "closing":
+            # The closing reply is conversational only. Persist it in the full
+            # transcript before instructing the meeting bot to leave.
+            self.transcript_log[-1]["candidate_answer"] = transcript
+            await self._persist_closing_and_leave()
+            return
+
         if self.transcript_log and self.transcript_log[-1].get("interaction_type") == "greeting":
             self.transcript_log[-1]["candidate_answer"] = transcript
             await self._ask_next_question()
@@ -185,6 +284,8 @@ class InterviewOrchestrator:
             )
 
         await self.speak(ai_response)
+        # Inactivity prompts apply only to greeting, main questions, and
+        # follow-up questions—not to conversational clarification turns.
         self.current_interaction_state = "listening"
 
     async def _handle_skip(self, question_obj: dict, current_q: str, transcript: str):
@@ -196,8 +297,8 @@ class InterviewOrchestrator:
         await self.api_client.save_transcript(qa_entry)
 
         skip_eval = AnswerEvaluator.build_skip_evaluation(question_obj, transcript, self.current_question_idx + 1)
-        self.analysis_evaluations.append(skip_eval)
-        await self.api_client.save_evaluation(skip_eval)
+        if await self.api_client.save_evaluation(skip_eval):
+            self.analysis_evaluations.append(skip_eval)
 
         self.current_question_idx += 1
         await self._ask_next_question()
@@ -217,7 +318,12 @@ class InterviewOrchestrator:
         if self.transcript_log and self.transcript_log[-1].get("follow_ups"):
             follow_up_context = self.transcript_log[-1]["follow_ups"]
 
-        filler = "Thank you for answering the question, we will now move onto a new question."
+        is_follow_up_answer = primary_eval_data is not None
+        if self.transcript_log and not is_follow_up_answer:
+            # A real main answer replaces a preceding request to repeat it.
+            self.transcript_log[-1]["candidate_answer"] = transcript
+
+        filler = "Thank you for answering the question."
         
         # Start evaluation in the background so it runs concurrently with TTS
         import asyncio
@@ -236,14 +342,40 @@ class InterviewOrchestrator:
 
         # Wait for the LLM evaluation to finish
         eval_data = await eval_task
-
         decision = eval_data.get("decision", "NEXT_QUESTION")
         is_complete = decision == "NEXT_QUESTION"
         follow_up_question = eval_data.get("suggested_follow_up", "")
 
         if decision == "REPEAT_QUESTION":
-            is_complete = False
-            follow_up_question = "I'm sorry, could you please repeat your answer?"
+            # Do not consume a follow-up or persist REPEAT_QUESTION. If a
+            # follow-up already exists, this repeats that same follow-up;
+            # otherwise the next reply remains the main-question answer.
+            if is_follow_up_answer and self.transcript_log:
+                follow_ups = self.transcript_log[-1].get("follow_ups", [])
+                repeat_text = (
+                    follow_ups[-1].get("ai_response", current_q)
+                    if follow_ups
+                    else current_q
+                )
+            else:
+                repeat_text = current_q
+            if self.transcript_log:
+                self.transcript_log[-1].setdefault("conversational_turns", []).append(
+                    {
+                        "candidate_speech": transcript,
+                        "ai_response": f"Let me repeat the question: {repeat_text}",
+                    }
+                )
+            await self.speak(f"Let me repeat the question: {repeat_text}")
+            self._begin_listening()
+            return
+
+        if is_follow_up_answer and self.transcript_log:
+            follow_ups = self.transcript_log[-1].get("follow_ups", [])
+            if follow_ups:
+                # The reply belongs to the already-asked follow-up, including
+                # when that follow-up was clarified or repeated first.
+                follow_ups[-1]["candidate_speech"] = transcript
 
         current_follow_ups = (
             self.transcript_log[-1].get("follow_ups", []) if self.transcript_log else []
@@ -259,12 +391,12 @@ class InterviewOrchestrator:
                 self.transcript_log[-1]["primary_eval"] = eval_data
                 self.transcript_log[-1].setdefault("follow_ups", []).append(
                     {
-                        "candidate_speech": transcript,
+                        "candidate_speech": "",
                         "ai_response": follow_up_question,
                     }
                 )
             await self.speak(follow_up_question)
-            self.current_interaction_state = "listening"
+            self._begin_listening()
         else:
             await self._complete_question(
                 question_obj, current_q, transcript, primary_eval_data, eval_data
@@ -279,17 +411,22 @@ class InterviewOrchestrator:
         current_eval: dict,
     ):
         """Saves the completed question's transcript and evaluation to core-api."""
-        if self.transcript_log:
+        if self.transcript_log and not self.transcript_log[-1].get("candidate_answer"):
             self.transcript_log[-1]["candidate_answer"] = transcript
 
         follow_ups = self.transcript_log[-1].get("follow_ups") if self.transcript_log else None
+        primary_transcript = (
+            self.transcript_log[-1].get("candidate_answer", transcript)
+            if self.transcript_log
+            else transcript
+        )
 
         await persist_completed_question(
             self.api_client,
             self.analysis_evaluations,
             question_obj=question_obj,
             current_q=current_q,
-            transcript=transcript,
+            transcript=primary_transcript,
             primary_eval=primary_eval,
             current_eval=current_eval,
             question_number=self.current_question_idx + 1,
@@ -321,10 +458,10 @@ class InterviewOrchestrator:
         )
 
         await self.speak(q_text)
-        self.current_interaction_state = "listening"
+        self._begin_listening()
 
     async def _close_interview(self):
-        """Speaks closing message and saves the final summary."""
+        """Speak the closing and wait for its final conversational reply."""
         self.transcript_log.append(
             {
                 "interaction_type": "closing",
@@ -333,20 +470,87 @@ class InterviewOrchestrator:
             }
         )
 
+        await self.speak(CLOSING_TEXT)
+        # Closing is deliberately not a normal listening turn: it accepts one
+        # candidate reply but never starts the 30-second "Are you there?" timer.
+        self.current_interaction_state = "closing"
+        self._closing_reply_timeout_task = asyncio.create_task(
+            self._persist_closing_after_reply_timeout()
+        )
+        logger.info(
+            "Started 30-second silent closing reply timeout",
+            extra={"session_id": self.session_id},
+        )
+
+    async def _persist_closing_after_reply_timeout(self):
+        """Persist and leave if the candidate does not reply to the closing."""
+        try:
+            await asyncio.sleep(CLOSING_REPLY_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            return
+
+        if not self.is_active or self.current_interaction_state != "closing":
+            return
+
+        logger.info(
+            "Closing reply timeout reached; saving interview and leaving",
+            extra={"session_id": self.session_id},
+        )
+        await self._persist_closing_and_leave()
+
+    async def _persist_closing_and_leave(self):
+        """Persist the closing interaction, then request the bot leave."""
+        self.current_interaction_state = "closing_persisting"
+        self._cancel_closing_reply_timeout(reason="closing interaction completed")
         await persist_interview_close(
             self.api_client,
             self.analysis_evaluations,
             self.transcript_log,
         )
+        await self._leave_bot_after_close()
+        self.is_active = False
 
-        await self.speak(CLOSING_TEXT)
-        self.current_interaction_state = "closing"
+    async def _leave_bot_after_close(self):
+        """Ask Attendee to leave after the closing reply has been persisted."""
+        metadata = getattr(self.session, "interview_metadata", None)
+        bot_id = metadata.get("bot_id") if isinstance(metadata, dict) else None
+        if not isinstance(bot_id, str) or not bot_id.strip():
+            logger.warning(
+                "Cannot leave meeting because the session has no bot_id",
+                extra={"session_id": self.session_id},
+            )
+            return
+
+        try:
+            leave_result = await bot_client.leave_bot(bot_id)
+        except Exception as err:
+            logger.error(
+                "Failed to request bot leave after interview close",
+                extra={"session_id": self.session_id, "bot_id": bot_id, "error": str(err)},
+            )
+            return
+
+        if leave_result.status == "leaving":
+            logger.info(
+                "Requested bot leave after interview close",
+                extra={"session_id": self.session_id, "bot_id": bot_id},
+            )
+        else:
+            logger.error(
+                "Bot leave request was not accepted after interview close",
+                extra={
+                    "session_id": self.session_id,
+                    "bot_id": bot_id,
+                    "status": leave_result.status,
+                    "error": leave_result.error_message,
+                },
+            )
 
     # ──────────────────────────── TTS ────────────────────────────
 
     async def speak(self, text: str):
         """Synthesizes text via TTS and streams audio to the WebSocket."""
-        logger.info("AI speaking", extra={"text": text[:80]})
+        logger.info("AI speaking", extra={"text": text})
         self.current_interaction_state = "speaking"
         from src.screening_pipeline.audio_websocket import speak_to_attendee
 

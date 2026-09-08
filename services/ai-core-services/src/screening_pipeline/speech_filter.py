@@ -9,15 +9,10 @@ WHISPER_HALLUCINATIONS = frozenset({
     "thank you",
     "thanks",
     "you",
-    "okay",
-    "ok",
     "yeah",
     "thank you for watching",
     "thanks for watching",
     "subscribe",
-    "no i dont know",
-    "okay i dont know",
-    "i dont know",
 })
 
 
