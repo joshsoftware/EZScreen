@@ -606,14 +606,68 @@ Default is `GOOGLE_MEET_MODE=mock` (placeholder Meet URLs). For live calendar ev
    - `VITE_GOOGLE_API_KEY=...`
 4. Rebuild/restart frontend.
 
-### 7.4 Attendee.dev meeting bot + public webhooks
+### 7.4 Attendee meeting bot + public webhooks
 
-Needed for live Meet bot / dual-channel audio:
+Needed for live Meet bot / dual-channel audio.
 
-1. Attendee API key → `ATTENDEE_API_KEY`
+**Option A — Hosted Attendee (app.attendee.dev)**  
+1. Attendee API key → `ATTENDEE_API_KEY`  
 2. Public HTTPS tunnel (ngrok, Cloudflare Tunnel, etc.) pointing at AI core webhook  
-   - `WEBHOOK_URL=https://<your-tunnel>/screening/webhook`
+   - `WEBHOOK_URL=https://<your-tunnel>/screening/webhook`  
 3. See **[docs/integrations/ATTENDEE_INTEGRATION.md](./integrations/ATTENDEE_INTEGRATION.md)**
+
+**Option B — Self-hosted Attendee + EZScreen MinIO** (`services/attendee`)  
+Uses the same MinIO as EZScreen (no AWS S3). Bucket: `attendee-recordings`.
+
+1. Start EZScreen infra (creates the Attendee bucket via `minio-init`):
+   ```bash
+   docker compose \
+     --env-file apps/core-api/.env \
+     --env-file services/ai-core-services/.env \
+     up -d db minio minio-init
+   ```
+2. Configure Attendee env (MinIO, not AWS):
+   ```bash
+   cd services/attendee
+   cp .env.example .env
+   # Fill CREDENTIALS_ENCRYPTION_KEY / DJANGO_SECRET_KEY via:
+   #   docker compose -f dev.docker-compose.yaml run --rm --no-deps attendee-app-local python init_env.py
+   # Copy AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY from MINIO_* in services/ai-core-services/.env
+   # Prefer AWS_ENDPOINT_URL=http://host.docker.internal:9002 (EZScreen MinIO host port)
+   # Optional if on ezscreen_default with working DNS: http://minio:9000
+   # Keep AWS_S3_ADDRESSING_STYLE=path
+   ```
+3. Confirm Docker network name (`docker network ls` → usually `ezscreen_default`). Override with `EZSCREEN_NETWORK=...` if needed.
+4. Start Attendee (UI on **http://localhost:8003**):
+   ```bash
+   docker compose -f dev.docker-compose.yaml up -d --build
+   docker compose -f dev.docker-compose.yaml exec attendee-app-local python manage.py migrate
+   ```
+5. Point `services/ai-core-services/.env` at your instance:
+   - `ATTENDEE_API_URL=http://host.docker.internal:8003`
+   - `ATTENDEE_API_KEY=<key from Attendee dashboard>`
+6. In `services/attendee/.env`, allow Docker hostnames (required or ai-core gets `DisallowedHost`):
+   ```
+   ALLOWED_HOSTS=localhost,127.0.0.1,host.docker.internal,attendee-app-local,*
+   SITE_DOMAIN=localhost:8003
+   ```
+   Then recreate Attendee app: `docker compose -f dev.docker-compose.yaml up -d attendee-app-local`
+7. Restart ai-core after env changes.
+8. Smoke test (from repo root):
+   ```bash
+   # Connectivity: should return {"results":[]}
+   # (run from a shell that has your ATTENDEE_API_KEY; do not paste keys into chat)
+   curl -s -H "Authorization: Token $ATTENDEE_API_KEY" \
+     -H "Host: localhost" \
+     http://127.0.0.1:8003/api/v1/bots
+
+   # Or via ai-core (needs a real interview_session_id + future Meet link for full join)
+   curl -s -X POST http://127.0.0.1:8002/screening/bot/dispatch \
+     -H 'Content-Type: application/json' \
+     -d '{"interview_session_id":"<uuid>","meeting_url":"https://meet.google.com/xxx-yyyy-zzz"}'
+   ```
+
+> Note: live audio/webhooks still need a public tunnel (`WEBHOOK_URL` / `WEBSOCKET_URL`). Without ngrok, bot create/schedule still works; realtime audio callbacks will not.
 
 ### 7.5 STT / TTS (Groq Whisper, Replicate Kokoro)
 

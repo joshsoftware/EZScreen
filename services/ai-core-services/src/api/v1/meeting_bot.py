@@ -1,5 +1,6 @@
 from fastapi import APIRouter, status, Response
 
+from src.core.logger import logger
 from src.meeting_bot.client import bot_client
 from src.meeting_bot.schemas import (
     BotStatusResponse,
@@ -18,6 +19,10 @@ async def dispatch_bot(request: DispatchBotRequest):
     try:
         return await bot_client.dispatch_bot(request)
     except Exception as err:
+        logger.error(
+            "Bot dispatch failed",
+            extra={"interview_session_id": request.interview_session_id, "error": str(err)},
+        )
         return DispatchBotResponse(
             interview_session_id=request.interview_session_id,
             status="error",

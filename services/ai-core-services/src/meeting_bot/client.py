@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from src.core.logger import logger
 from src.core.config import settings
 from src.meeting_bot.repository import interview_session_repo
@@ -27,10 +27,7 @@ class AttendeeBotClient:
             scheduled_at = session_detail.scheduled_at
             if scheduled_at:
                 try:
-                    # The calendar saves IST but marks it as UTC.
-                    # We subtract 5:30 to get the TRUE UTC time for Attendee.dev
                     dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
-                    dt = dt - timedelta(hours=5, minutes=30)
 
                     if dt < datetime.now(timezone.utc):
                         raise ValueError(
@@ -40,7 +37,7 @@ class AttendeeBotClient:
                 except ValueError:
                     raise
                 except Exception as e:
-                    logger.warning(f"Failed to adjust scheduled_at for IST: {e}")
+                    logger.warning(f"Failed to parse scheduled_at: {e}")
 
             if not meeting_url:
                 meta = session_detail.interview_metadata

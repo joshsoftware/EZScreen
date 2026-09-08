@@ -1,0 +1,127 @@
+# Local Attendee stack for EZScreen.
+# Uses its own bridge only. Reach EZScreen MinIO via host port:
+#   AWS_ENDPOINT_URL=http://host.docker.internal:9002  (see .env.example)
+# Do NOT attach to ezscreen_default — sharing that network has broken ICC on this host.
+#
+# Start EZScreen infra first (for MinIO bucket attendee-recordings):
+#   docker compose --env-file apps/core-api/.env --env-file services/ai-core-services/.env up -d db minio minio-init
+#
+# Then from this directory:
+#   docker compose -f dev.docker-compose.yaml up -d --build
+#   docker compose -f dev.docker-compose.yaml exec attendee-app-local python manage.py migrate
+#
+# Dashboard: http://localhost:8003  (8000 is reserved for EZScreen core-api)
+
+services:
+  attendee-worker-local:
+    build: ./
+    volumes:
+     - .:/attendee
+    networks:
+      - attendee_network
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_URL=redis://redis:6379/5
+      - DJANGO_SETTINGS_MODULE=attendee.settings.development
+      - ENABLE_CHROME_SANDBOX=false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: "celery -A attendee worker -l INFO"
+    depends_on:
+      - postgres
+      - redis
+
+  attendee-scheduler-local:
+    build: ./
+    volumes:
+     - .:/attendee
+    networks:
+      - attendee_network
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_URL=redis://redis:6379/5
+      - DJANGO_SETTINGS_MODULE=attendee.settings.development
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: "python manage.py run_scheduler"
+    entrypoint: []
+    depends_on:
+      - postgres
+      - redis
+
+  attendee-app-local:
+    build: ./
+    volumes:
+     - .:/attendee
+    networks:
+      - attendee_network
+    ports:
+      # Avoid clash with EZScreen core-api on host :8000
+      - "8003:8000"
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_URL=redis://redis:6379/5
+      - DJANGO_SETTINGS_MODULE=attendee.settings.development
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: python manage.py runserver 0.0.0.0:8000
+    entrypoint: []
+    depends_on:
+      - postgres
+      - redis
+
+  attendee-webpage-streamer-local:
+    build: ./
+    volumes:
+     - .:/attendee
+    networks:
+      - attendee_network
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=attendee.settings.development
+      - ENABLE_CHROME_SANDBOX=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: "python bots/webpage_streamer/run_webpage_streamer.py"
+    security_opt:
+      - seccomp=./bots/web_bot_adapter/chrome_seccomp.json
+    profiles:
+      - webpage-streamer
+
+  postgres:
+    image: postgres:15.3-alpine
+    environment:
+      POSTGRES_DB: attendee_development
+      POSTGRES_USER: attendee_development_user
+      POSTGRES_PASSWORD: attendee_development_user
+      PGDATA: /data/postgres
+    volumes:
+       - postgres:/data/postgres
+    networks:
+      - attendee_network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - attendee_network
+    restart: unless-stopped
+    volumes:
+      - redis:/data/redis
+
+networks:
+  attendee_network:
+    driver: bridge
+
+volumes:
+  postgres:
+  redis:
