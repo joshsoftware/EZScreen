@@ -3,6 +3,8 @@
 __all__ = [
     "create_upload_urls",
     "enqueue_bulk_resumes",
+    "enqueue_candidate_application_pipeline",
+    "get_candidate_application_pipeline_status",
     "list_ingest_errors",
     "assert_job_accepts_applications",
     "list_applicants",
@@ -20,6 +22,10 @@ from src.services.application_ingest_service import (
     create_upload_urls,
     enqueue_bulk_resumes,
     list_ingest_errors,
+)
+from src.services.application_candidate_pipeline_service import (
+    enqueue_candidate_application_pipeline,
+    get_candidate_application_pipeline_status,
 )
 from src.services.application_job_fit_service import rerun_job_fit
 from src.services.application_queries_service import (
