@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
@@ -20,8 +20,13 @@ import {
   scoreTextClass,
 } from './applicationFields'
 import { formatDateTime } from './jobFields'
+import { getReEvaluationStatusRequest, reEvaluateApplicationRequest } from './api'
+import { ApiError } from '../../lib/api/client'
+import { toast } from 'sonner'
 
-const TABLE_HEADERS = ['Candidate', 'Score', 'Fit', 'YOE', 'Status', 'Created']
+const TABLE_HEADERS = ['Candidate', 'Score', 'Fit', 'YOE', 'Status', 'Created', 'Actions']
+const REEVALUATION_POLL_INTERVAL_MS = 2000
+const REEVALUATION_TIMEOUT_MS = 120000
 
 function ApplicantsTableShell({ children }) {
   return (
@@ -57,6 +62,11 @@ export function ApplicantsTable({
   const navigate = useNavigate()
   const { fitLabels } = useOrgSettings()
   const [query, setQuery] = useState('')
+  const [reevaluatingId, setReevaluatingId] = useState(null)
+  const [reevaluationStartedAt, setReevaluationStartedAt] = useState(null)
+  const pollInFlightRef = useRef(false)
+  const onRefreshRef = useRef(onRefresh)
+  onRefreshRef.current = onRefresh
   const filterOptions = fitFilterOptions(fitLabels)
 
   const filteredApplicants = useMemo(() => {
@@ -72,6 +82,61 @@ export function ApplicantsTable({
     })
   }, [applicants, fitFilter, fitLabels, query])
 
+  useEffect(() => {
+    if (!reevaluatingId || !reevaluationStartedAt) return undefined
+
+    const poll = async () => {
+      if (pollInFlightRef.current) return
+      if (Date.now() - reevaluationStartedAt >= REEVALUATION_TIMEOUT_MS) {
+        setReevaluatingId(null)
+        setReevaluationStartedAt(null)
+        toast.error('Resume re-evaluation is taking longer than expected')
+        return
+      }
+
+      pollInFlightRef.current = true
+      try {
+        const pipeline = await getReEvaluationStatusRequest(jobId, reevaluatingId)
+        if (pipeline?.status === 'failed') {
+          setReevaluatingId(null)
+          setReevaluationStartedAt(null)
+          toast.error(`Resume re-evaluation failed: ${pipeline.error || 'Unknown error'}`)
+          return
+        }
+        if (pipeline?.status === 'completed') {
+          await onRefreshRef.current?.()
+          setReevaluatingId(null)
+          setReevaluationStartedAt(null)
+          toast.success('Resume re-evaluation completed')
+          return
+        }
+      } catch {
+        // Continue polling so a transient status request failure does not stop tracking.
+      } finally {
+        pollInFlightRef.current = false
+      }
+    }
+
+    void poll()
+    const intervalId = window.setInterval(poll, REEVALUATION_POLL_INTERVAL_MS)
+    return () => window.clearInterval(intervalId)
+  }, [jobId, reevaluatingId, reevaluationStartedAt])
+
+  async function onReevaluate(event, applicant) {
+    event.stopPropagation()
+    if (reevaluatingId) return
+    setReevaluatingId(applicant.id)
+    setReevaluationStartedAt(Date.now())
+    try {
+      await reEvaluateApplicationRequest(jobId, applicant.id)
+      toast.success('Resume re-evaluation queued')
+    } catch (err) {
+      setReevaluatingId(null)
+      setReevaluationStartedAt(null)
+      toast.error(err instanceof ApiError ? err.message : 'Failed to re-evaluate resume')
+    }
+  }
+
   if (error) {
     return (
       <div className="space-y-md">
@@ -84,7 +149,7 @@ export function ApplicantsTable({
   }
 
   if (loading) {
-    return <TableSkeleton rows={5} cols={6} />
+    return <TableSkeleton rows={5} cols={7} />
   }
 
   const remainingLabel =
@@ -242,6 +307,19 @@ export function ApplicantsTable({
                 </td>
                 <td className="py-md px-md text-body-sm text-on-surface-variant">
                   {formatDateTime(applicant.created_at)}
+                </td>
+                <td className="py-md px-md">
+                  {score == null ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="refresh"
+                      loading={reevaluatingId === applicant.id}
+                      onClick={(event) => onReevaluate(event, applicant)}
+                    >
+                      {reevaluatingId === applicant.id ? 'Evaluating…' : 'Re-evaluate'}
+                    </Button>
+                  ) : null}
                 </td>
               </tr>
             )

@@ -127,3 +127,16 @@ export function rerunJobFitRequest(jobId, applicationId) {
     method: 'POST',
   })
 }
+
+export function reEvaluateApplicationRequest(jobId, applicationId) {
+  return apiRequest(`/api/v1/jobs/${jobId}/applicants/${applicationId}/re-evaluate`, {
+    method: 'POST',
+  })
+}
+
+export function getReEvaluationStatusRequest(jobId, applicationId) {
+  return apiRequest(
+    `/api/v1/jobs/${jobId}/applicants/${applicationId}/re-evaluation-status`,
+    { method: 'GET' },
+  )
+}

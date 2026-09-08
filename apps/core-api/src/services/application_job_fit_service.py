@@ -67,6 +67,7 @@ def apply_job_fit(
     parsed_resume: dict,
     *,
     timeline_metadata: dict | None = None,
+    raise_on_failure: bool = False,
 ) -> None:
     parsed_jd = job.parsed_jd
     if not parsed_jd:
@@ -89,6 +90,8 @@ def apply_job_fit(
             "Job-fit failed for application %s; application kept without score",
             application.id,
         )
+        if raise_on_failure:
+            raise
         return
 
     if fit.get("status") != "success":
@@ -97,6 +100,10 @@ def apply_job_fit(
             application.id,
             fit.get("error_message") or fit,
         )
+        if raise_on_failure:
+            raise ValueError(
+                fit.get("error_message") or "Job-fit evaluation did not succeed"
+            )
         return
 
     wrote_fit = False
