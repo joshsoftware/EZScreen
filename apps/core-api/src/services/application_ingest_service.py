@@ -162,7 +162,7 @@ def _process_resume(
         if not email:
             raise ValueError("Could not extract candidate email from parsed resume")
 
-        candidate = _find_or_create_candidate(db, email, personal)
+        candidate = find_or_create_candidate(db, email, personal)
         application = _create_application(
             db,
             job=job,
@@ -232,7 +232,7 @@ def _ingest_error_message(error_code: str, exc: Exception) -> str:
     return "Resume processing failed."
 
 
-def _find_or_create_candidate(
+def find_or_create_candidate(
     db: Session,
     email: str,
     personal: dict,

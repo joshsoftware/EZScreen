@@ -10,6 +10,7 @@ import { OrgAdminLoginPage } from './pages/org-admin/OrgAdminLoginPage'
 import { OrgAdminForgotPasswordPage } from './pages/org-admin/OrgAdminForgotPasswordPage'
 import { OrgAdminResetPasswordPage } from './pages/org-admin/OrgAdminResetPasswordPage'
 import { PageSkeleton } from './components/ui/Skeleton'
+import { ORG_URL_SLUG } from './features/candidate/constants'
 
 const SuperAdminOrgsPage = lazy(() =>
   import('./pages/super-admin/SuperAdminOrgsPage').then((m) => ({
@@ -81,6 +82,21 @@ const OrgAdminSettingsPage = lazy(() =>
     default: m.OrgAdminSettingsPage,
   })),
 )
+const CandidateShell = lazy(() =>
+  import('./components/layout/CandidateShell').then((m) => ({
+    default: m.CandidateShell,
+  })),
+)
+const CandidateJobsPage = lazy(() =>
+  import('./pages/candidate/CandidateJobsPage').then((m) => ({
+    default: m.CandidateJobsPage,
+  })),
+)
+const CandidateJobDetailPage = lazy(() =>
+  import('./pages/candidate/CandidateJobDetailPage').then((m) => ({
+    default: m.CandidateJobDetailPage,
+  })),
+)
 
 function Lazy({ children }) {
   return <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
@@ -102,7 +118,14 @@ export default function App() {
           }}
         />
         <Routes>
-          <Route path="/" element={<Navigate to="/super-admin/login" replace />} />
+          <Route path="/" element={<Navigate to={`/${ORG_URL_SLUG}/jobs`} replace />} />
+
+          {/* Candidate Public Routes */}
+          <Route path="/:org" element={<Lazy><CandidateShell /></Lazy>}>
+            <Route path="jobs" element={<Lazy><CandidateJobsPage /></Lazy>} />
+            <Route path="jobs/:jobId" element={<Lazy><CandidateJobDetailPage /></Lazy>} />
+          </Route>
+
           <Route path="/super-admin/login" element={<SuperAdminLoginPage />} />
           <Route path="/org-admin/login" element={<OrgAdminLoginPage />} />
           <Route
@@ -261,7 +284,7 @@ export default function App() {
             />
           </Route>
 
-          <Route path="*" element={<Navigate to="/super-admin/login" replace />} />
+          <Route path="*" element={<Navigate to={`/${ORG_URL_SLUG}/jobs`} replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

@@ -94,10 +94,13 @@ export function OrgAdminJobDetailPage() {
 
   const screenedCount = applicants.filter((item) => applicantScore(item) != null).length
   const pendingCount = applicants.filter(isPendingApplicant).length
+  const pendingIngestCount = applicants.filter(
+    (item) => item.source === 'hr_bulk' && applicantScore(item) == null
+  ).length
   const queueRemaining = activeQueueWatch
     ? Math.max(0, activeQueueWatch.targetScreened - screenedCount - failedCount)
     : 0
-  const processingRemaining = Math.max(queueRemaining, pendingCount)
+  const processingRemaining = Math.max(queueRemaining, pendingIngestCount)
   const isProcessingResumes = processingRemaining > 0
 
   useEffect(() => {
