@@ -15,6 +15,7 @@ from src.screening_pipeline.evaluation_builders import (
     build_qa_entry,
     build_skip_evaluation,
 )
+from src.screening_pipeline.keyword_matcher import calculate_keyword_coverage
 from src.screening_pipeline.prompt_builder import screening_prompt_builder
 from src.screening_pipeline.prompts import (
     ANSWER_EVALUATION_SYSTEM,
@@ -31,6 +32,14 @@ _EVAL_FAILURE_FALLBACK = {
     "feedback": "Evaluation failed due to an internal error.",
     "suggested_follow_up": "",
 }
+
+
+def _coerce_score(value: Any) -> float:
+    """Return a bounded numeric LLM answer-quality score."""
+    try:
+        return max(0.0, min(10.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 class AnswerEvaluator:
@@ -72,7 +81,8 @@ class AnswerEvaluator:
         answer_depth: str,
         follow_up_context: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
-        """Evaluate answer against keywords/strictness. Returns LLM eval_data dict."""
+        """Evaluate answer with deterministic keyword and LLM quality scores."""
+        keyword_coverage = calculate_keyword_coverage(transcript, expected_keywords)
         full_context = screening_prompt_builder.build_evaluation_prompt(
             current_question=current_question,
             transcript=transcript,
@@ -94,11 +104,33 @@ class AnswerEvaluator:
             logger.error("Answer evaluation failed", extra={"error": str(e)})
             eval_data = dict(_EVAL_FAILURE_FALLBACK)
 
+        answer_quality_score = _coerce_score(
+            eval_data.get("answer_quality_score", eval_data.get("score"))
+        )
+        keyword_match_score = (
+            answer_quality_score if not keyword_coverage.found and not keyword_coverage.missing else keyword_coverage.score
+        )
+        final_score = round((keyword_match_score + answer_quality_score) / 2)
+
+        # The application, rather than the LLM, is authoritative for keyword
+        # coverage, the 50/50 final score, and the resulting next-step decision.
+        eval_data["keywords_found"] = keyword_coverage.found
+        eval_data["keywords_missing"] = keyword_coverage.missing
+        eval_data["coverage_percent"] = keyword_coverage.coverage_percent
+        eval_data["keyword_match_score"] = keyword_match_score
+        eval_data["answer_quality_score"] = answer_quality_score
+        eval_data["score"] = final_score
+
         decision = eval_data.get("decision", "NEXT_QUESTION")
         if decision == "REPEAT_QUESTION":
             eval_data["suggested_follow_up"] = (
                 "I'm sorry, could you please repeat your answer?"
             )
+            eval_data["is_sufficient"] = False
+        else:
+            decision = "NEXT_QUESTION" if final_score >= 6 else "ASK_FOLLOW_UP"
+            eval_data["decision"] = decision
+            eval_data["is_sufficient"] = decision == "NEXT_QUESTION"
 
         logger.info(
             "Answer evaluated",

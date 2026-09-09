@@ -733,31 +733,27 @@ EXPECTED KEYWORDS (answer should address most of these): {keywords}
 EVALUATION STRICTNESS LEVEL: {depth}
 
 STRICTNESS DEFINITIONS:
-- "aware": Accept the answer as-is. Any reasonable attempt at a response is sufficient. Do not penalize for missing keywords.
-- "partial_depth": Accept if the answer covers some of the expected keywords with a basic explanation. Partial understanding is acceptable.
-- "full_depth": Accept only if the answer covers most of the expected keywords with a clear and accurate explanation. Vague or incomplete answers are not sufficient.
+- "aware": A reasonable, relevant attempt that shows basic understanding can receive a strong answer-quality score.
+- "partial_depth": Require a basic, accurate explanation that demonstrates partial understanding for a strong answer-quality score.
+- "full_depth": Require a clear, accurate, and sufficiently complete explanation for a strong answer-quality score. Vague or incomplete answers are not sufficient.
+- Strictness changes only the answer-quality score. Keyword coverage remains a separate 50% component.
 
 SCORING RULES:
-- Score 0–10. Your score MUST reflect BOTH keyword coverage AND the EVALUATION STRICTNESS LEVEL above.
-- If STRICTNESS LEVEL is "aware": Score generously (7-10) if they show basic understanding, even if missing keywords.
-- If STRICTNESS LEVEL is "partial_depth": Score 7-10 only if they hit some keywords and explain the basic concept.
-- If STRICTNESS LEVEL is "full_depth": Score strictly. Score 7-10 ONLY if they hit most keywords with a clear, accurate explanation.
-- Score 5–6: Candidate fell short of the required strictness level or missed key concepts.
-- Score 0–4: Wrong, confused, or vague with no real understanding shown.
+- Return an independent `answer_quality_score` from 0–10. Do not calculate keyword coverage, keyword score, final score, or the final decision; Python is authoritative for those fields.
+- Assess conceptual correctness, relevance, clarity, explanation depth, and the evaluation strictness level.
+- Score 0–2 when the answer is incorrect, irrelevant, contradictory, or contains no meaningful understanding.
+- "aware": Score 10 for initial/basic but correct and relevant understanding, or a clear accurate explanation; score 7–9 when correct but incomplete; score 3–6 when loosely relevant, vague, or substantially incomplete.
+- "partial_depth": Score 6–7 for initial/basic but correct and relevant understanding; score 8–9 for a clear, accurate basic explanation; score 10 when it sufficiently covers the main concept; score 3–5 when relevant but vague or insufficiently explained.
+- "full_depth": Score 3–4 for only initial/basic but correct and relevant understanding; score 5–7 when accurate but materially incomplete; score 8–9 when clear and accurate but not sufficiently detailed; score 10 only when clear, accurate, detailed, and sufficiently complete.
 - Do NOT penalize for informal phrasing if the technical concept is correct.
 
 DECISION:
-- "NEXT_QUESTION" if score >= 6 AND coverage_percent >= 50 (candidate understood it well enough for screening).
-- "ASK_FOLLOW_UP" if score < 6 OR coverage_percent < 50 (answer was too shallow or missed key concepts).
+- Python applies `NEXT_QUESTION` when the balanced final score is at least 6; otherwise it applies `ASK_FOLLOW_UP`.
 - "REPEAT_QUESTION" if the candidate asked you to repeat the question, or if their response was completely unrelated to the interview (e.g. "I can't hear you", "Hold on a second").
 
 Return STRICT JSON only. No markdown:
 {
-  "score": <0-10>,
-  "coverage_percent": <0-100>,
-  "keywords_found": ["..."],
-  "keywords_missing": ["..."],
-  "is_sufficient": <true|false>,
+  "answer_quality_score": <0-10>,
   "decision": "NEXT_QUESTION | ASK_FOLLOW_UP | REPEAT_QUESTION",
   "feedback": "2-3 sentences: what was good, what was missing, pass/fail on this topic for screening",
   "suggested_follow_up": "If decision is ASK_FOLLOW_UP and this is NOT a follow-up evaluation itself, write a specific, conversational follow-up question here to probe what they missed based on the missing keywords. If REPEAT_QUESTION, omit this field."
@@ -765,8 +761,10 @@ Return STRICT JSON only. No markdown:
 ```
 
 > **Note on Evaluation Output Calculation:** 
-> * The **`score` (0-10)** is determined subjectively by the LLM based on conceptual understanding and the phrasing of the candidate's answer.
-> * The **`coverage_percent`** is strictly and mathematically calculated by the Python backend using the array output: `( len(keywords_found) / len(expected_keywords) ) * 100`. The LLM's generated `coverage_percent` acts merely as a fallback.
+> * The LLM determines only **`answer_quality_score`** from conceptual correctness, relevance, clarity, and the requested answer depth.
+> * Python deterministically calculates **`keywords_found`**, **`keywords_missing`**, and **`coverage_percent`** from the candidate transcript and expected-keyword array. Matching is case-insensitive and supports punctuation-normalized phrases, camel-case identifiers, and high-confidence STT variants.
+> * Python calculates **`keyword_match_score = coverage_percent / 10`** and **`final_score = round((keyword_match_score + answer_quality_score) / 2)`**. Each component has exactly 50% weight.
+> * Python is authoritative for the final score and normal `NEXT_QUESTION` / `ASK_FOLLOW_UP` decision. `REPEAT_QUESTION` remains a conversational repeat path.
 
 **Follow-up Answer Evaluation Prompt:**
 The prompt is **identical** to the standard Answer Evaluation Prompt above, except this exact string is injected at the very top of the context:

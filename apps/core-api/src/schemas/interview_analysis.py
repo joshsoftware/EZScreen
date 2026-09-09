@@ -58,13 +58,13 @@ class SaveEvaluationSummaryRequest(BaseModel):
 class TranscriptFollowUpItem(BaseModel):
     interaction_type: str = Field(..., min_length=1)
     bot_speech: str = Field(..., min_length=1)
-    candidate_answer: str = Field(..., min_length=1)
+    candidate_answer: str = ""
 
 
 class TranscriptInteractionItem(BaseModel):
     interaction_type: str = Field(..., min_length=1)
     bot_speech: str = Field(..., min_length=1)
-    candidate_answer: str = Field(..., min_length=1)
+    candidate_answer: str = ""
     question_id: int | None = Field(default=None, ge=1)
     follow_ups: list[TranscriptFollowUpItem] = Field(default_factory=list)
 
