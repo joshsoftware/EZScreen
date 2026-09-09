@@ -24,6 +24,8 @@ from src.screening_pipeline.prompts import (
     CLOSING_TEXT,
     GREETING_TEXT,
     MAX_FOLLOW_UPS_PER_QUESTION,
+    MAX_SILENCE_PROMPTS,
+    SILENCE_PROMPT_CYCLE_GRACE_SECONDS,
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
 )
@@ -93,6 +95,8 @@ class InterviewOrchestrator:
         self._silence_prompt_task: Optional[asyncio.Task] = None
         self._closing_reply_timeout_task: Optional[asyncio.Task] = None
         self._awaiting_silence_reply = False
+        self._silence_prompt_count = 0
+        self._silence_cycle_started_at: Optional[float] = None
 
         self.stt_client.on_speech_start = self.handle_candidate_activity
 
@@ -172,9 +176,12 @@ class InterviewOrchestrator:
             self._cancel_closing_reply_timeout(reason="closing reply detected by VAD")
 
     def _begin_listening(self):
-        """Enter listening mode and schedule one inactivity prompt."""
+        """Enter an eligible listening turn and start its silence-prompt cycle."""
         self.current_interaction_state = "listening"
         self._cancel_silence_prompt(reason="new listening turn")
+        self._silence_prompt_count = 0
+        self._silence_cycle_started_at = asyncio.get_running_loop().time()
+        self._awaiting_silence_reply = False
         self._silence_prompt_task = asyncio.create_task(self._prompt_after_silence())
         logger.info(
             "Started 30-second candidate inactivity timer",
@@ -217,14 +224,44 @@ class InterviewOrchestrator:
             silence_prompts[-1]["candidate_reply"] = transcript
 
     async def _prompt_after_silence(self):
-        """Ask once whether the candidate is still present after 30 seconds."""
-        await asyncio.sleep(SILENCE_PROMPT_SECONDS)
+        """Prompt up to three times, then close after continuous silence."""
+        try:
+            await asyncio.sleep(SILENCE_PROMPT_SECONDS)
+        except asyncio.CancelledError:
+            return
+
         if not self.is_active or self.current_interaction_state != "listening":
             return
 
+        now = asyncio.get_running_loop().time()
+        max_cycle_seconds = (
+            SILENCE_PROMPT_SECONDS * MAX_SILENCE_PROMPTS
+            + SILENCE_PROMPT_CYCLE_GRACE_SECONDS
+        )
+        if (
+            self._silence_cycle_started_at is None
+            or now - self._silence_cycle_started_at > max_cycle_seconds
+        ):
+            if self._silence_prompt_count:
+                logger.warning(
+                    "Silence prompt cycle exceeded its time window; restarting cycle",
+                    extra={
+                        "session_id": self.session_id,
+                        "previous_attempts": self._silence_prompt_count,
+                        "max_cycle_seconds": max_cycle_seconds,
+                    },
+                )
+            self._silence_prompt_count = 0
+            self._silence_cycle_started_at = now
+
+        self._silence_prompt_count += 1
         logger.info(
             "Candidate inactive; sending silence prompt",
-            extra={"session_id": self.session_id},
+            extra={
+                "session_id": self.session_id,
+                "attempt": self._silence_prompt_count,
+                "max_attempts": MAX_SILENCE_PROMPTS,
+            },
         )
         if self.transcript_log:
             self.transcript_log[-1].setdefault("silence_prompts", []).append(
@@ -233,9 +270,30 @@ class InterviewOrchestrator:
                     "candidate_reply": "",
                 }
             )
+        is_final_silence_prompt = self._silence_prompt_count >= MAX_SILENCE_PROMPTS
+        if not is_final_silence_prompt:
+            # Start the next 30-second interval now, rather than after the
+            # short prompt finishes playing. This keeps the three prompts in
+            # one continuous ~90-second silence window: 0:30, 1:00, 1:30.
+            self._silence_prompt_task = asyncio.create_task(self._prompt_after_silence())
+
         self._awaiting_silence_reply = True
         await self.speak(SILENCE_PROMPT_TEXT)
         self.current_interaction_state = "listening"
+
+        if is_final_silence_prompt:
+            logger.info(
+                "Silence prompt limit reached; closing interview",
+                extra={"session_id": self.session_id, "attempts": self._silence_prompt_count},
+            )
+            self._silence_prompt_task = None
+            self._awaiting_silence_reply = False
+            self._silence_cycle_started_at = None
+            await self._close_interview()
+            return
+
+        # Candidate VAD or transcript activity cancels the already-scheduled
+        # next interval before another prompt can be sent.
 
     # ──────────────────────────── MAIN PROCESSING ────────────────────────────
 

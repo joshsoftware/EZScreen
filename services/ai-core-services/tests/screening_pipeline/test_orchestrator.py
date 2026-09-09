@@ -178,6 +178,91 @@ async def test_silence_prompt_is_spoken_after_listening_timeout(monkeypatch):
     ]
 
 
+@pytest.mark.asyncio
+async def test_continuous_silence_prompts_three_times_then_starts_closing(monkeypatch):
+    tts_client = FakeTTSClient()
+    orch = InterviewOrchestrator(
+        "session-id",
+        MagicMock(),
+        stt_client=MagicMock(),
+        tts_client=tts_client,
+        evaluator=MagicMock(),
+    )
+    closed = []
+
+    async def record_close():
+        closed.append(True)
+
+    orch.is_active = True
+    orch.transcript_log = [{"interaction_type": "question"}]
+    monkeypatch.setattr("src.screening_pipeline.orchestrator.SILENCE_PROMPT_SECONDS", 0)
+    monkeypatch.setattr(orch, "_close_interview", record_close)
+
+    orch._begin_listening()
+    for _ in range(12):
+        await asyncio.sleep(0)
+
+    assert tts_client.spoken == ["Are you there?"] * 3
+    assert len(orch.transcript_log[-1]["silence_prompts"]) == 3
+    assert closed == [True]
+    assert orch._silence_prompt_task is None
+
+
+@pytest.mark.asyncio
+async def test_candidate_activity_cancels_remaining_continuous_silence_prompts(monkeypatch):
+    tts_client = FakeTTSClient()
+    orch = InterviewOrchestrator(
+        "session-id",
+        MagicMock(),
+        stt_client=MagicMock(),
+        tts_client=tts_client,
+        evaluator=MagicMock(),
+    )
+    orch.is_active = True
+    orch.transcript_log = [{"interaction_type": "question"}]
+    monkeypatch.setattr("src.screening_pipeline.orchestrator.SILENCE_PROMPT_SECONDS", 0.01)
+
+    orch._begin_listening()
+    orch.handle_candidate_activity()
+    await asyncio.sleep(0.02)
+
+    assert tts_client.spoken == []
+    assert orch._silence_prompt_task is None
+
+
+@pytest.mark.asyncio
+async def test_delayed_silence_cycle_restarts_instead_of_accumulating_to_close(monkeypatch):
+    tts_client = FakeTTSClient()
+    orch = InterviewOrchestrator(
+        "session-id",
+        MagicMock(),
+        stt_client=MagicMock(),
+        tts_client=tts_client,
+        evaluator=MagicMock(),
+    )
+    closed = []
+
+    async def record_close():
+        closed.append(True)
+
+    orch.is_active = True
+    orch.current_interaction_state = "listening"
+    orch.transcript_log = [{"interaction_type": "question"}]
+    orch._silence_prompt_count = 2
+    orch._silence_cycle_started_at = asyncio.get_running_loop().time() - 1
+    monkeypatch.setattr("src.screening_pipeline.orchestrator.SILENCE_PROMPT_SECONDS", 0)
+    monkeypatch.setattr(
+        "src.screening_pipeline.orchestrator.SILENCE_PROMPT_CYCLE_GRACE_SECONDS", 0
+    )
+    monkeypatch.setattr(orch, "_close_interview", record_close)
+
+    await orch._prompt_after_silence()
+
+    assert orch._silence_prompt_count == 1
+    assert closed == []
+    orch._cancel_silence_prompt()
+
+
 def test_silence_prompt_reply_is_saved_in_transcript():
     orch = InterviewOrchestrator(
         "session-id",
