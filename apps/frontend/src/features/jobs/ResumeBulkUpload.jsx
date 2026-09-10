@@ -236,7 +236,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
               loading={uploading}
               disabled={!hasFiles || busy}
             >
-              Upload and queue
+              Upload
             </Button>
           </div>
           <input

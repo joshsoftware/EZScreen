@@ -7,6 +7,9 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+EvaluationDecision = Literal["ASK_FOLLOW_UP", "NEXT_QUESTION", "REPEAT_QUESTION"]
+
+
 class SuccessMessageResponse(BaseModel):
     success: bool = True
     message: str
@@ -31,7 +34,7 @@ class EvaluationFollowUpItem(BaseModel):
     coverage_percent: float = Field(..., ge=0, le=100)
     keywords_found: list[str] = Field(default_factory=list)
     keywords_missing: list[str] = Field(default_factory=list)
-    decision: Literal["ASK_FOLLOW_UP", "NEXT_QUESTION"]
+    decision: EvaluationDecision
     feedback: str = Field(..., min_length=1)
 
 
@@ -43,7 +46,7 @@ class SaveEvaluationRequest(BaseModel):
     coverage_percent: float = Field(..., ge=0, le=100)
     keywords_found: list[str] = Field(default_factory=list)
     keywords_missing: list[str] = Field(default_factory=list)
-    decision: Literal["ASK_FOLLOW_UP", "NEXT_QUESTION"]
+    decision: EvaluationDecision
     feedback: str = Field(..., min_length=1)
     follow_ups: list[EvaluationFollowUpItem] = Field(default_factory=list)
 
@@ -58,13 +61,14 @@ class SaveEvaluationSummaryRequest(BaseModel):
 class TranscriptFollowUpItem(BaseModel):
     interaction_type: str = Field(..., min_length=1)
     bot_speech: str = Field(..., min_length=1)
-    candidate_answer: str = Field(..., min_length=1)
+    # Empty when the candidate never answered, e.g. the closing message.
+    candidate_answer: str = ""
 
 
 class TranscriptInteractionItem(BaseModel):
     interaction_type: str = Field(..., min_length=1)
     bot_speech: str = Field(..., min_length=1)
-    candidate_answer: str = Field(..., min_length=1)
+    candidate_answer: str = ""
     question_id: int | None = Field(default=None, ge=1)
     follow_ups: list[TranscriptFollowUpItem] = Field(default_factory=list)
 

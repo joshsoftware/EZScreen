@@ -234,6 +234,22 @@ export function canRescheduleScreening(detail, timeline) {
   return Boolean(screeningSlotFromTimeline(timeline)?.sessionId)
 }
 
+/** Screening is booked but has no outcome yet, so the bot can still change its status. */
+export function isScreeningLive(timeline) {
+  const types = timelineEventTypes(timeline)
+  if (!types.has('screening_scheduled') && !types.has('screening_rescheduled')) {
+    return false
+  }
+  return !(
+    types.has('screening_completed') ||
+    types.has('screening_no_show') ||
+    types.has('screening_cancelled') ||
+    types.has('screening_failed') ||
+    types.has('rejected') ||
+    types.has('shortlisted_for_l1')
+  )
+}
+
 /** Latest scheduled/rescheduled slot from timeline metadata. */
 export function screeningSlotFromTimeline(timeline, candidateEmail = null) {
   const list = Array.isArray(timeline) ? timeline : []

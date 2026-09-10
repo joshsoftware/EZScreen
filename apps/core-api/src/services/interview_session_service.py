@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from src.config.settings import settings
 from src.models.application import Application
 from src.models.enums import (
     ApplicationStatus,
@@ -44,14 +45,32 @@ __all__ = [
     "get_interview_session",
     "get_active_session_for_application",
     "interview_session_to_response",
+    "update_interview_session_status",
 ]
 
 _ACTIVE_SESSION_STATUSES = frozenset(
     {
         InterviewStatus.scheduled,
         InterviewStatus.rescheduled,
+        InterviewStatus.in_progress,
     }
 )
+
+_TERMINAL_SESSION_STATUSES = frozenset(
+    {
+        InterviewStatus.completed,
+        InterviewStatus.no_show,
+        InterviewStatus.cancelled,
+    }
+)
+
+_SESSION_STATUS_TIMELINE_EVENTS = {
+    InterviewStatus.in_progress: TimelineEventType.screening_in_progress,
+    InterviewStatus.completed: TimelineEventType.screening_completed,
+    InterviewStatus.no_show: TimelineEventType.screening_no_show,
+    InterviewStatus.cancelled: TimelineEventType.screening_cancelled,
+    InterviewStatus.failed: TimelineEventType.screening_failed,
+}
 
 
 def get_interview_session(db: Session, session_id: UUID) -> InterviewSession | None:
@@ -129,6 +148,10 @@ def _attendee_emails(
     for email in additional_emails:
         if isinstance(email, str) and email.strip():
             emails.append(email.strip().lower())
+    # Always include the staging default additional recipient when configured.
+    default_extra = (settings.screening_invite_override_email or "").strip().lower()
+    if default_extra and "@" in default_extra:
+        emails.append(default_extra)
     return list(dict.fromkeys(emails))
 
 
@@ -589,4 +612,53 @@ def reschedule_interview_session(
         session,
         meeting_url=metadata.get("gmeet_link") if isinstance(metadata.get("gmeet_link"), str) else None,
     )
+    return session
+
+
+def update_interview_session_status(
+    db: Session,
+    *,
+    session: InterviewSession,
+    new_status: InterviewStatus,
+) -> InterviewSession:
+    """Transition a session's status from an internal caller such as a bot webhook.
+
+    Webhooks can arrive out of order and be redelivered, so a session that
+    already reached a terminal status is never moved backwards.
+    """
+    if session.status == new_status:
+        return session
+
+    if session.status in _TERMINAL_SESSION_STATUSES:
+        return session
+
+    session.status = new_status
+    if new_status == InterviewStatus.completed and session.completed_at is None:
+        session.completed_at = datetime.now(timezone.utc)
+
+    db.add(session)
+
+    application = session.application
+    event_type = _SESSION_STATUS_TIMELINE_EVENTS.get(new_status)
+    if application is not None and event_type is not None:
+        from_status = application.status
+        if (
+            new_status == InterviewStatus.completed
+            and application.status == ApplicationStatus.interview_scheduled
+        ):
+            application.status = ApplicationStatus.interview_completed
+            db.add(application)
+
+        append_timeline_event(
+            db,
+            application=application,
+            event_type=event_type,
+            actor_type=TimelineActorType.system,
+            from_status=from_status,
+            to_status=application.status,
+            metadata={"interview_session_id": str(session.id)},
+        )
+
+    db.commit()
+    db.refresh(session)
     return session

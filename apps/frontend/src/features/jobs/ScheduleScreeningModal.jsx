@@ -44,6 +44,9 @@ function parseEmailList(raw) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+/** Default additional invite recipient (staging). Backend also injects this. */
+const DEFAULT_ADDITIONAL_EMAIL = 'nikhil.gosavi@joshsoftware.com'
+
 /** Normalize legacy IANA names from Intl (e.g. Asia/Calcutta → Asia/Kolkata). */
 function normalizeTimeZone(tz) {
   if (!tz) return undefined
@@ -80,7 +83,7 @@ export function ScheduleScreeningModal({
     }
     setScheduledLocal(defaultLocalSlot())
     setDurationMinutes('30')
-    setAdditionalEmails('')
+    setAdditionalEmails(DEFAULT_ADDITIONAL_EMAIL)
     setComment('')
   }, [open, isReschedule, initialSlot])
 

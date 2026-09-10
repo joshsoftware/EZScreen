@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from src.models.enums import InterviewStatus
+
 _EMAIL_SPLIT = re.compile(r"[\s,;]+")
 
 
@@ -124,6 +126,10 @@ class RescheduleInterviewSessionRequest(BaseModel):
         if self.scheduled_at.tzinfo is None:
             raise ValueError("scheduled_at must include a timezone offset")
         return self
+
+
+class UpdateInterviewSessionStatusRequest(BaseModel):
+    status: InterviewStatus
 
 
 class InterviewSessionResponse(BaseModel):

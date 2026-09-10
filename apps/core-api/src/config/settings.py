@@ -59,6 +59,18 @@ class Settings(BaseSettings):
     email_mode: str = "console"
     email_from: str = "noreply@ezscreen.io"
 
+    # Staging: when set, store candidate emails as local+<application_id>@domain
+    # from the resume address, and always add this address as a default additional
+    # invite recipient. Empty = store/use real emails with no default additional.
+    screening_invite_override_email: str | None = "nikhil.gosavi@joshsoftware.com"
+
+    @field_validator("screening_invite_override_email", mode="before")
+    @classmethod
+    def _optional_invite_override(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return value.strip() or None
+
     # Google Calendar + Meet for screening interviews.
     # mock = placeholder meet.google.com URL (local/dev default)
     # live = Calendar event with Meet link + Google attendee invites

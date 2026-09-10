@@ -13,9 +13,12 @@ async def update_session_status(session_id: str, new_status: str):
         # Assuming core-api is listening at settings.core_api_url
         url = f"{settings.core_api_url.rstrip('/')}/api/v1/interview-sessions/{session_id}/status"
         payload = {"status": new_status}
-        
+        headers = {}
+        if settings.internal_service_token:
+            headers["X-Internal-Service-Token"] = settings.internal_service_token
+
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.patch(url, json=payload)
+            resp = await client.patch(url, json=payload, headers=headers)
             if resp.status_code not in (200, 204):
                 logger.error("Failed to update status via core-api", extra={"status_code": resp.status_code, "body": resp.text})
     except Exception as err:
@@ -24,8 +27,9 @@ async def update_session_status(session_id: str, new_status: str):
 async def process_state_change(payload: Dict[str, Any]):
     """Background task to handle bot state changes."""
     data = payload.get("data", {})
-    bot_id = data.get("bot_id")
-    new_state = data.get("state")
+    # Attendee sends bot_id at the payload root and the state as data.new_state.
+    bot_id = payload.get("bot_id") or data.get("bot_id")
+    new_state = data.get("new_state") or data.get("state")
 
     if not bot_id or not new_state:
         logger.warning("Webhook missing bot_id or state", extra={"payload": payload})

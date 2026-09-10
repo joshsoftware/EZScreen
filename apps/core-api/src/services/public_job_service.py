@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -33,6 +33,7 @@ from src.services.application_candidate_pipeline_service import (
 )
 from src.services.application_ingest_service import find_or_create_candidate
 from src.services.application_timeline_service import append_timeline_event
+from src.services.candidate_email_masking import mask_email_for_application
 
 __all__ = [
     "list_public_jobs",
@@ -183,7 +184,13 @@ def submit_public_application(
         "phone": data.phone,
         "email": data.email,
     }
-    candidate = find_or_create_candidate(db, data.email, personal)
+    application_id = uuid4()
+    candidate = find_or_create_candidate(
+        db,
+        data.email,
+        personal,
+        application_id=application_id,
+    )
 
     existing_app = db.scalar(
         select(Application).where(
@@ -196,6 +203,7 @@ def submit_public_application(
 
     now = datetime.now(timezone.utc)
     application = Application(
+        id=application_id,
         job_description_id=job.id,
         candidate_id=candidate.id,
         resume_url=data.s3_key,
@@ -225,7 +233,8 @@ def submit_public_application(
         application_id=application.id,
         job_id=job.id,
         s3_key=data.s3_key,
-        candidate_email=data.email,
+        candidate_email=mask_email_for_application(data.email, application.id)
+        or data.email,
         candidate_name=candidate_name,
         job_title=job.title or "the role",
         organization_name=org.name if org else None,
