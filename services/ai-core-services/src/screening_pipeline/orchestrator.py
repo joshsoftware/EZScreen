@@ -355,7 +355,7 @@ class InterviewOrchestrator:
             await self._ask_next_question()
             return
 
-        question_obj = self.questions[self.current_question_idx]
+        question_obj = getattr(self, "current_question_obj", {})
         current_q = question_obj.get("question", "")
 
         intent, ai_response = await self.evaluator.route_intent(current_q, transcript)
@@ -558,6 +558,7 @@ class InterviewOrchestrator:
             await self._close_interview()
             return
 
+        self.current_question_obj = question_obj
         q_text = question_obj.get("question", "")
 
         self.transcript_log.append(
