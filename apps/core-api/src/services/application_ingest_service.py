@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -37,6 +37,7 @@ from src.services import storage_service
 from src.services.application_ai_service import call_parse_resume
 from src.services.application_job_fit_service import apply_job_fit
 from src.services.application_timeline_service import append_timeline_event
+from src.services.candidate_email_masking import mask_email_for_application
 from src.services.application_ingest_error_store import (
     list_ingest_errors as list_stored_ingest_errors,
     record_ingest_error,
@@ -162,9 +163,16 @@ def _process_resume(
         if not email:
             raise ValueError("Could not extract candidate email from parsed resume")
 
-        candidate = find_or_create_candidate(db, email, personal)
+        application_id = uuid4()
+        candidate = find_or_create_candidate(
+            db,
+            email,
+            personal,
+            application_id=application_id,
+        )
         application = _create_application(
             db,
+            application_id=application_id,
             job=job,
             candidate=candidate,
             s3_key=s3_key,
@@ -236,10 +244,17 @@ def find_or_create_candidate(
     db: Session,
     email: str,
     personal: dict,
+    *,
+    application_id: UUID | None = None,
 ) -> User:
     normalized = _normalize_email(email)
     if not normalized:
         raise ValueError("Could not extract candidate email from parsed resume")
+
+    if application_id is not None:
+        masked = mask_email_for_application(normalized, application_id)
+        if masked:
+            normalized = masked
 
     existing = _get_candidate_by_email(db, normalized)
     if existing is not None:
@@ -300,6 +315,7 @@ def _fill_candidate_profile(user: User, personal: dict) -> None:
 def _create_application(
     db: Session,
     *,
+    application_id: UUID | None = None,
     job: JobDescription,
     candidate: User,
     s3_key: str,
@@ -308,6 +324,7 @@ def _create_application(
 ) -> Application:
     now = datetime.now(timezone.utc)
     application = Application(
+        id=application_id or uuid4(),
         job_description_id=job.id,
         candidate_id=candidate.id,
         resume_url=s3_key,

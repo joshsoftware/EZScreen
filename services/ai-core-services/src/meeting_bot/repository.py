@@ -9,22 +9,23 @@ from src.meeting_bot.schemas import InterviewSessionDetailResponse
 class InterviewSessionRepository:
     """Read-only repository for querying interview_session records from PostgreSQL."""
 
+    async def _scalar_one_or_none(self, query):
+        """Run a query against either an async or sync session (see db.connection)."""
+        session = AsyncSessionLocal()
+        if hasattr(session, "__aenter__"):
+            async with session:
+                result = await session.execute(query)
+                return result.scalar_one_or_none()
+        with session:
+            result = session.execute(query)
+            return result.scalar_one_or_none()
+
     async def get_by_id(self, session_id: str) -> Optional[InterviewSessionDetailResponse]:
         """Fetch complete interview_session details by session_id."""
         try:
-            db_obj = None
-            session = AsyncSessionLocal()
-            if hasattr(session, "__aenter__"):
-                async with session:
-                    query = select(DBInterviewSession).where(DBInterviewSession.id == session_id)
-                    result = await session.execute(query)
-                    db_obj = result.scalar_one_or_none()
-            else:
-                with session:
-                    query = select(DBInterviewSession).where(DBInterviewSession.id == session_id)
-                    result = session.execute(query)
-                    db_obj = result.scalar_one_or_none()
-
+            db_obj = await self._scalar_one_or_none(
+                select(DBInterviewSession).where(DBInterviewSession.id == session_id)
+            )
             if not db_obj:
                 return None
 
@@ -39,15 +40,11 @@ class InterviewSessionRepository:
     async def get_by_bot_id(self, bot_id: str) -> Optional[InterviewSessionDetailResponse]:
         """Fetch session by bot_id inside interview_metadata."""
         try:
-            db_obj = None
-            session = AsyncSessionLocal()
-            async with session:
-                query = select(DBInterviewSession).where(
+            db_obj = await self._scalar_one_or_none(
+                select(DBInterviewSession).where(
                     DBInterviewSession.interview_metadata['bot_id'].astext == bot_id
                 )
-                result = await session.execute(query)
-                db_obj = result.scalar_one_or_none()
-
+            )
             if not db_obj:
                 return None
             return db_obj.to_response()

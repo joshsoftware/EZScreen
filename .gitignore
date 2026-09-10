@@ -232,3 +232,7 @@ design/ezscreen-stitch/
 
 # Node
 node_modules/
+
+# Attendee service local TLS certs
+services/attendee/cert.pem
+services/attendee/key.pem

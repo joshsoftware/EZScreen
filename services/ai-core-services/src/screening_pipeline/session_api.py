@@ -105,6 +105,9 @@ class SessionApiClient:
     def __init__(self, session_id: str):
         self.session_id = session_id
         self.base_url = settings.core_api_url.rstrip("/")
+        self.headers: Dict[str, str] = {}
+        if settings.internal_service_token:
+            self.headers["X-Internal-Service-Token"] = settings.internal_service_token
 
     async def save_transcript(self, qa_entry: Dict[str, Any]) -> bool:
         """Appends a single Q&A entry to the question_answer column."""
@@ -117,7 +120,7 @@ class SessionApiClient:
         try:
             url = f"{self.base_url}/api/v1/interview-sessions/{self.session_id}/qa-transcript"
             async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(url, json=qa_entry)
+                resp = await client.post(url, json=qa_entry, headers=self.headers)
                 if resp.status_code not in (200, 201, 204):
                     logger.error(
                         "Failed to save transcript",
@@ -142,7 +145,7 @@ class SessionApiClient:
         try:
             url = f"{self.base_url}/api/v1/interview-sessions/{self.session_id}/evaluation"
             async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(url, json=evaluation)
+                resp = await client.post(url, json=evaluation, headers=self.headers)
                 if resp.status_code not in (200, 201, 204):
                     logger.error(
                         "Failed to save evaluation",
@@ -169,7 +172,7 @@ class SessionApiClient:
         try:
             url = f"{self.base_url}/api/v1/interview-sessions/{self.session_id}/evaluation/summary"
             async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(url, json=final_summary)
+                resp = await client.post(url, json=final_summary, headers=self.headers)
                 if resp.status_code not in (200, 201, 204):
                     logger.error("Failed to save final summary", extra={"status": resp.status_code})
         except Exception as err:
@@ -178,17 +181,25 @@ class SessionApiClient:
     async def save_interview_metadata(self, transcript_log: List[Dict[str, Any]]):
         """Saves the full conversational transcript (greetings, small talk, QA) to interview_metadata."""
         transcript_payload = normalize_interview_metadata(transcript_log)
+        if not transcript_payload:
+            logger.warning(
+                "Skipping interview metadata save, no usable interactions",
+                extra={"session_id": self.session_id},
+            )
+            return
+
         logger.info("Saving full interview metadata to core-api", extra={
             "session_id": self.session_id,
             "total_interactions": len(transcript_payload)
         })
-        
+
         try:
             url = f"{self.base_url}/api/v1/interview-sessions/{self.session_id}/transcript"
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.post(
                     url,
                     json={"interview_metadata": transcript_payload},
+                    headers=self.headers,
                 )
                 if resp.status_code not in (200, 201, 204):
                     logger.error(

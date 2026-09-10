@@ -25,6 +25,7 @@ import {
   fitLabel,
   fitTone,
   formatApplicationStatus,
+  isScreeningLive,
   resolveMatchScore,
   screeningSlotFromTimeline,
 } from '../../features/jobs/applicationFields'
@@ -43,6 +44,8 @@ const ScheduleScreeningModal = lazy(() =>
     default: mod.ScheduleScreeningModal,
   })),
 )
+
+const SCREENING_POLL_MS = 10_000
 
 export function OrgAdminApplicationDetailPage() {
   const { jobId = '', applicationId = '' } = useParams()
@@ -63,18 +66,25 @@ export function OrgAdminApplicationDetailPage() {
   } = useJobQuery(jobId)
 
   const {
-    data: detail,
-    isLoading: detailLoading,
-    error: detailError,
-    refetch: refetchDetail,
-  } = useApplicationQuery(applicationId)
-
-  const {
     data: timeline = [],
     isLoading: timelineLoading,
     error: timelineQueryError,
     refetch: refetchTimeline,
-  } = useApplicationTimelineQuery(applicationId)
+  } = useApplicationTimelineQuery(applicationId, {
+    refetchInterval: (query) =>
+      isScreeningLive(query.state.data) ? SCREENING_POLL_MS : false,
+  })
+
+  const screeningLive = isScreeningLive(timeline)
+
+  const {
+    data: detail,
+    isLoading: detailLoading,
+    error: detailError,
+    refetch: refetchDetail,
+  } = useApplicationQuery(applicationId, {
+    refetchInterval: screeningLive ? SCREENING_POLL_MS : false,
+  })
 
   const mismatch =
     detail && detail.job_description_id !== jobId

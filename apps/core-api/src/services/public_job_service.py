@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -187,7 +187,13 @@ def submit_public_application(
         "phone": data.phone,
         "email": data.email,
     }
-    candidate = find_or_create_candidate(db, data.email, personal)
+    application_id = uuid4()
+    candidate = find_or_create_candidate(
+        db,
+        data.email,
+        personal,
+        application_id=application_id,
+    )
 
     existing_app = db.scalar(
         select(Application).where(
@@ -200,6 +206,7 @@ def submit_public_application(
 
     now = datetime.now(timezone.utc)
     application = Application(
+        id=application_id,
         job_description_id=job.id,
         candidate_id=candidate.id,
         resume_url=data.s3_key,

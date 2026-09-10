@@ -76,6 +76,7 @@ class InterviewType(str, enum.Enum):
 class InterviewStatus(str, enum.Enum):
     scheduled = "scheduled"
     rescheduled = "rescheduled"
+    in_progress = "in_progress"
     completed = "completed"
     no_show = "no_show"
     cancelled = "cancelled"

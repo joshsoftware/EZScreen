@@ -22,6 +22,7 @@ from src.schemas.interview_session import (
     InterviewSessionResponse,
     RescheduleInterviewSessionRequest,
     ScheduleInterviewSessionRequest,
+    UpdateInterviewSessionStatusRequest,
 )
 from src.services import (
     application_service,
@@ -216,6 +217,26 @@ def save_evaluation_summary(
     session = _get_session_or_404(db, session_id)
     interview_analysis_service.save_evaluation_summary(db, session, body)
     return SuccessMessageResponse(message="Summary saved successfully.")
+
+
+@router.patch(
+    "/{session_id}/status",
+    response_model=InterviewSessionResponse,
+    summary="Update screening session status from an internal service",
+)
+def update_interview_session_status(
+    session_id: UUID,
+    body: UpdateInterviewSessionStatusRequest,
+    db: DbSession,
+    _internal: InternalService,
+) -> InterviewSessionResponse:
+    session = _get_session_or_404(db, session_id)
+    updated = interview_session_service.update_interview_session_status(
+        db,
+        session=session,
+        new_status=body.status,
+    )
+    return interview_session_service.interview_session_to_response(updated)
 
 
 @router.post(

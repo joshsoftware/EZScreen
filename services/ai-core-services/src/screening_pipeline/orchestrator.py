@@ -92,6 +92,7 @@ class InterviewOrchestrator:
         self.current_interaction_state = "idle"  # idle, speaking, listening, evaluating
         self.transcript_log: list = []
         self.analysis_evaluations: list = []
+        self.is_finalized = False
         self._silence_prompt_task: Optional[asyncio.Task] = None
         self._closing_reply_timeout_task: Optional[asyncio.Task] = None
         self._awaiting_silence_reply = False
@@ -135,11 +136,51 @@ class InterviewOrchestrator:
         await self.speak(GREETING_TEXT)
         self._begin_listening()
 
+    async def finalize(self, *, reason: str) -> None:
+        """
+        Persist the final summary and conversational transcript exactly once.
+
+        Called on the normal closing path and again from cleanup(), so an interview
+        that ends early (bot leaves, candidate hangs up, WebSocket drops) is still
+        persisted. Never raises: teardown must not be blocked by a failed callback.
+        """
+        if self.is_finalized:
+            return
+        if self.api_client is None:
+            logger.warning(
+                "Skipping interview finalize, session was never loaded",
+                extra={"session_id": self.session_id, "reason": reason},
+            )
+            return
+
+        self.is_finalized = True
+        logger.info(
+            "Finalizing interview",
+            extra={
+                "session_id": self.session_id,
+                "reason": reason,
+                "evaluations": len(self.analysis_evaluations),
+                "interactions": len(self.transcript_log),
+            },
+        )
+        try:
+            await persist_interview_close(
+                self.api_client,
+                self.analysis_evaluations,
+                self.transcript_log,
+            )
+        except Exception as err:
+            logger.error(
+                "Failed to finalize interview",
+                extra={"session_id": self.session_id, "reason": reason, "error": str(err)},
+            )
+
     async def cleanup(self):
-        """Teardown connections."""
+        """Teardown connections, persisting the interview first if it ended early."""
         self.is_active = False
         self._cancel_silence_prompt()
         self._cancel_closing_reply_timeout()
+        await self.finalize(reason="session_ended")
         await self.stt_client.close()
 
     # ──────────────────────────── STT CALLBACK ────────────────────────────
@@ -560,11 +601,7 @@ class InterviewOrchestrator:
         """Persist the closing interaction, then request the bot leave."""
         self.current_interaction_state = "closing_persisting"
         self._cancel_closing_reply_timeout(reason="closing interaction completed")
-        await persist_interview_close(
-            self.api_client,
-            self.analysis_evaluations,
-            self.transcript_log,
-        )
+        await self.finalize(reason="questions_completed")
         await self._leave_bot_after_close()
         self.is_active = False
 
