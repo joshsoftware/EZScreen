@@ -51,6 +51,7 @@ async def persist_interview_close(
     llm_client: OllamaClient,
     evaluations: List[Dict[str, Any]],
     transcript_log: List[Dict[str, Any]],
+    termination_reason: str = "questions_completed",
 ) -> None:
     """Persist final summary and full conversational transcript."""
     if not evaluations:
@@ -58,10 +59,17 @@ async def persist_interview_close(
         
     summary_math = calculate_final_weighted_score(evaluations)
     
+    termination_context = "The interview completed successfully after asking the designated questions."
+    if termination_reason == "fatal_failure":
+        termination_context = "CRITICAL: The interview was terminated early because the candidate failed to recover their score across multiple categories. They struggled significantly."
+    elif termination_reason == "candidate_silence":
+        termination_context = "CRITICAL: The interview was terminated early because the candidate became completely unresponsive and stopped answering."
+
     prompt = FINAL_QUALITATIVE_SUMMARY_PROMPT.format(
         category_scores=json.dumps(summary_math["category_averages"], indent=2),
         transcript=json.dumps(evaluations, indent=2)
     )
+    prompt += f"\n\n═══ INTERVIEW TERMINATION REASON ═══\n{termination_context}\nIf the interview was terminated early, explicitly state why in the final bullet point."
     
     interview_summary_points = []
     try:
@@ -76,12 +84,17 @@ async def persist_interview_close(
     except Exception as e:
         interview_summary_points = ["Evaluation complete, but failed to generate qualitative summary."]
 
+    formatted_summary = "\n".join(f"• {pt}" for pt in interview_summary_points) if isinstance(interview_summary_points, list) else str(interview_summary_points)
+    
     final_summary_payload = {
+        "raw_must_have_score": summary_math["raw_scores"].get("must_have_matched", 0.0),
+        "raw_domain_expertise_score": summary_math["raw_scores"].get("experience_domain", 0.0),
+        "raw_good_to_have_score": summary_math["raw_scores"].get("good_to_have", 0.0),
+        "raw_lacking_skill_score": summary_math["raw_scores"].get("lacking_skill", 0.0),
         "total_score": summary_math["total_raw_score"],
         "max_possible_score": 100.0,
         "overall_score": summary_math["overall_score"],
-        "final_recommendation": "shortlist_for_l1" if summary_math["overall_score"] >= RECOMMENDATION_THRESHOLD else "reject",
-        "interview_summary": interview_summary_points
+        "final_recommendation": formatted_summary
     }
     
     await api_client.save_final_summary(final_summary_payload)

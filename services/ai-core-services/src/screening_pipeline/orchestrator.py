@@ -169,6 +169,7 @@ class InterviewOrchestrator:
                 self.llm_client,
                 self.analysis_evaluations,
                 self.transcript_log,
+                termination_reason=reason,
             )
         except Exception as err:
             logger.error(
@@ -331,6 +332,7 @@ class InterviewOrchestrator:
             self._silence_prompt_task = None
             self._awaiting_silence_reply = False
             self._silence_cycle_started_at = None
+            self.termination_reason = "candidate_silence"
             await self._close_interview()
             return
 
@@ -552,6 +554,7 @@ class InterviewOrchestrator:
             if termination_reason == "fatal_failure":
                 from src.core.logger import logger
                 logger.info("Candidate failed to recover. Terminating early.", extra={"session_id": self.session_id})
+                self.termination_reason = "fatal_failure"
             await self._close_interview()
             return
 
@@ -612,7 +615,8 @@ class InterviewOrchestrator:
         """Persist the closing interaction, then request the bot leave."""
         self.current_interaction_state = "closing_persisting"
         self._cancel_closing_reply_timeout(reason="closing interaction completed")
-        await self.finalize(reason="questions_completed")
+        reason = getattr(self, "termination_reason", "questions_completed")
+        await self.finalize(reason=reason)
         await self._leave_bot_after_close()
         self.is_active = False
 
