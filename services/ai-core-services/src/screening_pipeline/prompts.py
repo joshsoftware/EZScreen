@@ -70,3 +70,31 @@ MAX_FOLLOW_UPS_PER_QUESTION = 1
 
 # Recommendation threshold (AI_PROCESSING.md Section 5.4)
 RECOMMENDATION_THRESHOLD = 6.0
+
+FINAL_QUALITATIVE_SUMMARY_PROMPT = (
+    "You are an expert technical interviewer summarizing a candidate's performance in a screening interview. "
+    "Review the following interview transcript and the mathematically calculated category scores.\n\n"
+    "═══ CATEGORY SCORES ═══\n"
+    "{category_scores}\n\n"
+    "═══ INTERVIEW TRANSCRIPT ═══\n"
+    "{transcript}\n\n"
+    "Write exactly 5 to 6 bullet points summarizing the candidate's technical depth, strengths, and weaknesses. "
+    "CRITICAL REQUIREMENT: You MUST explicitly comment on the candidate's 'command' of the specific categories evaluated "
+    "(Must-Have, Domain, Good-To-Have, Lacking) by referencing their numerical scores and concrete technologies from their answers.\n"
+    "Example formats:\n"
+    "- 'Demonstrated excellent command of Must-Have skills (scored 8.5/10), answering complex Java and Spring Boot questions easily.'\n"
+    "- 'Showed adequate command of Domain-specific knowledge (scored 6.0/10) regarding E-commerce architecture.'\n"
+    "- 'Lacks command in Good-To-Have skills (scored 3.0/10), specifically struggling with Docker optimization.'\n"
+    "Only comment on categories that were actually asked in the transcript. "
+    "Ensure the final bullet point provides an overall summary of their fit.\n\n"
+    "Return STRICT JSON only. No markdown, no commentary:\n"
+    "{\n"
+    "  \"interview_summary\": [\n"
+    "    \"bullet point 1\",\n"
+    "    \"bullet point 2\",\n"
+    "    \"bullet point 3\",\n"
+    "    \"bullet point 4\",\n"
+    "    \"bullet point 5\"\n"
+    "  ]\n"
+    "}"
+)
