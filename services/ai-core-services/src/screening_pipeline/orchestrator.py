@@ -166,6 +166,7 @@ class InterviewOrchestrator:
         try:
             await persist_interview_close(
                 self.api_client,
+                self.llm_client,
                 self.analysis_evaluations,
                 self.transcript_log,
             )
@@ -539,11 +540,21 @@ class InterviewOrchestrator:
 
     async def _ask_next_question(self):
         """Moves to the next question or closes the interview."""
-        if self.current_question_idx >= len(self.questions):
+        if not hasattr(self, "question_queues"):
+            from src.screening_pipeline.routing_engine import initialize_queues
+            self.question_queues = initialize_queues(self.questions)
+            
+        from src.screening_pipeline.routing_engine import get_next_question
+        
+        question_obj, termination_reason = get_next_question(self.question_queues, self.analysis_evaluations)
+        
+        if not question_obj:
+            if termination_reason == "fatal_failure":
+                from src.core.logger import logger
+                logger.info("Candidate failed to recover. Terminating early.", extra={"session_id": self.session_id})
             await self._close_interview()
             return
 
-        question_obj = self.questions[self.current_question_idx]
         q_text = question_obj.get("question", "")
 
         self.transcript_log.append(

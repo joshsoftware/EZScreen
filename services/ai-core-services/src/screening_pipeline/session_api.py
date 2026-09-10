@@ -7,7 +7,7 @@ import httpx
 from typing import Dict, Any, List
 from src.core.config import settings
 from src.core.logger import logger
-from src.screening_pipeline.summary_calculator import compute_final_summary
+
 
 
 def _as_text(value: Any) -> str:
@@ -157,16 +157,15 @@ class SessionApiClient:
             logger.error("Error saving evaluation to core-api", extra={"error": str(err)})
             return False
 
-    async def save_final_summary(self, evaluations: List[Dict[str, Any]]):
-        """Calculates the final_summary from all evaluations and sends it to core-api."""
-        final_summary = compute_final_summary(evaluations)
-        if final_summary is None:
+    async def save_final_summary(self, final_summary: Dict[str, Any]):
+        """Saves the pre-computed final_summary to core-api."""
+        if not final_summary:
             return
 
         logger.info("Saving final summary to core-api", extra={
             "session_id": self.session_id,
-            "overall_score": final_summary["overall_score"],
-            "recommendation": final_summary["final_recommendation"]
+            "overall_score": final_summary.get("overall_score"),
+            "recommendation": final_summary.get("final_recommendation")
         })
 
         try:

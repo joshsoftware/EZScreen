@@ -9,6 +9,7 @@ def build_skip_evaluation(question_obj: Dict, transcript: str, question_number: 
     """Build a 0-score evaluation for skipped questions."""
     return {
         "question_id": question_number,
+        "category": question_obj.get("category", "must_have_matched"),
         "question": question_obj.get("question", ""),
         "candidate_answer": transcript,
         "score": 0,
@@ -44,6 +45,7 @@ def build_evaluation_block(
 
     evaluation = {
         "question_id": question_number,
+        "category": question_obj.get("category", "must_have_matched"),
         "question": current_q,
         "candidate_answer": transcript,
         "score": source.get("score", 0),
