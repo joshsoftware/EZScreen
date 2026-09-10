@@ -80,21 +80,23 @@ SKILLS:
 * Do not place the same normalized skill in both primary_skills and secondary_skills.
 * Do not infer skills from projects or job titles unless the skill is explicitly stated.
 * Normalize obvious naming variations, e.g. "React.js"/"ReactJS" → "React", "Postgres"/"PostgreSQL" → "PostgreSQL".
-* CRITICAL RULE: Completely ignore Internship roles. Do not extract any skills from internship descriptions into primary_skills or secondary_skills.
+* CRITICAL RULE: Completely ignore Internship roles when extracting skills. Do not extract any skills from internship descriptions into primary_skills or secondary_skills, even for internships that are 6 months or longer.
 
 SKILL-SPECIFIC EXPERIENCE (skill_experience):
 
 * For EVERY skill identified in primary_skills and secondary_skills, determine the candidate's total years of experience with that specific skill.
-* STEP 1 - Calculate from ROLE HIGHLIGHTS for ALL skills:
-  - Look at each role in the "Professional Experience" / "Work Experience" section.
+* STEP 1 - Calculate from ROLE HIGHLIGHTS for ALL skills (EXCLUDING internship roles):
+  - Look at each NON-INTERNSHIP role in the "Professional Experience" / "Work Experience" section.
   - A skill is considered "used in a role" ONLY if it is explicitly mentioned in that role's bullet points/highlights.
-  - Sum the durations (years) of all roles where the skill is explicitly mentioned.
+  - Sum the durations (years) of all non-internship roles where the skill is explicitly mentioned.
   - Subtract overlapping role durations to prevent double-counting.
+  - Do NOT include internship roles in this calculation, even if the internship is 6 months or longer.
   - This provides the `calculated_role_years`.
 * STEP 2 - Check for DIRECT per-skill year statements:
   - A valid explicit statement is when the candidate directly associates a specific number of years with one or more specific skills, such as: "Java (5 years)", "7+ years of Python", or "10 years of experience in Java, Spring".
-  - If a candidate includes a broad professional summary statement like "3+ years of experience in enterprise development using Java, Spring Boot", apply that exact number of years (e.g., 3.0) to EACH of the skills listed.
-  - CRITICAL: If a candidate states a number of years in a professional summary paragraph (e.g., "7 years of success in DevOps..."), and then lists skills within that SAME summary paragraph (e.g., "... Skilled in Jenkins, Docker"), you MUST apply that exact number of years (e.g., 7.0) to ALL skills mentioned anywhere within that summary block, even if they are in separate sentences.
+  - CRITICAL: Only assign years to skills that are EXPLICITLY and DIRECTLY associated with a year statement. The skills must be syntactically linked to the year phrase (e.g., "X years of experience in [skill]", "X years of [skill]", "[skill] (X years)").
+  - DO NOT blanket-assign years from a generic summary statement to all skills mentioned nearby. For example, if a candidate writes "7 years of success in DevOps. Skilled in Jenkins, Docker, Kubernetes", do NOT assign 7 years to Jenkins, Docker, or Kubernetes — those skills are listed separately and are not explicitly tied to the year statement.
+  - Similarly, "10 years of professional experience. Technologies: React, Node.js, AWS" does NOT mean React, Node.js, or AWS each have 10 years — only assign years when the year phrase directly names the skill.
   - This provides the `stated_years`.
 * STEP 3 - Determine Final Skill Experience:
   - If a skill has an explicitly `stated_years`, you MUST use that exact value. You CANNOT use the `calculated_role_years` for that skill, even if the calculated years are higher.
@@ -105,7 +107,12 @@ SKILL-SPECIFIC EXPERIENCE (skill_experience):
 WORK EXPERIENCE:
 
 * Extract every distinct professional role separately.
-* CRITICAL RULE - INTERNSHIPS: If a role title or description contains the word "Intern" or "Internship", you MUST skip it entirely. DO NOT extract it. DO NOT add its duration to `total_years`. DO NOT add its duration to any skill. Treat the internship as if it does not exist.
+* CRITICAL RULE - INTERNSHIPS:
+  - If a role title or description contains the word "Intern" or "Internship", calculate its duration from the start_date and end_date.
+  - If the internship duration is LESS THAN 6 months, you MUST skip it entirely. DO NOT extract it. Treat it as if it does not exist.
+  - If the internship duration is 6 months OR MORE, you MUST extract it as a normal role. Extract its title, company, dates, years, and highlights as you would for any other role.
+  - DO NOT add internship durations to `total_years` or the `total_years_calculation`, even for internships that are 6 months or longer. The `total_years` must represent only non-internship professional experience.
+  - DO NOT add internship durations to any skill in `skill_experience`. Internship roles must not contribute to skill experience years.
 * CRITICAL RULE - TRAINEES: Roles containing the word "Trainee" (e.g., "Engineer Trainee") MUST BE EXTRACTED. They are valid professional experience. Do NOT skip them.
 * For every role, extract title, company, start_date, end_date, years, and highlights.
 * Extract dates only from information explicitly associated with that role.
@@ -126,8 +133,8 @@ WORK EXPERIENCE:
 * For year-only ranges, use the year difference directly and round to 1 decimal place.
 * Do not return years as null merely because only a year or month/year is available.
 * Return years as null only when the available dates are genuinely insufficient to calculate a reliable duration.
-* total_years must represent unique professional experience across all extracted roles. Overlapping employment periods must not be double-counted.
-* CRITICAL RULE FOR MATH: Inside the `experience` object, you MUST first provide a string field called `total_years_calculation`. In this field, you must write out the exact mathematical addition of the individual role `years` (e.g., "7.5 + 0.6 = 8.1"). Subtract any overlapping durations.
+* total_years must represent unique NON-INTERNSHIP professional experience across all extracted roles. Overlapping employment periods must not be double-counted. Do NOT include internship role durations in total_years.
+* CRITICAL RULE FOR MATH: Inside the `experience` object, you MUST first provide a string field called `total_years_calculation`. In this field, you must write out the exact mathematical addition of the individual NON-INTERNSHIP role `years` (e.g., "7.5 + 0.6 = 8.1"). Subtract any overlapping durations. Do NOT include internship role years in this calculation.
 * After `total_years_calculation`, provide `total_years` as the final calculated float exactly matching your calculation. Do not guess.
 * `total_years` and individual role `years` should be rounded and formatted to only 1 decimal place (e.g., 3.45 becomes 3.4).
 

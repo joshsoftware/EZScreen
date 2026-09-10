@@ -1,9 +1,12 @@
 """Deterministic experience recalculation for parsed resume data.
 
 Pure functions — no I/O. Overrides LLM date math with strict Python calculations.
-When the resume's professional summary/description explicitly states years of experience
-alongside specific skills (e.g., "6+ years of experience… Node.js, React"),
+When the resume explicitly ties years of experience to specific skills
+(e.g., "10 years of experience in Java", "Python (5 years)"),
 those explicit years take absolute priority over role-based calculations.
+Generic summary statements ("7 years of professional experience") do NOT
+blanket-assign years to all skills in the same paragraph — skills without
+an explicit per-skill year statement fall back to role-based calculation.
 """
 
 from __future__ import annotations
@@ -37,11 +40,18 @@ def _parse_date(date_str, is_end_date: bool = False) -> datetime.datetime | None
 
 
 def _extract_summary_skill_years(resume_text: str, all_skills: list[str]) -> dict[str, float]:
-    """Extract explicit years from summary/description paragraphs and map to skills mentioned there.
+    """Extract ONLY explicitly per-skill stated years from summary/description text.
 
-    Scans the resume text for patterns like "X+ years of experience" or "X years of expertise"
-    in summary-like paragraphs. Any skill explicitly named in the SAME paragraph inherits
-    that exact year value.
+    A skill gets years ONLY when the text explicitly associates years with
+    that specific skill, e.g.:\
+      - "10 years of experience in Java" → Java = 10.0
+      - "5+ years of Python and React" → Python = 5.0, React = 5.0
+      - "5-7 years of Python experience" → Python = 7.0 (max of range)
+      - "Java (8 years)" → Java = 8.0
+
+    Generic statements like "7 years of professional experience. Skilled in
+    Jenkins, Docker" do NOT assign 7 years to Jenkins/Docker — those skills
+    fall through to role-based calculation instead.
 
     Returns a dict mapping skill_name_lower -> explicit_years.
     """
@@ -50,37 +60,126 @@ def _extract_summary_skill_years(resume_text: str, all_skills: list[str]) -> dic
 
     explicit_map: dict[str, float] = {}
 
-    # Split text into paragraphs (blank-line separated or section-like blocks)
-    paragraphs = re.split(r'\n\s*\n|\n(?=[A-Z][A-Z\s]+\n)', resume_text)
+    # Build a set of lower-cased skill names for fast lookup
+    skill_set_lower = {s.lower() for s in all_skills}
 
-    # Pattern: "X+ years" or "X years" or "X.Y+ years" (captures the number)
-    year_pattern = re.compile(r'(\d+(?:\.\d+)?)\+?\s*(?:years?|yrs?)\s+of\s+(?:experience|expertise|success|professional)', re.IGNORECASE)
+    def _parse_year_value(low_str: str, high_str: str | None) -> float:
+        """Return the year value to use. For ranges pick the higher number."""
+        low = float(low_str)
+        if high_str:
+            return max(low, float(high_str))
+        return low
 
-    for para in paragraphs:
-        para_lower = para.lower()
-        match = year_pattern.search(para)
-        if not match:
-            continue
+    # --- Pattern A: "X[+] years" or "X-Y years" of experience in/with/using <skill list> ---
+    # Handles:
+    #   "10 years of experience in Java"
+    #   "5+ years of expertise with Python and React"
+    #   "5-7 years of experience in Java"  → picks 7.0
+    pattern_a = re.compile(
+        r'(\d+(?:\.\d+)?)'                                   # lower bound (group 1)
+        r'(?:\s*[-–]\s*(\d+(?:\.\d+)?))?'                    # optional upper bound (group 2)
+        r'\+?\s*(?:years?|yrs?)\s+of\s+'
+        r'(?:experience|expertise|success|professional[\w\s]*?)'
+        r'\s+(?:in|with|using|on|across)\s+'
+        r'([^.;\n]+)',                                        # skill clause (group 3)
+        re.IGNORECASE,
+    )
 
-        stated_years = float(match.group(1))
+    # --- Pattern C: "X[+] years" or "X-Y years" of <skill> experience ---
+    # Handles:
+    #   "5-7 years of Python experience"     → Python = 7.0
+    #   "10 years of Java development"       → Java = 10.0
+    #   "3+ years of React experience"       → React = 3.0
+    pattern_c = re.compile(
+        r'(\d+(?:\.\d+)?)'                                   # lower bound (group 1)
+        r'(?:\s*[-–]\s*(\d+(?:\.\d+)?))?'                    # optional upper bound (group 2)
+        r'\+?\s*(?:years?|yrs?)\s+of\s+'
+        r'([^.;\n]{1,60})',                                   # short clause containing skill (group 3)
+        re.IGNORECASE,
+    )
 
-        # Check which skills are mentioned in this same paragraph
-        # Handle plural/singular variations (e.g., "REST APIs" matches "REST API development")
+    # --- Pattern B: "skill (X years)" or "skill - X years" inline format ---
+    pattern_b = re.compile(
+        r'([A-Za-z][A-Za-z0-9\s.#+/\-]*?)\s*'       # skill name (flexible)
+        r'(?:\(|\-\s*|–\s*|:\s*)'                      # delimiter: (, -, –, :
+        r'(\d+(?:\.\d+)?)'                              # lower bound (group 2)
+        r'(?:\s*[-–]\s*(\d+(?:\.\d+)?))?'              # optional upper bound (group 3)
+        r'\+?\s*(?:years?|yrs?)'
+        r'(?:\)|)',                                      # optional closing )
+        re.IGNORECASE,
+    )
+
+    def _skill_in_text(skill_lower: str, text_lower: str) -> bool:
+        """Check if a skill name appears in text, handling plural/singular."""
+        if skill_lower in text_lower:
+            return True
+        # Strip trailing 's' for plural check (e.g., "REST APIs" → "REST API")
+        if skill_lower.endswith("s") and skill_lower[:-1] in text_lower:
+            return True
+        return False
+
+    # Scan entire resume text for Pattern A matches
+    # (years of experience IN/WITH/USING <skills>)
+    for match in pattern_a.finditer(resume_text):
+        stated_years = _parse_year_value(match.group(1), match.group(2))
+        skill_clause = match.group(3).lower()
+
         for skill in all_skills:
             skill_lower = skill.lower()
-            # Direct match
-            if skill_lower in para_lower:
+            if _skill_in_text(skill_lower, skill_clause):
                 explicit_map[skill_lower] = stated_years
-                continue
-            # Strip trailing 's' for plural check (e.g., "REST APIs" → "REST API")
-            if skill_lower.endswith("s") and skill_lower[:-1] in para_lower:
+
+    # Scan entire resume text for Pattern C matches
+    # (X years of <skill> experience — skill is in the clause, not after a preposition)
+    for match in pattern_c.finditer(resume_text):
+        stated_years = _parse_year_value(match.group(1), match.group(2))
+        skill_clause = match.group(3).lower()
+
+        # Only assign if a known skill is directly named in the short clause
+        # AND the clause does NOT contain generic words that mean it's a broad statement
+        generic_words = {"professional", "software", "engineering", "industry", "work", "career", "total"}
+        if any(w in skill_clause for w in generic_words):
+            continue
+
+        for skill in all_skills:
+            skill_lower = skill.lower()
+            if _skill_in_text(skill_lower, skill_clause):
+                # Only assign if not already set by Pattern A (Pattern A is more precise)
+                if skill_lower not in explicit_map:
+                    explicit_map[skill_lower] = stated_years
+
+    # Scan entire resume text for Pattern B matches (inline format)
+    for match in pattern_b.finditer(resume_text):
+        candidate_skill = match.group(1).strip()
+        stated_years = _parse_year_value(match.group(2), match.group(3))
+        candidate_lower = candidate_skill.lower()
+
+        for skill in all_skills:
+            skill_lower = skill.lower()
+            if skill_lower in candidate_lower or candidate_lower in skill_lower:
                 explicit_map[skill_lower] = stated_years
 
     return explicit_map
 
 
+_INTERNSHIP_RE = re.compile(r'\binterns?\b|\binternship\b', re.IGNORECASE)
+_MIN_INTERNSHIP_MONTHS = 6
+
+
+def _is_internship_role(role: dict) -> bool:
+    """Detect whether a role is an internship based on its title or the LLM flag."""
+    if role.get("is_internship"):
+        return True
+    title = role.get("title") or ""
+    return bool(_INTERNSHIP_RE.search(title))
+
+
 def recalculate_experience(parsed_data: dict, resume_text: str = "") -> None:
     """Recalculate role years and total_years from start/end dates.
+
+    Internship roles (>= 6 months) are kept in the parsed data for display
+    but are excluded from ``total_years`` and ``skill_experience`` so they
+    do not affect scoring.  Internships shorter than 6 months are removed.
 
     Args:
         parsed_data: The parsed resume dict (mutated in place).
@@ -94,7 +193,15 @@ def recalculate_experience(parsed_data: dict, resume_text: str = "") -> None:
     if not roles:
         return
 
-    intervals = []
+    # ------------------------------------------------------------------
+    # Phase 1: Compute each role's years & deterministic is_internship flag
+    # ------------------------------------------------------------------
+    all_intervals: list[list] = []          # parallel to *roles* (after pruning)
+    non_intern_intervals: list[list] = []   # only non-internship intervals
+    non_intern_roles: list[dict] = []       # only non-internship roles
+
+    roles_to_keep: list[dict] = []
+
     for role in roles:
         start_dt = _parse_date(role.get("start_date"), is_end_date=False)
         end_dt = _parse_date(role.get("end_date"), is_end_date=True)
@@ -102,28 +209,61 @@ def recalculate_experience(parsed_data: dict, resume_text: str = "") -> None:
         if start_dt and end_dt and start_dt <= end_dt:
             days = (end_dt - start_dt).days
             role["years"] = round(days / 365.25, 1)
-            intervals.append([start_dt, end_dt])
         else:
             role["years"] = 0.0
+            start_dt = None
+            end_dt = None
 
-    if not intervals:
-        parsed_data["experience"]["total_years"] = 0.0
-        return
+        is_intern = _is_internship_role(role)
+        role["is_internship"] = is_intern
 
-    # Create a deep copy for merging so we don't mutate the original intervals mapped to roles
-    sorted_intervals = sorted([[iv[0], iv[1]] for iv in intervals], key=lambda x: x[0])
-    merged = [sorted_intervals[0]]
-    for current in sorted_intervals[1:]:
-        last = merged[-1]
-        if current[0] <= last[1]:
-            last[1] = max(last[1], current[1])
+        if is_intern:
+            # Remove internships shorter than 6 months
+            months = (role.get("years") or 0.0) * 12
+            if months < _MIN_INTERNSHIP_MONTHS:
+                continue  # drop this role entirely
+
+        roles_to_keep.append(role)
+
+        if start_dt and end_dt:
+            interval = [start_dt, end_dt]
+            all_intervals.append(interval)
+            if not is_intern:
+                non_intern_intervals.append(interval)
+                non_intern_roles.append(role)
         else:
-            merged.append([current[0], current[1]])
+            all_intervals.append(None)
+            if not is_intern:
+                non_intern_intervals.append(None)
+                non_intern_roles.append(role)
 
-    total_days = sum((iv[1] - iv[0]).days for iv in merged)
-    parsed_data["experience"]["total_years"] = round(total_days / 365.25, 1)
+    # Replace roles list with the pruned version (short internships removed)
+    parsed_data["experience"]["roles"] = roles_to_keep
+    roles = roles_to_keep
 
-    # Now, recalculate skill_experience deterministically
+    # ------------------------------------------------------------------
+    # Phase 2: total_years from NON-internship roles only
+    # ------------------------------------------------------------------
+    valid_non_intern = [iv for iv in non_intern_intervals if iv is not None]
+    if not valid_non_intern:
+        parsed_data["experience"]["total_years"] = 0.0
+        # Still need to handle skill_experience below
+    else:
+        sorted_intervals = sorted([[iv[0], iv[1]] for iv in valid_non_intern], key=lambda x: x[0])
+        merged = [sorted_intervals[0]]
+        for current in sorted_intervals[1:]:
+            last = merged[-1]
+            if current[0] <= last[1]:
+                last[1] = max(last[1], current[1])
+            else:
+                merged.append([current[0], current[1]])
+
+        total_days = sum((iv[1] - iv[0]).days for iv in merged)
+        parsed_data["experience"]["total_years"] = round(total_days / 365.25, 1)
+
+    # ------------------------------------------------------------------
+    # Phase 3: skill_experience from NON-internship roles only
+    # ------------------------------------------------------------------
     skill_exp = parsed_data.get("skill_experience", [])
     if not skill_exp:
         return
@@ -131,6 +271,9 @@ def recalculate_experience(parsed_data: dict, resume_text: str = "") -> None:
     # Build the explicit summary-level skill→years mapping from the raw resume text
     all_skill_names = [s.get("skill", "") for s in skill_exp if s.get("skill")]
     summary_years = _extract_summary_skill_years(resume_text, all_skill_names)
+
+    # Build parallel list of valid intervals for non-internship roles only
+    scoring_intervals = [iv for iv in non_intern_intervals if iv is not None]
 
     for skill_obj in skill_exp:
         skill_name = skill_obj.get("skill", "")
@@ -150,9 +293,9 @@ def recalculate_experience(parsed_data: dict, resume_text: str = "") -> None:
             skill_obj["years"] = summary_years[skill_name_lower]
             continue
 
-        # PRIORITY 2: Role-based calculation for skills NOT mentioned in a summary statement
+        # PRIORITY 2: Role-based calculation — NON-INTERNSHIP roles only
         skill_intervals = []
-        for role, interval in zip(roles, intervals):
+        for role, interval in zip(non_intern_roles, scoring_intervals):
             # Check if skill is mentioned in this role's highlights
             highlights = " ".join(role.get("highlights", [])).lower()
             if skill_name_lower in highlights:
