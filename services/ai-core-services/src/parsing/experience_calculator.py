@@ -38,6 +38,51 @@ def _parse_date(date_str, is_end_date: bool = False) -> datetime.datetime | None
         pass
     return None
 
+def _skill_in_text(skill_lower: str, text_lower: str) -> bool:
+    """Check if a skill name appears in text, handling variations and aliases."""
+    if skill_lower in text_lower:
+        return True
+        
+    # Strip trailing 's' for plural check (e.g., "REST APIs" → "REST API")
+    if skill_lower.endswith("s") and skill_lower[:-1] in text_lower:
+        return True
+        
+    # Common variations and aliases mapping
+    aliases = {
+        "rest api": ["restful api", "restful"],
+        "rest apis": ["restful apis", "restful", "rest api"],
+        "react": ["react.js", "reactjs", "react js"],
+        "react.js": ["react", "reactjs", "react js"],
+        "node.js": ["nodejs", "node js", "node"],
+        "node": ["node.js", "nodejs", "node js"],
+        "vue.js": ["vuejs", "vue js", "vue"],
+        "vue": ["vue.js", "vuejs", "vue js"],
+        "angular.js": ["angularjs", "angular js", "angular"],
+        "express.js": ["expressjs", "express js", "express"],
+        "express": ["express.js", "expressjs", "express js"],
+        "next.js": ["nextjs", "next js", "next"],
+        "nuxt.js": ["nuxtjs", "nuxt js", "nuxt"],
+        "postgres": ["postgresql"],
+        "postgresql": ["postgres"],
+        "mongodb": ["mongo"],
+        "mongo": ["mongodb"],
+        "amazon web services": ["aws"],
+        "aws": ["amazon web services"],
+        "google cloud platform": ["gcp", "google cloud"],
+        "gcp": ["google cloud platform", "google cloud"],
+        "golang": ["go"],
+        "go": ["golang"],
+        "javascript": ["js"],
+        "typescript": ["ts"]
+    }
+    
+    if skill_lower in aliases:
+        for alias in aliases[skill_lower]:
+            if alias in text_lower:
+                return True
+                
+    return False
+
 
 def _extract_summary_skill_years(resume_text: str, all_skills: list[str]) -> dict[str, float]:
     """Extract ONLY explicitly per-skill stated years from summary/description text.
@@ -64,7 +109,14 @@ def _extract_summary_skill_years(resume_text: str, all_skills: list[str]) -> dic
     skill_set_lower = {s.lower() for s in all_skills}
 
     def _parse_year_value(low_str: str, high_str: str | None) -> float:
-        """Return the year value to use. For ranges pick the higher number."""
+        """Return the year value to use. 
+        
+        When a candidate lists a year range (such as '1-3 years'), we always extract 
+        the highest value (3 years). We do this because if a candidate genuinely has 
+        3 years of experience but we extracted the minimum value (1 year), it would 
+        unfairly penalize their score during ratio calculation. By picking the maximum 
+        value, we ensure candidates receive full credit for their potential experience.
+        """
         low = float(low_str)
         if high_str:
             return max(low, float(high_str))
@@ -109,14 +161,7 @@ def _extract_summary_skill_years(resume_text: str, all_skills: list[str]) -> dic
         re.IGNORECASE,
     )
 
-    def _skill_in_text(skill_lower: str, text_lower: str) -> bool:
-        """Check if a skill name appears in text, handling plural/singular."""
-        if skill_lower in text_lower:
-            return True
-        # Strip trailing 's' for plural check (e.g., "REST APIs" → "REST API")
-        if skill_lower.endswith("s") and skill_lower[:-1] in text_lower:
-            return True
-        return False
+
 
     # Scan entire resume text for Pattern A matches
     # (years of experience IN/WITH/USING <skills>)
@@ -297,8 +342,8 @@ def recalculate_experience(parsed_data: dict, resume_text: str = "") -> None:
         skill_intervals = []
         for role, interval in zip(non_intern_roles, scoring_intervals):
             # Check if skill is mentioned in this role's highlights
-            highlights = " ".join(role.get("highlights", [])).lower()
-            if skill_name_lower in highlights:
+            raw_highlights = " ".join(role.get("highlights", [])).lower()
+            if _skill_in_text(skill_name_lower, raw_highlights):
                 # Add a copy of the interval to prevent mutation
                 skill_intervals.append([interval[0], interval[1]])
 
@@ -319,19 +364,14 @@ def recalculate_experience(parsed_data: dict, resume_text: str = "") -> None:
         skill_days = sum((iv[1] - iv[0]).days for iv in merged_skill)
         calculated_years = round(skill_days / 365.25, 1)
 
-        original_years = skill_obj.get("years")
-
-        # If the LLM's original output is very close (<= 1.0 years diff) to our strict math,
-        # it means the LLM attempted the role-based calculation but made a mental math error.
-        # We overwrite it to fix the math.
-        # If the difference is large (> 1.0 years), the LLM likely found an EXPLICIT mention
-        # (e.g., "Java (10 years)") which overrides the role calculation. We preserve it!
-        if original_years is not None and abs(original_years - calculated_years) > 1.0:
-            continue
-
         # Cap role-calculated years to total career duration (cannot exceed total_years)
         total_years = parsed_data["experience"].get("total_years", 0.0)
         if total_years and total_years > 0 and calculated_years > total_years:
             calculated_years = total_years
 
+        # Always trust our role-based calculation.
+        # Explicit mentions (e.g., "Java (10 years)") are already handled at PRIORITY 1
+        # via _extract_summary_skill_years → summary_years. By the time we reach here,
+        # there is no explicit statement, so the LLM's value could be wrong
+        # (e.g., LLM included internship durations). Always override with our clean math.
         skill_obj["years"] = calculated_years

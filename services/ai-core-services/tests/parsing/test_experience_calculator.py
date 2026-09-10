@@ -297,6 +297,32 @@ def test_range_does_not_assign_to_generic_clause():
     assert "node.js" not in result
 
 
+def test_restful_apis_matches_rest_apis():
+    """'RESTful APIs' in role highlights should match the skill 'REST APIs'."""
+    parsed_data = {
+        "experience": {
+            "total_years": 3.0,
+            "roles": [
+                {
+                    "title": "Backend Developer",
+                    "company": "Acme",
+                    "start_date": "2021-01",
+                    "end_date": "2024-01",
+                    "years": 3.0,
+                    "highlights": ["Engineered secure RESTful APIs for the platform."],
+                },
+            ],
+        },
+        "skill_experience": [
+            {"skill": "REST APIs", "years": 5.0},  # LLM gave wrong inflated value
+        ],
+    }
+    recalculate_experience(parsed_data, resume_text="")
+
+    rest_years = next(s["years"] for s in parsed_data["skill_experience"] if s["skill"] == "REST APIs")
+    assert rest_years == 3.1  # ~3 years (Jan 2021–Jan 2024), matched via RESTful normalization, not 5.0
+
+
 # ──────────────────────── Internship handling tests ────────────────────────
 
 
