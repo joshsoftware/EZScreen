@@ -9,7 +9,6 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from src.config.settings import settings
 from src.models.application import Application
 from src.models.enums import (
     ApplicationStatus,
@@ -31,6 +30,7 @@ from src.services.application_timeline_service import (
     timeline_event_types,
 )
 from src.services.bot_dispatch_service import dispatch_screening_bot
+from src.services.candidate_email_masking import default_additional_invite_emails
 from src.services.email_service import (
     ScreeningInvitePayload,
     ScreeningInviteResult,
@@ -148,10 +148,8 @@ def _attendee_emails(
     for email in additional_emails:
         if isinstance(email, str) and email.strip():
             emails.append(email.strip().lower())
-    # Always include the staging default additional recipient when configured.
-    default_extra = (settings.screening_invite_override_email or "").strip().lower()
-    if default_extra and "@" in default_extra:
-        emails.append(default_extra)
+    # Dev only: add configured staging mailbox(es) as extra recipients.
+    emails.extend(default_additional_invite_emails())
     return list(dict.fromkeys(emails))
 
 

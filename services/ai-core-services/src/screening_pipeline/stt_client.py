@@ -4,7 +4,7 @@ import wave
 import httpx
 import webrtcvad
 import struct
-from typing import Callable
+from typing import Callable, Optional
 from src.core.logger import logger
 
 class WhisperCloudSTTClient:
@@ -13,10 +13,17 @@ class WhisperCloudSTTClient:
     when the candidate stops speaking, and uploads the chunk to Whisper API.
     """
     
-    def __init__(self, api_url: str, api_key: str, on_transcript: Callable[[str], None]):
+    def __init__(
+        self,
+        api_url: str,
+        api_key: str,
+        on_transcript: Callable[[str], None],
+        on_speech_start: Optional[Callable[[], None]] = None,
+    ):
         self.api_url = api_url or "https://api.groq.com/openai/v1/audio/transcriptions"
         self.api_key = api_key
         self.on_transcript = on_transcript
+        self.on_speech_start = on_speech_start
         
         self.vad = webrtcvad.Vad(3) # Aggressiveness 3 (highest)
         self.audio_buffer = bytearray()
@@ -88,6 +95,8 @@ class WhisperCloudSTTClient:
                 is_speech = False
                 
             if is_speech:
+                if not self.is_speaking and self.on_speech_start:
+                    self.on_speech_start()
                 self.is_speaking = True
                 self.silence_frames = 0
             elif self.is_speaking:

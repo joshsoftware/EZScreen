@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     jwt_secret: str
     internal_service_token: str | None = None
 
+    # dev | prod — candidate email masking / staging invite extras only run in dev.
+    app_env: str = "dev"
+
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 7
@@ -59,10 +62,27 @@ class Settings(BaseSettings):
     email_mode: str = "console"
     email_from: str = "noreply@ezscreen.io"
 
-    # Staging: when set, store candidate emails as local+<application_id>@domain
-    # from the resume address, and always add this address as a default additional
-    # invite recipient. Empty = store/use real emails with no default additional.
-    screening_invite_override_email: str | None = "nikhil.gosavi@joshsoftware.com"
+    # Dev only: when set, store candidate emails as
+    # local+<application_id>@domain from the resume address, and add these
+    # address(es) as default additional invite recipients (comma-separated).
+    # Empty / prod = real emails. Never default a real mailbox here —
+    # prod images must stay safe.
+    screening_invite_override_email: str | None = None
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def _normalize_app_env(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        cleaned = value.strip().lower()
+        aliases = {
+            "local": "dev",
+            "development": "dev",
+            "staging": "dev",
+            "production": "prod",
+        }
+        cleaned = aliases.get(cleaned, cleaned)
+        return cleaned if cleaned in {"dev", "prod"} else "dev"
 
     @field_validator("screening_invite_override_email", mode="before")
     @classmethod
@@ -70,6 +90,10 @@ class Settings(BaseSettings):
         if not isinstance(value, str):
             return value
         return value.strip() or None
+
+    @property
+    def is_dev(self) -> bool:
+        return self.app_env == "dev"
 
     # Google Calendar + Meet for screening interviews.
     # mock = placeholder meet.google.com URL (local/dev default)

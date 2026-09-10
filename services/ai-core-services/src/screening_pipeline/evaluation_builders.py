@@ -30,7 +30,17 @@ def build_evaluation_block(
     follow_ups: Optional[List[Dict]] = None,
 ) -> Dict[str, Any]:
     """Build the final evaluation block for analysis_result.evaluations[]."""
-    source = primary_eval if primary_eval else current_eval
+    # A repeat request is a conversational event, not a completed technical
+    # evaluation. Use the subsequent actual-answer evaluation defensively if
+    # an older in-memory transcript still contains REPEAT_QUESTION.
+    source = (
+        current_eval
+        if primary_eval and primary_eval.get("decision") == "REPEAT_QUESTION"
+        else (primary_eval or current_eval)
+    )
+    decision = source.get("decision", "NEXT_QUESTION")
+    if decision not in {"ASK_FOLLOW_UP", "NEXT_QUESTION"}:
+        decision = "ASK_FOLLOW_UP"
 
     evaluation = {
         "question_id": question_number,
@@ -40,7 +50,7 @@ def build_evaluation_block(
         "coverage_percent": source.get("coverage_percent", 0),
         "keywords_found": source.get("keywords_found", []),
         "keywords_missing": source.get("keywords_missing", []),
-        "decision": source.get("decision", "NEXT_QUESTION"),
+        "decision": decision,
         "feedback": source.get("feedback", ""),
     }
 

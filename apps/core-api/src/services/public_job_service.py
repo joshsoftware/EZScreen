@@ -31,9 +31,12 @@ from src.services import storage_service
 from src.services.application_candidate_pipeline_service import (
     enqueue_candidate_application_pipeline,
 )
+from src.services.email_service import (
+    ApplicationConfirmationPayload,
+    send_application_confirmation,
+)
 from src.services.application_ingest_service import find_or_create_candidate
 from src.services.application_timeline_service import append_timeline_event
-from src.services.candidate_email_masking import mask_email_for_application
 
 __all__ = [
     "list_public_jobs",
@@ -228,16 +231,21 @@ def submit_public_application(
     db.refresh(application)
 
     org = db.get(Organization, job.organization_id)
-    candidate_name = f"{data.first_name} {data.last_name}".strip()
+    send_application_confirmation(
+        ApplicationConfirmationPayload(
+            to_email=data.email,
+            candidate_name=" ".join(
+                part for part in (data.first_name, data.last_name) if part
+            ).strip(),
+            job_title=job.title,
+            organization_name=org.name if org else None,
+        )
+    )
+
     enqueue_candidate_application_pipeline(
         application_id=application.id,
         job_id=job.id,
         s3_key=data.s3_key,
-        candidate_email=mask_email_for_application(data.email, application.id)
-        or data.email,
-        candidate_name=candidate_name,
-        job_title=job.title or "the role",
-        organization_name=org.name if org else None,
     )
 
     return PublicCandidateApplyResponse(

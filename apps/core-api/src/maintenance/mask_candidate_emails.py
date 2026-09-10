@@ -8,7 +8,7 @@ their user id.
 
 Only candidates are touched — org admin, HR, and super admin logins are left alone.
 
-Requires SCREENING_INVITE_OVERRIDE_EMAIL to be set (feature flag for staging mask).
+Requires APP_ENV=dev and SCREENING_INVITE_OVERRIDE_EMAIL to be set.
 
 Usage (inside the core-api container):
 
@@ -87,7 +87,7 @@ def main() -> int:
 
     if not masking_enabled():
         print(
-            "SCREENING_INVITE_OVERRIDE_EMAIL is not set — nothing to mask.",
+            "Masking disabled — set APP_ENV=dev and SCREENING_INVITE_OVERRIDE_EMAIL.",
             file=sys.stderr,
         )
         return 1

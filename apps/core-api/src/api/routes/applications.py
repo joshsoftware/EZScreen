@@ -180,6 +180,76 @@ def rerun_job_fit(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+@applicant_router.post(
+    "/{application_id}/re-evaluate",
+    response_model=JobFitRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Re-parse and re-evaluate an application resume",
+)
+def re_evaluate_application(
+    job_id: UUID,
+    application_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+) -> JobFitRunResponse:
+    job = job_service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+
+    application = application_service.get_application(db, application_id)
+    if application is None or application.job_description_id != job_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+    if application.resume_score is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Application has already been evaluated",
+        )
+    s3_key = (application.resume_url or "").strip()
+    if not isinstance(application.parsed_resume, dict) and not s3_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Application has no resume to re-evaluate",
+        )
+
+    application_service.enqueue_candidate_application_pipeline(
+        application_id=application.id,
+        job_id=job.id,
+        s3_key=s3_key,
+        reparse_resume=False,
+    )
+    return JobFitRunResponse(
+        application_id=application.id,
+        status="queued",
+        resume_score=application.resume_score,
+    )
+
+
+@applicant_router.get(
+    "/{application_id}/re-evaluation-status",
+    summary="Get application re-evaluation status",
+)
+def get_re_evaluation_status(
+    job_id: UUID,
+    application_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+) -> dict[str, str | None]:
+    job = job_service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+    application = application_service.get_application(db, application_id)
+    if application is None or application.job_description_id != job_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+    return application_service.get_candidate_application_pipeline_status(application_id)
+
 
 @detail_router.get(
     "/{application_id}",

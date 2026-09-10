@@ -1,14 +1,16 @@
-"""Staging-safe candidate email masking.
+"""Dev-only candidate email masking.
 
-While ``SCREENING_INVITE_OVERRIDE_EMAIL`` is set, candidate addresses from resumes
-are rewritten to plus-addressed variants of the *original* mailbox
-(``local+<application_id>@domain``). Each application stays identifiable while
-preserving the candidate's real local-part and domain.
+Only active when ``APP_ENV=dev`` **and** ``SCREENING_INVITE_OVERRIDE_EMAIL`` is
+set. In that case candidate addresses from resumes are rewritten to
+plus-addressed variants of the *original* mailbox
+(``local+<application_id>@domain``).
 
-The override address itself is only used as a default *additional* invite
-recipient (see interview_session_service) — not as the stored candidate email.
+The override address(es) themselves are only used as default *additional*
+invite recipients (see interview_session_service) — not as the stored
+candidate email. Comma-separated values are supported.
 
-Clear the setting to store and use real candidate addresses unchanged.
+When ``APP_ENV=prod`` (or the override is empty), real resume emails are stored
+and used unchanged.
 """
 
 from __future__ import annotations
@@ -19,21 +21,33 @@ from src.config.settings import settings
 
 __all__ = [
     "masking_enabled",
-    "default_additional_invite_email",
+    "default_additional_invite_emails",
     "mask_email_for_application",
 ]
 
 
-def default_additional_invite_email() -> str | None:
-    """Staging default additional invite recipient, or None when unset."""
-    base = (settings.screening_invite_override_email or "").strip().lower()
-    if not base or "@" not in base:
-        return None
-    return base
+def _configured_override_emails() -> list[str]:
+    raw = (settings.screening_invite_override_email or "").strip().lower()
+    if not raw:
+        return []
+    emails: list[str] = []
+    for part in raw.replace(";", ",").split(","):
+        email = part.strip()
+        if email and "@" in email:
+            emails.append(email)
+    return list(dict.fromkeys(emails))
+
+
+def default_additional_invite_emails() -> list[str]:
+    """Dev default additional invite recipients, or [] when disabled."""
+    if not settings.is_dev:
+        return []
+    return _configured_override_emails()
 
 
 def masking_enabled() -> bool:
-    return default_additional_invite_email() is not None
+    """True only in dev when at least one override mailbox is configured."""
+    return bool(default_additional_invite_emails())
 
 
 def mask_email_for_application(
