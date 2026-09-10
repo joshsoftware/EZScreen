@@ -114,13 +114,21 @@ class Settings(BaseSettings):
 
     @property
     def s3_endpoint_url(self) -> str:
+        """Browser-facing MinIO/S3 URL (presigned uploads/downloads)."""
         scheme = "https" if self.minio_secure else "http"
         return f"{scheme}://{self.minio_endpoint}"
 
     @property
     def s3_internal_endpoint_url(self) -> str:
-        scheme = "https" if self.minio_secure else "http"
+        """Server-side MinIO URL (health checks, get_object).
+
+        When MINIO_INTERNAL_ENDPOINT is set (e.g. minio:9000 in Docker), always
+        use http — TLS terminates at nginx for the public host only.
+        """
         host = (self.minio_internal_endpoint or self.minio_endpoint).strip()
+        if self.minio_internal_endpoint:
+            return f"http://{host}"
+        scheme = "https" if self.minio_secure else "http"
         return f"{scheme}://{host}"
 
     @property
