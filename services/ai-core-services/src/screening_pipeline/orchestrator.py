@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core.config import settings
@@ -86,6 +87,7 @@ class InterviewOrchestrator:
         self.tts_client = tts_client or LocalKokoroTTSClient()
 
         resolved_llm = llm_client or OllamaClient()
+        self.llm_client = resolved_llm
         self.evaluator = evaluator or AnswerEvaluator(resolved_llm)
         self.api_client = api_client  # Usually set after session load
 
