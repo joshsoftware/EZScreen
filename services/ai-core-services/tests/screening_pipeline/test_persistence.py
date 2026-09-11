@@ -76,7 +76,9 @@ async def test_persist_interview_close_calls_summary_and_metadata():
     api_client.save_final_summary = AsyncMock()
     api_client.save_interview_metadata = AsyncMock()
 
-    await persist_interview_close(api_client, [{"score": 7}], [{"bot_speech": "hi"}])
+    llm_client = MagicMock()
+    llm_client.openai_chat_generate = AsyncMock(return_value=MagicMock(response='{"interview_summary": ["point 1"]}'))
+    await persist_interview_close(api_client, llm_client, [{"score": 7, "category": "must_have_matched"}], [{"bot_speech": "hi"}])
 
     api_client.save_final_summary.assert_awaited_once()
     api_client.save_interview_metadata.assert_awaited_once()

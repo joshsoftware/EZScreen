@@ -88,7 +88,7 @@ FINAL_QUALITATIVE_SUMMARY_PROMPT = (
     "Only comment on categories that were actually asked in the transcript. "
     "Ensure the final bullet point provides an overall summary of their fit.\n\n"
     "Return STRICT JSON only. No markdown, no commentary:\n"
-    "{\n"
+    "{{\n"
     "  \"interview_summary\": [\n"
     "    \"bullet point 1\",\n"
     "    \"bullet point 2\",\n"
@@ -96,5 +96,5 @@ FINAL_QUALITATIVE_SUMMARY_PROMPT = (
     "    \"bullet point 4\",\n"
     "    \"bullet point 5\"\n"
     "  ]\n"
-    "}"
+    "}}"
 )

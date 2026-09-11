@@ -35,7 +35,7 @@ async def test_close_interview_saves_closing_reply_then_requests_bot_leave(monke
             if False:
                 yield b""
 
-    async def record_persistence(*_args):
+    async def record_persistence(*_args, **kwargs):
         events.append(("saved", None))
 
     async def record_leave(bot_id):
@@ -91,7 +91,7 @@ async def test_close_interview_without_reply_saves_then_leaves_after_silent_time
             if False:
                 yield b""
 
-    async def record_persistence(*_args):
+    async def record_persistence(*_args, **kwargs):
         events.append(("saved", None))
 
     async def record_leave(bot_id):
