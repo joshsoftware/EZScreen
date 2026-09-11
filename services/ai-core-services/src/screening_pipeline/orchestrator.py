@@ -6,7 +6,6 @@ Controls the flow: Greeting → Questions → Evaluation → Follow-up → Closi
 from __future__ import annotations
 
 import asyncio
-import random
 
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -123,7 +122,6 @@ class InterviewOrchestrator:
             self.api_client = SessionApiClient(session_id=str(self.session.id))
 
         self.questions = _coerce_questions_list(self.session.generated_questions)
-        random.shuffle(self.questions)
         self.is_active = True
 
         await self.stt_client.connect()
