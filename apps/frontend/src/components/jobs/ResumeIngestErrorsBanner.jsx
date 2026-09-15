@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Alert } from '../ui/Alert'
 
-const DEFAULT_DISMISS_MS = 10000
+const DEFAULT_DISMISS_MS = 30000
 
 function formatIngestErrorSummary(errors) {
   if (!errors.length) return ''
@@ -46,8 +46,11 @@ export function ResumeIngestErrorsBanner({
       <div>
         <p className="font-medium">
           {errors.length === 1
-            ? 'A resume could not be processed'
-            : `${errors.length} resumes could not be processed`}
+            ? 'In this upload, 1 resume could not be processed'
+            : `In this upload, ${errors.length} resumes could not be processed`}
+        </p>
+        <p className="text-body-sm mt-xs opacity-90">
+          Re-upload only the files listed below. Already-applied candidates do not need another upload.
         </p>
         <p className="text-body-sm mt-xs opacity-90">{formatIngestErrorSummary(errors)}</p>
       </div>

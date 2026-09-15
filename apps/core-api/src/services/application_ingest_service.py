@@ -39,6 +39,7 @@ from src.services.application_job_fit_service import apply_job_fit
 from src.services.application_timeline_service import append_timeline_event
 from src.services.candidate_email_masking import mask_email_for_application
 from src.services.application_ingest_error_store import (
+    clear_ingest_errors,
     list_ingest_errors as list_stored_ingest_errors,
     record_ingest_error,
 )
@@ -98,6 +99,10 @@ def enqueue_bulk_resumes(
             organization_id=job.organization_id,
             job_id=job.id,
         )
+
+    # Latest upload attempt only — drop earlier failures so the banner
+    # never mixes previous attempts with this one.
+    clear_ingest_errors(job.id)
 
     for resume in body.resumes:
         thread = threading.Thread(
@@ -234,6 +239,9 @@ def _ingest_error_message(error_code: str, exc: Exception) -> str:
     if error_code == "invalid_candidate":
         return str(exc).strip() or "Could not create a candidate from this resume."
     if error_code == "parse_failed":
+        text = str(exc).strip().lower()
+        if "timed out" in text or "timeout" in text:
+            return "Resume parsing timed out — re-upload this file."
         return str(exc).strip() or "Resume parsing failed."
     if isinstance(exc, ValueError) and str(exc).strip():
         return str(exc).strip()

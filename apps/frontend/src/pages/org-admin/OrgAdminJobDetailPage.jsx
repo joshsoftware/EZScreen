@@ -7,6 +7,7 @@ import {
   updateJobRequest,
   getResumeIngestErrorsRequest,
   getJobRequest,
+  listJobsRequest,
 } from '../../features/jobs/api'
 import {
   useJobApplicantsQuery,
@@ -45,7 +46,8 @@ import { PageSkeleton } from '../../components/ui/Skeleton'
 import { ResumeIngestErrorsBanner } from '../../components/jobs/ResumeIngestErrorsBanner'
 
 const POLL_INTERVAL_MS = 3000
-const POLL_TIMEOUT_MS = 120000
+/** Keep watching long enough for large batches (parse timeout is 5m per file). */
+const POLL_TIMEOUT_MS = 900000
 
 export function OrgAdminJobDetailPage() {
   const { jobId = '' } = useParams()
@@ -64,15 +66,20 @@ export function OrgAdminJobDetailPage() {
   const [fitFilter, setFitFilter] = useState('all')
   const [queueWatch, setQueueWatch] = useState(null)
   const [ingestErrors, setIngestErrors] = useState([])
+  /** Keep filtering by the latest upload even after the queue watch ends. */
+  const [attemptStartedAt, setAttemptStartedAt] = useState(null)
   const applicantsRef = useRef([])
   const wasProcessingRef = useRef(false)
   const editSkillsInitializedRef = useRef(false)
 
   const activeQueueWatch = queueWatch ?? peekResumeQueueWatch(jobId, POLL_TIMEOUT_MS)
-  const recentIngestErrors = ingestErrors.filter((item) => {
-    if (!activeQueueWatch) return true
-    return new Date(item.created_at).getTime() >= activeQueueWatch.startedAt
-  })
+  const errorWindowStart = activeQueueWatch?.startedAt ?? attemptStartedAt
+  const recentIngestErrors =
+    errorWindowStart == null
+      ? []
+      : ingestErrors.filter(
+          (item) => new Date(item.created_at).getTime() >= errorWindowStart,
+        )
   const failedCount = recentIngestErrors.length
 
   const {
@@ -104,11 +111,7 @@ export function OrgAdminJobDetailPage() {
   const isProcessingResumes = processingRemaining > 0
 
   useEffect(() => {
-    if (!jobId) {
-      setIngestErrors([])
-      return undefined
-    }
-    if (!activeQueueWatch && ingestErrors.length === 0) {
+    if (!jobId || !activeQueueWatch) {
       return undefined
     }
 
@@ -116,29 +119,23 @@ export function OrgAdminJobDetailPage() {
 
     async function pollIngestErrors() {
       try {
-        const since = activeQueueWatch
-          ? new Date(activeQueueWatch.startedAt).toISOString()
-          : undefined
-        const data = await getResumeIngestErrorsRequest(jobId, since ? { since } : {})
+        const since = new Date(activeQueueWatch.startedAt).toISOString()
+        const data = await getResumeIngestErrorsRequest(jobId, { since })
         if (cancelled) return
         const errors = Array.isArray(data?.errors) ? data.errors : []
-        if (errors.length > 0) {
-          setIngestErrors(errors)
-        }
+        setIngestErrors(errors)
       } catch {
         // Polling should not interrupt the rest of the page.
       }
     }
 
     void pollIngestErrors()
-    if (!activeQueueWatch) return undefined
-
     const id = window.setInterval(pollIngestErrors, POLL_INTERVAL_MS)
     return () => {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [activeQueueWatch, ingestErrors.length, jobId])
+  }, [activeQueueWatch, jobId])
 
   useEffect(() => {
     if (!isProcessingResumes) return undefined
@@ -182,11 +179,14 @@ export function OrgAdminJobDetailPage() {
     if (!jobId) {
       setQueueWatch(null)
       setIngestErrors([])
+      setAttemptStartedAt(null)
       return
     }
     wasProcessingRef.current = false
     const stored = peekResumeQueueWatch(jobId, POLL_TIMEOUT_MS)
     setQueueWatch(stored)
+    setAttemptStartedAt(stored?.startedAt ?? null)
+    setIngestErrors([])
   }, [jobId])
 
   useEffect(() => {
@@ -290,9 +290,27 @@ export function OrgAdminJobDetailPage() {
     }
   }
 
-  function onCloneJob() {
+  async function onCloneJob() {
+    let existingTitles = []
+    try {
+      const pageSize = 50
+      let page = 1
+      while (page <= 20) {
+        const batch = await listJobsRequest({ page, limit: pageSize })
+        const jobs = Array.isArray(batch) ? batch : []
+        existingTitles = existingTitles.concat(
+          jobs.map((item) => item.title).filter(Boolean),
+        )
+        if (jobs.length < pageSize) break
+        page += 1
+      }
+    } catch {
+      // Fall through with empty titles — still produce Copy 1.
+    }
     navigate('/org-admin/jobs/new', {
-      state: { cloneInitialValues: jobToCloneFormValues(job) },
+      state: {
+        cloneInitialValues: jobToCloneFormValues(job, existingTitles),
+      },
     })
   }
 
@@ -300,14 +318,20 @@ export function OrgAdminJobDetailPage() {
     const added = Number(queued) || 0
     if (added <= 0) return
     wasProcessingRef.current = false
+    const startedAt = Date.now()
+    const scoredNow = applicantsRef.current.filter(
+      (item) => applicantScore(item) != null,
+    ).length
+    const pendingNow = applicantsRef.current.filter(
+      (item) => item.source === 'hr_bulk' && applicantScore(item) == null,
+    ).length
     setIngestErrors([])
-    setQueueWatch((current) => ({
-      targetScreened:
-        (current?.targetScreened ??
-          applicantsRef.current.filter((item) => applicantScore(item) != null).length) +
-        added,
-      startedAt: current?.startedAt ?? Date.now(),
-    }))
+    setAttemptStartedAt(startedAt)
+    // Fresh attempt window every upload so the banner never mixes prior failures.
+    setQueueWatch({
+      targetScreened: scoredNow + pendingNow + added,
+      startedAt,
+    })
     void invalidateJobApplicants(jobId)
   }
 

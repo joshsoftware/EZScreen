@@ -283,12 +283,46 @@ def create_job(
     return job
 
 
-def _clone_title(title: str | None) -> str:
+def _clone_root_title(title: str | None) -> str:
+    """Strip a trailing `` (Copy)`` / `` (Copy N)`` suffix to get the root title."""
     base = (title or "").strip() or "Untitled job"
-    suffix = " (Copy)"
-    if base.endswith(suffix):
-        return base
-    return f"{base}{suffix}"
+    match = re.fullmatch(r"(.*?)(?: \(Copy(?: \d+)?\))?", base)
+    root = (match.group(1).strip() if match else base) or "Untitled job"
+    return root
+
+
+def _clone_title(
+    db: Session,
+    *,
+    organization_id: UUID,
+    title: str | None,
+) -> str:
+    """Return the next unique ``{root} (Copy N)`` title within the organization."""
+    root = _clone_root_title(title)
+    like_root = (
+        root.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    stmt = select(JobDescription.title).where(
+        JobDescription.organization_id == organization_id,
+        JobDescription.title.ilike(f"{like_root} (Copy%", escape="\\"),
+    )
+    existing = [t for t in db.scalars(stmt).all() if isinstance(t, str)]
+    pattern = re.compile(
+        rf"^{re.escape(root)} \(Copy(?: (\d+))?\)$",
+        re.IGNORECASE,
+    )
+    used: set[int] = set()
+    for existing_title in existing:
+        match = pattern.fullmatch(existing_title.strip())
+        if not match:
+            continue
+        used.add(int(match.group(1)) if match.group(1) else 1)
+    n = 1
+    while n in used:
+        n += 1
+    return f"{root} (Copy {n})"
 
 
 def clone_job(
@@ -302,7 +336,11 @@ def clone_job(
     cloned = JobDescription(
         organization_id=source.organization_id,
         created_by=created_by,
-        title=_clone_title(source.title),
+        title=_clone_title(
+            db,
+            organization_id=source.organization_id,
+            title=source.title,
+        ),
         description=source.description,
         job_type=source.job_type,
         work_type=source.work_type,

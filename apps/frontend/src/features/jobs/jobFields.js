@@ -106,13 +106,38 @@ export function jobToFormValues(job) {
 }
 
 /** Prefill Create Job step 1 from an existing job (always draft). */
-export function jobToCloneFormValues(job) {
+export function stripCloneSuffix(title) {
+  const base = (title || '').trim() || 'Untitled job'
+  return base.replace(/ \(Copy(?: \d+)?\)$/i, '').trim() || 'Untitled job'
+}
+
+/**
+ * Next unique `{root} (Copy N)` title given existing org titles.
+ * Unnumbered `(Copy)` is treated as Copy 1 already taken.
+ */
+export function nextCloneTitle(sourceTitle, existingTitles = []) {
+  const root = stripCloneSuffix(sourceTitle)
+  const escaped = root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(`^${escaped} \\(Copy(?: (\\d+))?\\)$`, 'i')
+  const used = new Set()
+  for (const title of existingTitles) {
+    const match = String(title || '')
+      .trim()
+      .match(pattern)
+    if (!match) continue
+    used.add(match[1] ? Number(match[1]) : 1)
+  }
+  let n = 1
+  while (used.has(n)) n += 1
+  return `${root} (Copy ${n})`
+}
+
+/** Prefill Create Job step 1 from an existing job (always draft). */
+export function jobToCloneFormValues(job, existingTitles = []) {
   const values = jobToFormValues(job)
-  const base = values.title.trim() || 'Untitled job'
-  const suffix = ' (Copy)'
   return {
     ...values,
-    title: base.endsWith(suffix) ? base : `${base}${suffix}`,
+    title: nextCloneTitle(values.title, existingTitles),
     status: 'draft',
   }
 }
