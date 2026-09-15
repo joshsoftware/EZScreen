@@ -425,28 +425,20 @@ class InterviewOrchestrator:
             # A real main answer replaces a preceding request to repeat it.
             self.transcript_log[-1]["candidate_answer"] = transcript
 
-        filler = "Thank you for answering the question."
-        
-        # Start evaluation in the background so it runs concurrently with TTS
-        import asyncio
-        eval_task = asyncio.create_task(
-            self.evaluator.evaluate_answer(
-                current_question=current_q,
-                transcript=transcript,
-                expected_keywords=expected_keywords,
-                answer_depth=answer_depth,
-                follow_up_context=follow_up_context,
-            )
+        # Evaluate the answer synchronously to determine the next step
+        eval_data = await self.evaluator.evaluate_answer(
+            current_question=current_q,
+            transcript=transcript,
+            expected_keywords=expected_keywords,
+            answer_depth=answer_depth,
+            follow_up_context=follow_up_context,
         )
-
-        # Speak the filler to avoid awkward silence
-        await self.speak(filler)
-
-        # Wait for the LLM evaluation to finish
-        eval_data = await eval_task
         decision = eval_data.get("decision", "NEXT_QUESTION")
         is_complete = decision == "NEXT_QUESTION"
         follow_up_question = eval_data.get("suggested_follow_up", "")
+        if()
+        if decision != "REPEAT_QUESTION":
+            await self.speak("Thank you for answering the question.")
 
         if decision == "REPEAT_QUESTION":
             # Do not consume a follow-up or persist REPEAT_QUESTION. If a
