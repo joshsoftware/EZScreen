@@ -40,6 +40,7 @@ class EvaluationFollowUpItem(BaseModel):
 
 class SaveEvaluationRequest(BaseModel):
     question_id: int = Field(..., ge=1)
+    category: str = Field(default="must_have_matched")
     question: str = Field(..., min_length=1)
     candidate_answer: str = Field(..., min_length=1)
     score: float = Field(..., ge=0, le=10)
@@ -52,10 +53,14 @@ class SaveEvaluationRequest(BaseModel):
 
 
 class SaveEvaluationSummaryRequest(BaseModel):
+    raw_must_have_score: float = Field(default=0.0)
+    raw_domain_expertise_score: float = Field(default=0.0)
+    raw_good_to_have_score: float = Field(default=0.0)
+    raw_lacking_skill_score: float = Field(default=0.0)
     total_score: float = Field(..., ge=0)
     max_possible_score: float = Field(..., gt=0)
     overall_score: float = Field(..., ge=0, le=10)
-    final_recommendation: Literal["shortlist_for_l1", "reject", "review"]
+    final_recommendation: str
 
 
 class TranscriptFollowUpItem(BaseModel):

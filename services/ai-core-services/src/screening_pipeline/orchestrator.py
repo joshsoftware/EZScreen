@@ -6,7 +6,7 @@ Controls the flow: Greeting → Questions → Evaluation → Follow-up → Closi
 from __future__ import annotations
 
 import asyncio
-import random
+
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core.config import settings
@@ -86,6 +86,7 @@ class InterviewOrchestrator:
         self.tts_client = tts_client or LocalKokoroTTSClient()
 
         resolved_llm = llm_client or OllamaClient()
+        self.llm_client = resolved_llm
         self.evaluator = evaluator or AnswerEvaluator(resolved_llm)
         self.api_client = api_client  # Usually set after session load
 
@@ -121,7 +122,6 @@ class InterviewOrchestrator:
             self.api_client = SessionApiClient(session_id=str(self.session.id))
 
         self.questions = _coerce_questions_list(self.session.generated_questions)
-        random.shuffle(self.questions)
         self.is_active = True
 
         await self.stt_client.connect()
@@ -166,8 +166,10 @@ class InterviewOrchestrator:
         try:
             await persist_interview_close(
                 self.api_client,
+                self.llm_client,
                 self.analysis_evaluations,
                 self.transcript_log,
+                termination_reason=reason,
             )
         except Exception as err:
             logger.error(
@@ -330,6 +332,7 @@ class InterviewOrchestrator:
             self._silence_prompt_task = None
             self._awaiting_silence_reply = False
             self._silence_cycle_started_at = None
+            self.termination_reason = "candidate_silence"
             await self._close_interview()
             return
 
@@ -352,7 +355,7 @@ class InterviewOrchestrator:
             await self._ask_next_question()
             return
 
-        question_obj = self.questions[self.current_question_idx]
+        question_obj = getattr(self, "current_question_obj", {})
         current_q = question_obj.get("question", "")
 
         intent, ai_response = await self.evaluator.route_intent(current_q, transcript)
@@ -422,28 +425,20 @@ class InterviewOrchestrator:
             # A real main answer replaces a preceding request to repeat it.
             self.transcript_log[-1]["candidate_answer"] = transcript
 
-        filler = "Thank you for answering the question."
-        
-        # Start evaluation in the background so it runs concurrently with TTS
-        import asyncio
-        eval_task = asyncio.create_task(
-            self.evaluator.evaluate_answer(
-                current_question=current_q,
-                transcript=transcript,
-                expected_keywords=expected_keywords,
-                answer_depth=answer_depth,
-                follow_up_context=follow_up_context,
-            )
+        # Evaluate the answer synchronously to determine the next step
+        eval_data = await self.evaluator.evaluate_answer(
+            current_question=current_q,
+            transcript=transcript,
+            expected_keywords=expected_keywords,
+            answer_depth=answer_depth,
+            follow_up_context=follow_up_context,
         )
-
-        # Speak the filler to avoid awkward silence
-        await self.speak(filler)
-
-        # Wait for the LLM evaluation to finish
-        eval_data = await eval_task
         decision = eval_data.get("decision", "NEXT_QUESTION")
         is_complete = decision == "NEXT_QUESTION"
         follow_up_question = eval_data.get("suggested_follow_up", "")
+        if()
+        if decision != "REPEAT_QUESTION":
+            await self.speak("Thank you for answering the question.")
 
         if decision == "REPEAT_QUESTION":
             # Do not consume a follow-up or persist REPEAT_QUESTION. If a
@@ -539,11 +534,23 @@ class InterviewOrchestrator:
 
     async def _ask_next_question(self):
         """Moves to the next question or closes the interview."""
-        if self.current_question_idx >= len(self.questions):
+        if not hasattr(self, "question_queues"):
+            from src.screening_pipeline.routing_engine import initialize_queues
+            self.question_queues = initialize_queues(self.questions)
+            
+        from src.screening_pipeline.routing_engine import get_next_question
+        
+        question_obj, termination_reason = get_next_question(self.question_queues, self.analysis_evaluations)
+        
+        if not question_obj:
+            if termination_reason == "fatal_failure":
+                from src.core.logger import logger
+                logger.info("Candidate failed to recover. Terminating early.", extra={"session_id": self.session_id})
+                self.termination_reason = "fatal_failure"
             await self._close_interview()
             return
 
-        question_obj = self.questions[self.current_question_idx]
+        self.current_question_obj = question_obj
         q_text = question_obj.get("question", "")
 
         self.transcript_log.append(
@@ -601,7 +608,8 @@ class InterviewOrchestrator:
         """Persist the closing interaction, then request the bot leave."""
         self.current_interaction_state = "closing_persisting"
         self._cancel_closing_reply_timeout(reason="closing interaction completed")
-        await self.finalize(reason="questions_completed")
+        reason = getattr(self, "termination_reason", "questions_completed")
+        await self.finalize(reason=reason)
         await self._leave_bot_after_close()
         self.is_active = False
 

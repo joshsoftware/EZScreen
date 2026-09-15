@@ -93,11 +93,12 @@ Apply the following difficulty guidance based on the Target Experience Level:
 - If 3-5 years (MEDIUM): Ask single-concept questions that verify genuine hands-on knowledge.
 - If 5+ years (HARD): Ask high-level "when to use what" or architecture questions.
 
-Generate EXACTLY 15 questions in total across the following categories:
-1. CATEGORY "must_have_matched" — from matched_skills.must_have (7–8 questions)
-2. CATEGORY "lacking_skill" — from missing_skills.must_have (3–4 questions)
-3. CATEGORY "good_to_have" — from JD good-to-have skills (2–3 questions)
-4. CATEGORY "experience_domain" — from JD responsibilities (~2 purely technical questions)
+Generate EXACTLY 15 questions in total across the following categories.
+Choose the exact count within each range based on how many distinct skills or topics are available:
+1. CATEGORY "must_have_matched" — from matched_skills.must_have (7 to 8 questions)
+2. CATEGORY "good_to_have" — from JD good-to-have skills (3 to 4 questions)
+3. CATEGORY "experience_domain" — from JD responsibilities (2 to 3 purely technical questions)
+4. CATEGORY "lacking_skill" — from missing_skills.must_have (2 to 3 questions)
 
 ═══ ANSWER DEPTH LEVELS ═══
 Each question must include an `answer_depth` level ("aware", "partial_depth", or "full_depth") based on how strictly the answer should be evaluated:
