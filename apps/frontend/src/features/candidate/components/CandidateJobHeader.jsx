@@ -48,10 +48,12 @@ export function CandidateJobHeader({ job }) {
           </span>
         ) : null}
 
-        {(job.experience_min !== null || job.experience_max !== null) ? (
+        {(job.experience_min != null || job.experience_max != null) ? (
           <span className="inline-flex items-center gap-xs rounded-lg bg-surface-container-low px-sm py-xs text-body-sm font-medium text-on-surface">
             <span className="material-symbols-outlined text-primary text-[18px]">badge</span>
-            {job.experience_min ?? 0} - {job.experience_max ?? 'Any'} yrs exp
+            {job.experience_max == null
+              ? `${job.experience_min ?? 0}+ yrs exp`
+              : `${job.experience_min ?? 0} - ${job.experience_max} yrs exp`}
           </span>
         ) : null}
       </div>
