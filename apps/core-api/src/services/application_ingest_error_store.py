@@ -10,6 +10,7 @@ from typing import Any
 from uuid import UUID
 
 __all__ = [
+    "clear_ingest_errors",
     "record_ingest_error",
     "list_ingest_errors",
 ]
@@ -34,6 +35,12 @@ def _prune_job_errors(job_id: UUID, *, now: datetime | None = None) -> None:
     while bucket and bucket[0]["created_at"] < cutoff:
         bucket.popleft()
     if not bucket:
+        _ERRORS.pop(job_id, None)
+
+
+def clear_ingest_errors(job_id: UUID) -> None:
+    """Drop stored failures for a job (used when a new bulk upload starts)."""
+    with _LOCK:
         _ERRORS.pop(job_id, None)
 
 
