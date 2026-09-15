@@ -436,7 +436,6 @@ class InterviewOrchestrator:
         decision = eval_data.get("decision", "NEXT_QUESTION")
         is_complete = decision == "NEXT_QUESTION"
         follow_up_question = eval_data.get("suggested_follow_up", "")
-        if()
         if decision != "REPEAT_QUESTION":
             await self.speak("Thank you for answering the question.")
 
