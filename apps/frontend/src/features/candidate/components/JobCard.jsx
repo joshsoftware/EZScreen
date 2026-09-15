@@ -43,10 +43,12 @@ export function JobCard({ job, org = ORG_URL_SLUG }) {
             </span>
           ) : null}
 
-          {(job.experience_min !== null || job.experience_max !== null) ? (
+          {(job.experience_min != null || job.experience_max != null) ? (
             <span className="inline-flex items-center gap-xs rounded-lg bg-surface-container-low px-sm py-xs text-label-md">
               <span className="material-symbols-outlined text-[14px] text-primary">badge</span>
-              {job.experience_min ?? 0} - {job.experience_max ?? 'Any'} yrs
+              {job.experience_max == null
+                ? `${job.experience_min ?? 0}+ yrs`
+                : `${job.experience_min ?? 0} - ${job.experience_max} yrs`}
             </span>
           ) : null}
         </div>
