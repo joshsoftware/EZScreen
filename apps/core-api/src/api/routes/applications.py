@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import queue
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, AsyncIterator
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -26,7 +28,12 @@ from src.schemas.application import (
     UploadUrlsResponse,
 )
 from src.services import application_service, job_service
-
+from src.services.application_ingest_progress import (
+    encode_sse,
+    get_batch_snapshot,
+    subscribe,
+    unsubscribe,
+)
 router = APIRouter(
     prefix="/jobs/{job_id}/applications",
     tags=["Candidate Applications"],
@@ -130,6 +137,65 @@ def list_ingest_errors(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     _assert_job_access(current_user, job)
     return application_service.list_ingest_errors(job_id, since=since)
+
+
+@router.get(
+    "/ingest-stream",
+    summary="Stream bulk resume ingest progress for a batch (SSE)",
+)
+async def stream_ingest_progress(
+    job_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+    batch_id: str = Query(..., min_length=8, max_length=64),
+) -> StreamingResponse:
+    job = job_service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    _assert_job_access(current_user, job)
+
+    subscribed = subscribe(batch_id)
+    if subscribed is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ingest batch not found or already expired",
+        )
+    subscriber, snapshot = subscribed
+    if str(snapshot.get("job_id")) != str(job_id):
+        unsubscribe(batch_id, subscriber)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ingest batch not found for this job",
+        )
+
+    async def event_generator() -> AsyncIterator[str]:
+        try:
+            while True:
+                try:
+                    payload = await asyncio.to_thread(subscriber.get, True, 15.0)
+                except queue.Empty:
+                    # Keep proxies / browsers from closing idle streams.
+                    yield ": keepalive\n\n"
+                    latest = get_batch_snapshot(batch_id)
+                    if latest and latest.get("done"):
+                        yield encode_sse(latest)
+                        break
+                    continue
+                yield encode_sse(payload)
+                if payload.get("done"):
+                    break
+        finally:
+            unsubscribe(batch_id, subscriber)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @applicant_router.get(

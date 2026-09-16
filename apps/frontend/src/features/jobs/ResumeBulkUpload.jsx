@@ -7,10 +7,7 @@ import {
   getResumeUploadUrlsRequest,
 } from './api'
 
-const ALLOWED_TYPES = new Set([
-  'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-])
+const ALLOWED_TYPES = new Set(['application/pdf'])
 
 function isGoogleDriveConfigured() {
   return Boolean(
@@ -29,6 +26,12 @@ function normalizeContentType(file) {
   return ''
 }
 
+function isAllowedResumeFile(file) {
+  const lower = file.name.toLowerCase()
+  if (lower.endsWith('.pdf')) return true
+  return ALLOWED_TYPES.has(normalizeContentType(file))
+}
+
 export function ResumeBulkUpload({ jobId, onQueued }) {
   const inputRef = useRef(null)
   const [files, setFiles] = useState([])
@@ -42,17 +45,31 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
   const busy = uploading || pickingDrive
   const fileLabel = !hasFiles
     ? driveConfigured
-      ? 'Drop PDF or DOCX files here, or pick from device / Drive.'
-      : 'Drop PDF or DOCX files here, or browse to select.'
+      ? 'Drop PDF files here, or pick from device / Drive.'
+      : 'Drop PDF files here, or browse to select.'
     : `${files.length} file${files.length === 1 ? '' : 's'} ready to upload`
 
   function addFiles(selected) {
     if (!selected.length) return
     setError(null)
+    const allowed = []
+    const rejected = []
+    for (const file of selected) {
+      if (isAllowedResumeFile(file)) allowed.push(file)
+      else rejected.push(file.name)
+    }
+    if (rejected.length) {
+      const sample = rejected.slice(0, 3).join(', ')
+      const more = rejected.length > 3 ? ` (+${rejected.length - 3} more)` : ''
+      setError(
+        `Only PDF resumes are supported. Skipped: ${sample}${more}`,
+      )
+    }
+    if (!allowed.length) return
     setFiles((current) => {
       const existing = new Set(current.map((file) => `${file.name}-${file.size}`))
       const next = [...current]
-      for (const file of selected) {
+      for (const file of allowed) {
         const key = `${file.name}-${file.size}`
         if (!existing.has(key)) {
           next.push(file)
@@ -87,11 +104,13 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
       const { pickResumesFromGoogleDrive } = await import('../../lib/googleDrivePicker')
       const selected = await pickResumesFromGoogleDrive()
       if (!selected.length) return
-      const allowed = selected.filter((file) => ALLOWED_TYPES.has(normalizeContentType(file)))
+      const allowed = selected.filter((file) => isAllowedResumeFile(file))
       const skipped = selected.length - allowed.length
       if (allowed.length) addFiles(allowed)
       if (skipped > 0) {
-        toast.message(`${skipped} Drive file${skipped === 1 ? '' : 's'} skipped (PDF/DOCX only)`)
+        toast.message(
+          `${skipped} Drive file${skipped === 1 ? '' : 's'} skipped (PDF only)`,
+        )
       }
       if (allowed.length) {
         toast.success(
@@ -129,10 +148,10 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
     setUploading(true)
     setError(null)
 
-    const invalid = files.find((file) => !ALLOWED_TYPES.has(normalizeContentType(file)))
+    const invalid = files.find((file) => !isAllowedResumeFile(file))
     if (invalid) {
       setUploading(false)
-      setError(`Unsupported file type: ${invalid.name}. Use PDF or DOCX only.`)
+      setError(`Unsupported file type: ${invalid.name}. Use PDF only.`)
       return
     }
 
@@ -165,10 +184,12 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
 
       const queued = await enqueueBulkResumesRequest(jobId, uploadedResumes)
       const queuedValue = Number(queued?.queued || uploadedResumes.length)
+      const batchId =
+        typeof queued?.batch_id === 'string' ? queued.batch_id.trim() : ''
       toast.success(`${queuedValue} resume${queuedValue === 1 ? '' : 's'} queued`)
       setFiles([])
       if (onQueued) {
-        await onQueued(queuedValue)
+        await onQueued({ queued: queuedValue, batchId })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload resumes')
@@ -207,7 +228,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
           <span className="material-symbols-outlined text-[32px] text-secondary">upload_file</span>
           <p className="text-body-sm text-on-surface">{fileLabel}</p>
           <p className="text-label-md text-on-surface-variant">
-            Supports PDF and DOCX
+            Supports PDF only
             {driveConfigured ? ' · device or Google Drive' : ''} · up to 50 files
           </p>
           <div className="flex flex-wrap gap-sm justify-center">
@@ -243,7 +264,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
             ref={inputRef}
             type="file"
             multiple
-            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            accept=".pdf,application/pdf"
             onChange={onFileChange}
             className="hidden"
             disabled={busy}

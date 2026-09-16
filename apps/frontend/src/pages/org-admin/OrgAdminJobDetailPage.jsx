@@ -5,9 +5,9 @@ import { JobForm } from '../../features/jobs/JobForm'
 import { JobSkillsEditor } from '../../features/jobs/JobSkillsEditor'
 import {
   updateJobRequest,
-  getResumeIngestErrorsRequest,
   getJobRequest,
   listJobsRequest,
+  streamResumeIngestProgress,
 } from '../../features/jobs/api'
 import {
   useJobApplicantsQuery,
@@ -45,9 +45,17 @@ import { PageHeader, Panel, StatCard } from '../../components/ui/PageHeader'
 import { PageSkeleton } from '../../components/ui/Skeleton'
 import { ResumeIngestErrorsBanner } from '../../components/jobs/ResumeIngestErrorsBanner'
 
-const POLL_INTERVAL_MS = 3000
-/** Keep watching long enough for large batches (parse timeout is 5m per file). */
 const POLL_TIMEOUT_MS = 900000
+
+function ingestErrorCreatedAtMs(value) {
+  if (value == null) return 0
+  if (typeof value === 'number') return value
+  const raw = String(value).trim()
+  if (!raw) return 0
+  const normalized = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw) ? raw : `${raw}Z`
+  const ms = Date.parse(normalized)
+  return Number.isFinite(ms) ? ms : 0
+}
 
 export function OrgAdminJobDetailPage() {
   const { jobId = '' } = useParams()
@@ -68,9 +76,14 @@ export function OrgAdminJobDetailPage() {
   const [ingestErrors, setIngestErrors] = useState([])
   /** Keep filtering by the latest upload even after the queue watch ends. */
   const [attemptStartedAt, setAttemptStartedAt] = useState(null)
+  const [activeBatchId, setActiveBatchId] = useState(null)
+  const [ingestProgress, setIngestProgress] = useState(null)
+  const [bannerDismissed, setBannerDismissed] = useState(false)
   const applicantsRef = useRef([])
   const wasProcessingRef = useRef(false)
   const editSkillsInitializedRef = useRef(false)
+  const lastErrorToastSigRef = useRef('')
+  const lastCompletedRef = useRef(0)
 
   const activeQueueWatch = queueWatch ?? peekResumeQueueWatch(jobId, POLL_TIMEOUT_MS)
   const errorWindowStart = activeQueueWatch?.startedAt ?? attemptStartedAt
@@ -78,9 +91,11 @@ export function OrgAdminJobDetailPage() {
     errorWindowStart == null
       ? []
       : ingestErrors.filter(
-          (item) => new Date(item.created_at).getTime() >= errorWindowStart,
+          (item) => ingestErrorCreatedAtMs(item.created_at) >= errorWindowStart - 5000,
         )
-  const failedCount = recentIngestErrors.length
+  const failedCount =
+    ingestProgress?.failed ?? recentIngestErrors.length
+  const visibleIngestErrors = bannerDismissed ? [] : recentIngestErrors
 
   const {
     data: job,
@@ -104,47 +119,82 @@ export function OrgAdminJobDetailPage() {
   const pendingIngestCount = applicants.filter(
     (item) => item.source === 'hr_bulk' && applicantScore(item) == null
   ).length
+  const streamRemaining =
+    ingestProgress && !ingestProgress.done
+      ? Math.max(0, Number(ingestProgress.remaining) || 0)
+      : null
   const queueRemaining = activeQueueWatch
     ? Math.max(0, activeQueueWatch.targetScreened - screenedCount - failedCount)
     : 0
-  const processingRemaining = Math.max(queueRemaining, pendingIngestCount)
-  const isProcessingResumes = processingRemaining > 0
+  const processingRemaining = Math.max(
+    streamRemaining ?? 0,
+    queueRemaining,
+    activeBatchId ? pendingIngestCount : 0,
+  )
+  const isProcessingResumes =
+    Boolean(activeBatchId) || processingRemaining > 0 || Boolean(streamRemaining)
 
   useEffect(() => {
-    if (!jobId || !activeQueueWatch) {
-      return undefined
-    }
+    if (!jobId || !activeBatchId) return undefined
 
+    const controller = new AbortController()
     let cancelled = false
 
-    async function pollIngestErrors() {
+    async function runStream() {
       try {
-        const since = new Date(activeQueueWatch.startedAt).toISOString()
-        const data = await getResumeIngestErrorsRequest(jobId, { since })
-        if (cancelled) return
-        const errors = Array.isArray(data?.errors) ? data.errors : []
-        setIngestErrors(errors)
-      } catch {
-        // Polling should not interrupt the rest of the page.
+        await streamResumeIngestProgress(jobId, activeBatchId, {
+          signal: controller.signal,
+          onEvent(event) {
+            if (cancelled || !event || typeof event !== 'object') return
+            setIngestProgress(event)
+            const errors = Array.isArray(event.errors) ? event.errors : []
+            setIngestErrors(errors)
+
+            const completed = Number(event.completed) || 0
+            if (completed > lastCompletedRef.current) {
+              lastCompletedRef.current = completed
+              void refetchApplicants()
+            }
+
+            if (errors.length > 0) {
+              const signature = errors
+                .map((item) => `${item.file_name}|${item.message}|${item.created_at}`)
+                .join(';')
+              if (signature !== lastErrorToastSigRef.current) {
+                lastErrorToastSigRef.current = signature
+                setBannerDismissed(false)
+                toast.error(
+                  errors.length === 1
+                    ? `1 resume failed: ${errors[0].file_name}`
+                    : `${errors.length} resumes could not be processed`,
+                )
+              }
+            }
+
+            if (event.done) {
+              clearResumeQueueWatch(jobId)
+              setQueueWatch(null)
+              setActiveBatchId(null)
+              void refetchApplicants()
+            }
+          },
+        })
+      } catch (err) {
+        if (cancelled || controller.signal.aborted) return
+        toast.error(
+          err instanceof Error ? err.message : 'Lost connection to resume progress',
+        )
+        setActiveBatchId(null)
+        void refetchApplicants()
       }
     }
 
-    void pollIngestErrors()
-    const id = window.setInterval(pollIngestErrors, POLL_INTERVAL_MS)
+    void runStream()
     return () => {
       cancelled = true
-      window.clearInterval(id)
+      controller.abort()
     }
-  }, [activeQueueWatch, jobId])
-
-  useEffect(() => {
-    if (!isProcessingResumes) return undefined
-    void refetchApplicants()
-    const id = window.setInterval(() => {
-      void refetchApplicants()
-    }, POLL_INTERVAL_MS)
-    return () => window.clearInterval(id)
-  }, [isProcessingResumes, refetchApplicants])
+  }, [activeBatchId, jobId, refetchApplicants])
 
   const error = jobQueryError
     ? jobQueryError instanceof ApiError
@@ -180,13 +230,23 @@ export function OrgAdminJobDetailPage() {
       setQueueWatch(null)
       setIngestErrors([])
       setAttemptStartedAt(null)
+      setActiveBatchId(null)
+      setIngestProgress(null)
+      setBannerDismissed(false)
+      lastErrorToastSigRef.current = ''
+      lastCompletedRef.current = 0
       return
     }
     wasProcessingRef.current = false
     const stored = peekResumeQueueWatch(jobId, POLL_TIMEOUT_MS)
     setQueueWatch(stored)
     setAttemptStartedAt(stored?.startedAt ?? null)
+    setActiveBatchId(stored?.batchId || null)
     setIngestErrors([])
+    setIngestProgress(null)
+    setBannerDismissed(false)
+    lastErrorToastSigRef.current = ''
+    lastCompletedRef.current = 0
   }, [jobId])
 
   useEffect(() => {
@@ -204,12 +264,18 @@ export function OrgAdminJobDetailPage() {
       wasProcessingRef.current = false
       if (failedCount === 0) {
         toast.success('Resume processing finished')
+      } else {
+        toast.error(
+          failedCount === 1
+            ? 'Resume processing finished with 1 failure'
+            : `Resume processing finished with ${failedCount} failures`,
+        )
       }
     }
   }, [failedCount, isProcessingResumes])
 
   useEffect(() => {
-    if (!activeQueueWatch) return undefined
+    if (!activeQueueWatch || activeBatchId) return undefined
 
     if (activeQueueWatch.targetScreened <= screenedCount + failedCount) {
       clearResumeQueueWatch(jobId)
@@ -223,7 +289,7 @@ export function OrgAdminJobDetailPage() {
       setQueueWatch(null)
       toast.message('Still processing — use refresh to check again')
     }
-  }, [activeQueueWatch, failedCount, jobId, screenedCount])
+  }, [activeBatchId, activeQueueWatch, failedCount, jobId, screenedCount])
 
   async function onSubmit(payload) {
     setSubmitting(true)
@@ -314,9 +380,16 @@ export function OrgAdminJobDetailPage() {
     })
   }
 
-  function handleQueued(queued) {
-    const added = Number(queued) || 0
-    if (added <= 0) return
+  function handleQueued(payload) {
+    const added =
+      typeof payload === 'object' && payload != null
+        ? Number(payload.queued)
+        : Number(payload)
+    const batchId =
+      typeof payload === 'object' && payload != null
+        ? String(payload.batchId || '').trim()
+        : ''
+    if (!Number.isFinite(added) || added <= 0) return
     wasProcessingRef.current = false
     const startedAt = Date.now()
     const scoredNow = applicantsRef.current.filter(
@@ -326,12 +399,24 @@ export function OrgAdminJobDetailPage() {
       (item) => item.source === 'hr_bulk' && applicantScore(item) == null,
     ).length
     setIngestErrors([])
+    setIngestProgress({
+      queued: added,
+      completed: 0,
+      failed: 0,
+      remaining: added,
+      done: false,
+      errors: [],
+    })
     setAttemptStartedAt(startedAt)
-    // Fresh attempt window every upload so the banner never mixes prior failures.
+    setBannerDismissed(false)
+    lastErrorToastSigRef.current = ''
+    lastCompletedRef.current = 0
     setQueueWatch({
       targetScreened: scoredNow + pendingNow + added,
       startedAt,
+      batchId: batchId || null,
     })
+    setActiveBatchId(batchId || null)
     void invalidateJobApplicants(jobId)
   }
 
@@ -369,7 +454,10 @@ export function OrgAdminJobDetailPage() {
 
   return (
     <div className="space-y-lg">
-      <ResumeIngestErrorsBanner errors={recentIngestErrors} />
+      <ResumeIngestErrorsBanner
+        errors={visibleIngestErrors}
+        onDismiss={() => setBannerDismissed(true)}
+      />
 
       <PageHeader
         breadcrumb={
