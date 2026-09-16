@@ -68,6 +68,7 @@ def _normalize_skill_item(
     if mode == "strings":
         return skill
     return {"skill": skill, "required_years": years if years is not None else default_years}
+    return {"skill": skill, "required_years": years}
 
 
 def _jd_for_match(parsed_jd: dict, *, mode: Literal["objects", "strings"]) -> dict:
@@ -78,6 +79,7 @@ def _jd_for_match(parsed_jd: dict, *, mode: Literal["objects", "strings"]) -> di
     if not isinstance(skills, dict):
         return jd
     default_years = _default_skill_years(jd)
+    
     normalized = {}
     for key in ("must_have", "good_to_have"):
         items = skills.get(key)
@@ -88,6 +90,7 @@ def _jd_for_match(parsed_jd: dict, *, mode: Literal["objects", "strings"]) -> di
         for item in items:
             converted = _normalize_skill_item(
                 item, default_years=default_years, mode=mode
+                item, mode=mode
             )
             if converted is not None:
                 bucket.append(converted)
