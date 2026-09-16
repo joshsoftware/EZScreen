@@ -32,22 +32,9 @@ def _json_safe(value: object) -> object:
     return value
 
 
-def _default_skill_years(parsed_jd: dict) -> float:
-    experience = parsed_jd.get("experience_required")
-    if isinstance(experience, dict):
-        for key in ("min_years", "max_years"):
-            raw = experience.get(key)
-            if isinstance(raw, Decimal):
-                raw = float(raw)
-            if isinstance(raw, (int, float)) and raw >= 0:
-                return float(raw)
-    return 0.0
-
-
 def _normalize_skill_item(
     item: object,
     *,
-    default_years: float,
     mode: Literal["objects", "strings"],
 ) -> dict | str | None:
     skill = None
@@ -67,7 +54,6 @@ def _normalize_skill_item(
         return None
     if mode == "strings":
         return skill
-    return {"skill": skill, "required_years": years if years is not None else default_years}
     return {"skill": skill, "required_years": years}
 
 
@@ -78,7 +64,6 @@ def _jd_for_match(parsed_jd: dict, *, mode: Literal["objects", "strings"]) -> di
     skills = jd.get("skills")
     if not isinstance(skills, dict):
         return jd
-    default_years = _default_skill_years(jd)
     
     normalized = {}
     for key in ("must_have", "good_to_have"):
@@ -89,7 +74,6 @@ def _jd_for_match(parsed_jd: dict, *, mode: Literal["objects", "strings"]) -> di
         bucket = []
         for item in items:
             converted = _normalize_skill_item(
-                item, default_years=default_years, mode=mode
                 item, mode=mode
             )
             if converted is not None:
