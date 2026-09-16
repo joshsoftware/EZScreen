@@ -1,58 +1,44 @@
-import { useEffect, useState } from 'react'
 import { Alert } from '../ui/Alert'
-
-const DEFAULT_DISMISS_MS = 30000
-
-function formatIngestErrorSummary(errors) {
-  if (!errors.length) return ''
-  if (errors.length === 1) {
-    const item = errors[0]
-    return `${item.file_name} — ${item.message}`
-  }
-  return errors.map((item) => `${item.file_name}: ${item.message}`).join(' · ')
-}
-
-function errorsSignature(errors) {
-  return errors
-    .map((item) => `${item.file_name ?? ''}|${item.message ?? ''}|${item.created_at ?? ''}`)
-    .join(';')
-}
+import { Button } from '../ui/Button'
 
 export function ResumeIngestErrorsBanner({
   errors = [],
-  dismissAfterMs = DEFAULT_DISMISS_MS,
+  onDismiss,
 }) {
-  const signature = errorsSignature(errors)
-  const [dismissedSignature, setDismissedSignature] = useState(null)
-
-  useEffect(() => {
-    if (!errors.length) {
-      setDismissedSignature(null)
-      return undefined
-    }
-
-    setDismissedSignature(null)
-    const id = window.setTimeout(() => {
-      setDismissedSignature(signature)
-    }, dismissAfterMs)
-
-    return () => window.clearTimeout(id)
-  }, [signature, dismissAfterMs, errors.length])
-
-  if (!errors.length || dismissedSignature === signature) return null
+  if (!errors.length) return null
 
   return (
     <Alert tone="warning">
-      <div>
-        <p className="font-medium">
-          {errors.length === 1
-            ? 'In this upload, 1 resume could not be processed'
-            : `In this upload, ${errors.length} resumes could not be processed`}
-        </p>
-        <p className="text-body-sm mt-xs opacity-90">
-          Re-upload only the files listed below. Already-applied candidates do not need another upload.
-        </p>
-        <p className="text-body-sm mt-xs opacity-90">{formatIngestErrorSummary(errors)}</p>
+      <div className="flex items-start justify-between gap-md">
+        <div className="min-w-0">
+          <p className="font-medium">
+            {errors.length === 1
+              ? 'In this upload, 1 resume could not be processed'
+              : `In this upload, ${errors.length} resumes could not be processed`}
+          </p>
+          <p className="text-body-sm mt-xs opacity-90">
+            Re-upload only the files listed below.
+          </p>
+          <ul className="text-body-sm mt-sm space-y-xs opacity-90 list-disc pl-md">
+            {errors.map((item) => (
+              <li key={`${item.file_name}-${item.created_at}-${item.message}`}>
+                <span className="font-medium">{item.file_name}</span>
+                {' — '}
+                {item.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+        {typeof onDismiss === 'function' ? (
+          <Button
+            type="button"
+            variant="ghost"
+            className="shrink-0"
+            onClick={onDismiss}
+          >
+            Dismiss
+          </Button>
+        ) : null}
       </div>
     </Alert>
   )

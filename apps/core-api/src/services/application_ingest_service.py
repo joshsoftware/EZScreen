@@ -43,6 +43,11 @@ from src.services.application_ingest_error_store import (
     list_ingest_errors as list_stored_ingest_errors,
     record_ingest_error,
 )
+from src.services.application_ingest_progress import (
+    mark_item_failure,
+    mark_item_success,
+    start_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,16 +109,19 @@ def enqueue_bulk_resumes(
     # never mixes previous attempts with this one.
     clear_ingest_errors(job.id)
 
+    queued = len(body.resumes)
+    batch_id = start_batch(job.id, queued)
+
     for resume in body.resumes:
         thread = threading.Thread(
             target=_process_resume,
-            args=(job.id, resume.s3_key, resume.file_name, actor_id),
+            args=(job.id, resume.s3_key, resume.file_name, actor_id, batch_id),
             daemon=True,
             name=f"resume-{resume.file_name[:40]}",
         )
         thread.start()
 
-    return BulkCreateResponse(job_id=job.id, queued=len(body.resumes))
+    return BulkCreateResponse(job_id=job.id, queued=queued, batch_id=batch_id)
 
 
 def list_ingest_errors(
@@ -140,13 +148,14 @@ def _process_resume(
     s3_key: str,
     file_name: str,
     actor_id: UUID | None = None,
+    batch_id: str | None = None,
 ) -> None:
     db = SessionLocal()
     try:
         job = db.get(JobDescription, job_id)
         if job is None:
             logger.error("Job %s not found while processing %s", job_id, file_name)
-            return
+            raise ValueError(f"Job {job_id} not found")
 
         parse_payload = call_parse_resume(s3_key=s3_key, file_name=file_name)
         if parse_payload.get("status") != "success":
@@ -203,14 +212,18 @@ def _process_resume(
             file_name,
             application.id,
         )
+        if batch_id:
+            mark_item_success(batch_id, file_name=file_name)
     except Exception as exc:
         error_code, _ = _classify_ingest_error(exc)
-        record_ingest_error(
+        entry = record_ingest_error(
             job_id,
             file_name=file_name,
             error_code=error_code,
             message=_ingest_error_message(error_code, exc),
         )
+        if batch_id:
+            mark_item_failure(batch_id, error=entry)
         logger.exception("Failed processing resume %s for job %s", file_name, job_id)
         db.rollback()
     finally:
@@ -227,6 +240,8 @@ def _classify_ingest_error(exc: Exception) -> tuple[str, str]:
             return "invalid_candidate", text
         if "could not extract candidate email" in lowered:
             return "invalid_candidate", text
+        if "unsupported resume format" in lowered or "only pdf" in lowered:
+            return "unsupported_format", text
         if "parse" in lowered or "parsed_resume" in lowered:
             return "parse_failed", text
         return "processing_failed", text or "Resume processing failed"
@@ -238,6 +253,8 @@ def _ingest_error_message(error_code: str, exc: Exception) -> str:
         return "This candidate has already applied to this job."
     if error_code == "invalid_candidate":
         return str(exc).strip() or "Could not create a candidate from this resume."
+    if error_code == "unsupported_format":
+        return "Only PDF resumes are supported — convert this file to PDF and re-upload."
     if error_code == "parse_failed":
         text = str(exc).strip().lower()
         if "timed out" in text or "timeout" in text:

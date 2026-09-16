@@ -73,6 +73,7 @@ class BulkCreateRequest(BaseModel):
 class BulkCreateResponse(BaseModel):
     job_id: UUID
     queued: int
+    batch_id: str
 
 
 class IngestErrorItem(BaseModel):

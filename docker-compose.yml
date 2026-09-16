@@ -4,6 +4,8 @@ services:
   # Compose substitutes from project-root `.env` OR:
   #   docker compose --env-file apps/core-api/.env --env-file services/ai-core-services/.env up -d
   # Staging MinIO public URL: MINIO_SERVER_URL in services/ai-core-services/.env
+  # Model weights host path: AI_MODELS_HOST_DIR (default ./data/ai-models;
+  #   staging: /www/ezscreen-models) — set in services/ai-core-services/.env
   db:
     image: postgres:15-alpine
     container_name: ezscreen-db
@@ -94,10 +96,17 @@ services:
     environment:
       CORE_API_URL: "http://core-api:8000"
       CORE_API_BASE_URL: "http://core-api:8000"
+      # Keep HF downloads on the host bind mount (not ephemeral container FS).
+      HF_HOME: /root/.cache/huggingface
+      TRANSFORMERS_CACHE: /root/.cache/huggingface
+      HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface
     volumes:
-      - rapidocr_models:/usr/local/lib/python3.11/site-packages/rapidocr/models
-      - hf_cache:/root/.cache/huggingface
-      - kokoro_models:/app/.models
+      # Models on the EC2 host (default: ./data/ai-models). Staging: set
+      # AI_MODELS_HOST_DIR=/www/ezscreen-models so weights live on the large disk,
+      # not under /var/lib/docker on the small root volume.
+      - ${AI_MODELS_HOST_DIR:-./data/ai-models}/rapidocr:/usr/local/lib/python3.11/site-packages/rapidocr/models
+      - ${AI_MODELS_HOST_DIR:-./data/ai-models}/huggingface:/root/.cache/huggingface
+      - ${AI_MODELS_HOST_DIR:-./data/ai-models}/kokoro:/app/.models
     depends_on:
       db:
         condition: service_healthy
@@ -124,6 +133,3 @@ services:
 volumes:
   pgdata:
   miniodata:
-  rapidocr_models:
-  hf_cache:
-  kokoro_models:

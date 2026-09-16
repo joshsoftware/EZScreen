@@ -8,13 +8,17 @@ function parseStoredWatch(raw, timeoutMs = 120000) {
   const parsed = JSON.parse(raw)
   const targetScreened = Number(parsed?.targetScreened)
   const startedAt = Number(parsed?.startedAt)
+  const batchId =
+    typeof parsed?.batchId === 'string' && parsed.batchId.trim()
+      ? parsed.batchId.trim()
+      : null
   if (!Number.isFinite(targetScreened) || !Number.isFinite(startedAt)) {
     return null
   }
   if (Date.now() - startedAt >= timeoutMs) {
     return null
   }
-  return { targetScreened, startedAt }
+  return { targetScreened, startedAt, batchId }
 }
 
 /** Read queue watch without mutating sessionStorage (safe during render). */
@@ -29,7 +33,7 @@ export function peekResumeQueueWatch(jobId, timeoutMs = 120000) {
   }
 }
 
-/** @returns {{ targetScreened: number, startedAt: number } | null} */
+/** @returns {{ targetScreened: number, startedAt: number, batchId?: string|null } | null} */
 export function loadResumeQueueWatch(jobId, screenedCount = null, timeoutMs = 120000) {
   if (!jobId) return null
   try {
@@ -62,10 +66,11 @@ export function saveResumeQueueWatch(jobId, watch) {
       JSON.stringify({
         targetScreened: watch.targetScreened,
         startedAt: watch.startedAt,
+        batchId: watch.batchId || null,
       }),
     )
   } catch {
-    // Private browsing or quota exceeded — polling still works in-memory.
+    // Private browsing or quota exceeded — in-memory watch still works.
   }
 }
 

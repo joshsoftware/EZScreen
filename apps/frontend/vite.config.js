@@ -17,6 +17,9 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: apiTarget,
           changeOrigin: true,
+          // Keep SSE ingest streams open (no proxy idle timeout).
+          timeout: 0,
+          proxyTimeout: 0,
         },
       },
     },

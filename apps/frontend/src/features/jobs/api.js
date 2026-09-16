@@ -1,4 +1,10 @@
 import { apiBlobRequest, apiRequest } from '../../lib/api/client'
+import { API_BASE_URL } from '../../config/env'
+import {
+  getAccessToken,
+  notifySessionExpired,
+  setAccessToken,
+} from '../../lib/auth/session'
 
 export function listJobsRequest({ status, page = 1, limit = 50 } = {}) {
   const search = new URLSearchParams()
@@ -120,6 +126,87 @@ export function getResumeIngestErrorsRequest(jobId, { since } = {}) {
     `/api/v1/jobs/${jobId}/applications/ingest-errors${query ? `?${query}` : ''}`,
     { method: 'GET' },
   )
+}
+
+/**
+ * Open an authenticated SSE stream for one bulk ingest batch.
+ * Calls onEvent for each progress payload until done or aborted.
+ */
+export async function streamResumeIngestProgress(
+  jobId,
+  batchId,
+  { onEvent, signal } = {},
+) {
+  const path = `/api/v1/jobs/${encodeURIComponent(jobId)}/applications/ingest-stream?batch_id=${encodeURIComponent(batchId)}`
+
+  async function openStream(token) {
+    const headers = new Headers({ Accept: 'text/event-stream' })
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    return fetch(`${API_BASE_URL}${path}`, {
+      method: 'GET',
+      headers,
+      credentials: 'include',
+      signal,
+    })
+  }
+
+  let bearer = getAccessToken()
+  let response = await openStream(bearer)
+  if (response.status === 401 && bearer) {
+    const refresh = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      signal,
+    })
+    if (refresh.ok) {
+      const data = await refresh.json()
+      if (data?.access_token) {
+        setAccessToken(data.access_token)
+        bearer = data.access_token
+        response = await openStream(bearer)
+      }
+    }
+    if (response.status === 401) {
+      notifySessionExpired()
+      throw new Error('Session expired')
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(`Ingest stream failed (${response.status})`)
+  }
+  if (!response.body) {
+    throw new Error('Ingest stream unavailable')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const chunks = buffer.split('\n\n')
+    buffer = chunks.pop() || ''
+    for (const chunk of chunks) {
+      const dataLine = chunk
+        .split('\n')
+        .map((line) => line.trimEnd())
+        .find((line) => line.startsWith('data:'))
+      if (!dataLine) continue
+      const jsonText = dataLine.replace(/^data:\s?/, '')
+      if (!jsonText) continue
+      let payload
+      try {
+        payload = JSON.parse(jsonText)
+      } catch {
+        continue
+      }
+      onEvent?.(payload)
+      if (payload?.done) return
+    }
+  }
 }
 
 export function rerunJobFitRequest(jobId, applicationId) {
