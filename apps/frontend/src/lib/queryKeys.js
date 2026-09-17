@@ -13,5 +13,6 @@ export const queryKeys = {
   application: (applicationId) => ['application', applicationId],
   applicationTimeline: (applicationId) => ['application', applicationId, 'timeline'],
   interviewSession: (sessionId) => ['interview-session', sessionId],
+  interviewAnalysis: (sessionId) => ['interview-analysis', sessionId],
 }
 

@@ -97,6 +97,10 @@ export function getInterviewSessionRequest(sessionId) {
   return apiRequest(`/api/v1/interview-sessions/${sessionId}`)
 }
 
+export function getInterviewAnalysisRequest(sessionId) {
+  return apiRequest(`/api/v1/interview-sessions/${sessionId}/analysis`)
+}
+
 export function rescheduleInterviewSessionRequest(sessionId, body) {
   return apiRequest(`/api/v1/interview-sessions/${sessionId}/reschedule`, {
     method: 'POST',

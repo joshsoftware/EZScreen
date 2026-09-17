@@ -3,9 +3,18 @@ import { Link, useParams } from 'react-router-dom'
 import { usePublicJobDetailQuery } from '../../features/candidate/usePublicJobs'
 import { ORG_URL_SLUG } from '../../features/candidate/constants'
 import { CandidateApplyModal } from '../../features/candidate/components/CandidateApplyModal'
-import { CandidateJobHeader } from '../../features/candidate/components/CandidateJobHeader'
 import { CandidateJobSkills } from '../../features/candidate/components/CandidateJobSkills'
 import { CandidateJobSummarySidebar } from '../../features/candidate/components/CandidateJobSummarySidebar'
+import {
+  formatExperience,
+  formatJobType,
+  formatWorkType,
+} from '../../features/jobs/jobFields'
+import { Alert } from '../../components/ui/Alert'
+import { Badge } from '../../components/ui/Badge'
+import { Button } from '../../components/ui/Button'
+import { HtmlContent } from '../../components/ui/HtmlContent'
+import { PageHeader, Panel } from '../../components/ui/PageHeader'
 import { PageSkeleton } from '../../components/ui/Skeleton'
 
 export function CandidateJobDetailPage() {
@@ -16,83 +25,87 @@ export function CandidateJobDetailPage() {
   const { data: job, isLoading, isError, error } = usePublicJobDetailQuery(jobId, org)
 
   if (isLoading) {
-    return (
-      <div className="mx-auto max-w-5xl px-margin-mobile py-lg md:px-lg md:py-2xl">
-        <PageSkeleton />
-      </div>
-    )
+    return <PageSkeleton />
   }
 
   if (isError || !job) {
     return (
-      <div className="mx-auto max-w-4xl px-margin-mobile py-2xl text-center">
-        <div className="rounded-2xl border border-error/30 bg-error-container/30 p-2xl">
-          <h2 className="text-headline-md font-semibold text-on-surface">Position Not Found</h2>
-          <p className="mt-xs text-body-md text-on-surface-variant max-w-md mx-auto">
-            {error?.message || 'This job opening is no longer accepting applications.'}
-          </p>
-          <Link
-            to={jobsPath}
-            className="mt-lg inline-flex items-center gap-xs rounded-xl bg-primary px-lg py-sm text-body-sm font-medium text-on-primary shadow-soft hover:bg-primary/90 transition-colors"
-          >
-            <span>Back to Open Roles</span>
-          </Link>
-        </div>
+      <div className="space-y-md">
+        <PageHeader
+          breadcrumb={
+            <p className="text-label-md text-secondary">
+              <Link to={jobsPath} className="hover:underline">
+                Open positions
+              </Link>
+            </p>
+          }
+          title="Position not found"
+        />
+        <Alert>
+          {error?.message || 'This job opening is no longer accepting applications.'}
+        </Alert>
+        <Button to={jobsPath} variant="secondary" icon="arrow_back">
+          Back to open positions
+        </Button>
       </div>
     )
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-margin-mobile py-lg md:px-lg md:py-xl">
-      {/* Back Navigation */}
-      <Link
-        to={jobsPath}
-        className="inline-flex items-center gap-xs text-body-sm font-medium text-on-surface-variant hover:text-primary transition-colors mb-md"
-      >
-        <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-        <span>Back to open positions</span>
-      </Link>
+    <div className="space-y-lg">
+      <PageHeader
+        breadcrumb={
+          <p className="text-label-md text-secondary">
+            <Link to={jobsPath} className="hover:underline">
+              Open positions
+            </Link>
+          </p>
+        }
+        title={job.title || 'Untitled position'}
+        description={job.organization_name || undefined}
+        actions={
+          <Button type="button" icon="send" onClick={() => setIsApplyModalOpen(true)}>
+            Apply
+          </Button>
+        }
+      />
 
-      {/* Header Banner */}
-      <CandidateJobHeader job={job} />
+      <div className="flex flex-wrap gap-xs -mt-sm mb-sm">
+        {job.location ? <Badge tone="neutral">{job.location}</Badge> : null}
+        {job.work_type ? <Badge tone="neutral">{formatWorkType(job.work_type)}</Badge> : null}
+        {job.job_type ? <Badge tone="info">{formatJobType(job.job_type)}</Badge> : null}
+        {job.experience_min != null || job.experience_max != null ? (
+          <Badge tone="neutral">
+            {formatExperience(job.experience_min, job.experience_max)}
+          </Badge>
+        ) : null}
+      </div>
 
-      {/* Main Content Layout */}
-      <div className="grid gap-xl lg:grid-cols-3">
-        {/* Left Column: Job Overview & Required Skills */}
-        <div className="lg:col-span-2 space-y-xl">
-          {/* Job Description Panel */}
-          <div className="rounded-2xl border border-outline-variant/70 bg-surface-container-lowest p-lg md:p-xl shadow-soft">
-            <h2 className="text-headline-sm font-semibold text-on-surface mb-md">
-              About the Role
-            </h2>
+      <div className="grid gap-lg lg:grid-cols-3 items-start">
+        <div className="lg:col-span-2 space-y-lg">
+          <Panel title="About the role">
             {job.description ? (
-              <div
-                className="rich-text text-body-md text-on-surface leading-relaxed whitespace-pre-line"
-                dangerouslySetInnerHTML={{ __html: job.description }}
-              />
+              <HtmlContent html={job.description} empty="No detailed description available." />
             ) : (
-              <p className="text-body-md text-on-surface-variant italic">No detailed description available.</p>
+              <p className="text-body-sm text-on-surface-variant italic">
+                No detailed description available.
+              </p>
             )}
-          </div>
-
-          {/* Key Skills & Requirements Panel */}
+          </Panel>
           <CandidateJobSkills skills={job.skills} />
         </div>
 
-        {/* Right Column: Job Summary Sidebar */}
         <CandidateJobSummarySidebar
           job={job}
           onApply={() => setIsApplyModalOpen(true)}
         />
       </div>
 
-      {/* Application Modal */}
-      {isApplyModalOpen && (
-        <CandidateApplyModal
-          job={job}
-          onClose={() => setIsApplyModalOpen(false)}
-        />
-      )}
+      <CandidateApplyModal
+        open={isApplyModalOpen}
+        job={job}
+        onClose={() => setIsApplyModalOpen(false)}
+      />
     </div>
   )
 }

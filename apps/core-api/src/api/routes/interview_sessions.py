@@ -12,6 +12,7 @@ from src.models.enums import UserRole
 from src.models.interview_session import InterviewSession
 from src.models.user import User
 from src.schemas.interview_analysis import (
+    InterviewAnalysisResponse,
     SaveEvaluationRequest,
     SaveEvaluationSummaryRequest,
     SaveQaTranscriptRequest,
@@ -254,6 +255,27 @@ def save_conversation_transcript(
     session = _get_session_or_404(db, session_id)
     interview_analysis_service.save_conversation_transcript(db, session, body)
     return SuccessMessageResponse(message="Metadata saved successfully.")
+
+
+@router.get(
+    "/{session_id}/analysis",
+    response_model=InterviewAnalysisResponse,
+    summary="View AI screening analysis report for interview session",
+)
+def get_interview_analysis(
+    session_id: UUID,
+    db: DbSession,
+    current_user: JobActor,
+) -> InterviewAnalysisResponse:
+    session = _get_session_for_org(db, session_id, current_user)
+    loaded = interview_analysis_service.get_analysis_for_session(db, session.id)
+    if loaded is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Interview analysis not found",
+        )
+    analysis_session, analysis = loaded
+    return interview_analysis_service.analysis_to_response(analysis_session, analysis)
 
 
 @router.get(

@@ -73,7 +73,7 @@ export function OrgAdminJobCreatePage() {
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-3xl">
       <PageHeader
         breadcrumb={
           <p className="text-label-md text-secondary">
@@ -89,13 +89,13 @@ export function OrgAdminJobCreatePage() {
             <>
               Step 1 is prefilled from the source job.
               <br />
-              Review details, then continue to skills.
+              Review the JD template, then continue to skills.
             </>
           ) : (
             <>
-              Step 1 captures the opening.
+              Step 1 is the structured JD template.
               <br />
-              Step 2 lets you edit, add, or remove skills and set expected years.
+              Step 2 extracts skills and years so you can edit, add, or remove them.
             </>
           )
         }
