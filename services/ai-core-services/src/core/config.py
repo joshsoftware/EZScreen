@@ -33,7 +33,6 @@ class Settings(BaseSettings):
 
     # Real-time WebSocket Audio Stream Endpoint
     websocket_url: str
-    pipecat_enabled: bool = False
     
     # Webhook callback URL for Attendee to post lifecycle events to
     webhook_url: str

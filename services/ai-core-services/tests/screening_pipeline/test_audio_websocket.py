@@ -7,7 +7,6 @@ import pytest
 from src.screening_pipeline.audio_websocket import (
     _should_forward_candidate_audio,
     _run_pipecat_session,
-    speak_to_attendee,
 )
 from src.screening_pipeline.pipecat_transport import (
     decode_attendee_audio_message,
@@ -24,29 +23,6 @@ def test_mixed_audio_is_used_as_fallback_only_while_listening_or_closing():
 def test_user_audio_is_preferred_over_mixed_audio():
     assert _should_forward_candidate_audio("realtime_audio.user", "speaking", False)
     assert not _should_forward_candidate_audio("realtime_audio.mixed", "listening", True)
-
-
-@pytest.mark.asyncio
-async def test_speak_to_attendee_preserves_order_and_50ms_output_frames():
-    class FakeWebSocket:
-        def __init__(self):
-            self.messages = []
-
-        async def send_json(self, message):
-            self.messages.append(message)
-
-    websocket = FakeWebSocket()
-    pcm_bytes = bytes(range(256)) * 20
-
-    await speak_to_attendee(websocket, pcm_bytes)
-
-    assert len(websocket.messages) == 3
-    assert all(message["trigger"] == "realtime_audio.bot_output" for message in websocket.messages)
-    assert all(message["data"]["sample_rate"] == 24000 for message in websocket.messages)
-    assert [
-        len(__import__("base64").b64decode(message["data"]["chunk"]))
-        for message in websocket.messages
-    ] == [2400, 2400, 320]
 
 
 def test_pipecat_attendee_codec_preserves_audio_payload_and_rate():
@@ -138,5 +114,6 @@ async def test_pipecat_websocket_branch_preserves_attendee_audio_selection():
     assert runtime.push_audio.await_args_list == [
         ((b"mixed-before", 24000),),
         ((b"user-audio", 16000),),
+        ((b"binary-audio", 24000),),
     ]
     runtime.cleanup.assert_awaited_once()
