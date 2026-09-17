@@ -7,13 +7,23 @@ import os
 import numpy as np
 from src.core.config import settings
 
+_shared_client: "LocalKokoroTTSClient | None" = None
+
 class LocalKokoroTTSClient:
     """Generates PCM audio using a local Kokoro-82M ONNX model."""
     
-    def __init__(self, model_dir: str = ".models"):
-        self.model_dir = model_dir
-        self.model_path = os.path.join(model_dir, "kokoro-v1.0.onnx")
-        self.voices_path = os.path.join(model_dir, "voices-v1.0.bin")
+    def __init__(
+        self,
+        model_path: str | None = None,
+        voices_path: str | None = None,
+    ):
+        model_root = settings.ai_models_host_dir or "/app/.models"
+        self.model_path = model_path or settings.kokoro_model_path or os.path.join(
+            model_root, "kokoro", "kokoro-v1.0.onnx"
+        )
+        self.voices_path = voices_path or settings.kokoro_voices_path or os.path.join(
+            model_root, "kokoro", "voices-v1.0.bin"
+        )
         self.kokoro = None
         self._download_lock = asyncio.Lock()
         
@@ -25,6 +35,13 @@ class LocalKokoroTTSClient:
                 self.kokoro = Kokoro(self.model_path, self.voices_path)
             return
 
+        if not settings.kokoro_allow_download:
+            raise FileNotFoundError(
+                "Kokoro artifacts are missing or unreadable. Configure "
+                "KOKORO_MODEL_PATH and KOKORO_VOICES_PATH with externally "
+                "provisioned files, or explicitly enable KOKORO_ALLOW_DOWNLOAD."
+            )
+
         async with self._download_lock:
             # Double check in case another task downloaded it while we were waiting
             if os.path.exists(self.model_path) and os.path.exists(self.voices_path):
@@ -34,7 +51,9 @@ class LocalKokoroTTSClient:
                 return
                 
             logger.info("Downloading local Kokoro-82M model files (~80MB)... This only happens once.")
-            os.makedirs(self.model_dir, exist_ok=True)
+            model_dir = os.path.dirname(self.model_path)
+            if model_dir:
+                os.makedirs(model_dir, exist_ok=True)
             
             async with httpx.AsyncClient(follow_redirects=True) as client:
                 # Download ONNX
@@ -84,3 +103,11 @@ class LocalKokoroTTSClient:
             logger.error(f"Local Kokoro TTS synthesis failed: {e}")
             yield b'\x00' * 2400
             await asyncio.sleep(0.05)
+
+
+def get_shared_kokoro_client() -> LocalKokoroTTSClient:
+    """Return the process-level Kokoro client shared by app and live sessions."""
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = LocalKokoroTTSClient()
+    return _shared_client

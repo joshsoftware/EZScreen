@@ -21,6 +21,9 @@ COPY README.md .
 # Install dependencies using pip. Use CPU-only PyTorch index to prevent 4GB NVIDIA CUDA downloads.
 RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu .
 
+# Pre-download NLTK sentence tokenizer data so startup does not block on network
+RUN python -m nltk.downloader punkt_tab
+
 COPY . .
 
 EXPOSE 8002

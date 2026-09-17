@@ -9,13 +9,13 @@ from src.screening_pipeline.webhook_handler import router as webhook_router
 from src.screening_pipeline.audio_websocket import router as websocket_router
 
 from contextlib import asynccontextmanager
-from src.screening_pipeline.tts_client import LocalKokoroTTSClient
+from src.screening_pipeline.tts_client import get_shared_kokoro_client
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Pre-download models on startup if they don't exist in the volume
     try:
-        await LocalKokoroTTSClient()._ensure_models()
+        await get_shared_kokoro_client()._ensure_models()
     except Exception as e:
         print(f"Failed to pre-download Kokoro models: {e}")
     yield

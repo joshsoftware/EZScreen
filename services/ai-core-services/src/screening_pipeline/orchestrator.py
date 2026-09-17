@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
 
 from src.core.config import settings
 from src.core.logger import logger
@@ -65,6 +65,7 @@ class InterviewOrchestrator:
         evaluator: Optional[AnswerEvaluator] = None,
         llm_client: Optional[OllamaClient] = None,
         api_client: Optional[SessionApiClient] = None,
+        speech_output: Optional[Callable[[str], Awaitable[None]]] = None,
     ):
         self.session_id = session_id
         self.websocket = websocket
@@ -89,6 +90,7 @@ class InterviewOrchestrator:
         self.llm_client = resolved_llm
         self.evaluator = evaluator or AnswerEvaluator(resolved_llm)
         self.api_client = api_client  # Usually set after session load
+        self.speech_output = speech_output
 
         self.current_interaction_state = "idle"  # idle, speaking, listening, evaluating
         self.transcript_log: list = []
@@ -654,6 +656,10 @@ class InterviewOrchestrator:
         """Synthesizes text via TTS and streams audio to the WebSocket."""
         logger.info("AI speaking", extra={"text": text})
         self.current_interaction_state = "speaking"
+        if self.speech_output is not None:
+            await self.speech_output(text)
+            return
+
         from src.screening_pipeline.audio_websocket import speak_to_attendee
 
         async for chunk in self.tts_client.synthesize(text):

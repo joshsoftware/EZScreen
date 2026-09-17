@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # Real-time WebSocket Audio Stream Endpoint
     websocket_url: str
+    pipecat_enabled: bool = False
     
     # Webhook callback URL for Attendee to post lifecycle events to
     webhook_url: str
@@ -47,6 +48,10 @@ class Settings(BaseSettings):
     # Kokoro TTS (Cloud API)
     kokoro_api_url: str | None = None
     kokoro_api_key: str | None = None
+    ai_models_host_dir: str | None = None
+    kokoro_model_path: str | None = None
+    kokoro_voices_path: str | None = None
+    kokoro_allow_download: bool = False
 
     # Docling
     docling_do_ocr: bool = True
