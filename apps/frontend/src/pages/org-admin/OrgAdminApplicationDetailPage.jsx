@@ -8,23 +8,27 @@ import {
 import {
   useApplicationQuery,
   useApplicationTimelineQuery,
+  useInterviewAnalysisQuery,
   useInterviewSessionQuery,
   useJobQuery,
   useJobQueryClient,
 } from '../../features/jobs/useJobQueries'
 import { ApplicationDetailPanel } from '../../features/jobs/ApplicationDetailPanel'
 import { CandidateScreeningQuestionsPanel } from '../../features/jobs/CandidateScreeningQuestionsPanel'
+import { InterviewAnalysisPanel, interviewAnalysisHeader } from '../../features/jobs/InterviewAnalysisPanel'
 import { ResumePreviewButton } from '../../features/jobs/ResumeActions'
 import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
   canRejectApplication,
   canRescheduleScreening,
   canScheduleScreening,
+  canShowInterviewAnalysis,
   candidateInitials,
   candidateName,
   fitLabel,
   fitTone,
   formatApplicationStatus,
+  interviewSessionIdFromTimeline,
   isScreeningLive,
   resolveMatchScore,
   screeningSlotFromTimeline,
@@ -119,13 +123,30 @@ export function OrgAdminApplicationDetailPage() {
     Boolean(detail) && !mismatch && canRescheduleScreening(detail, timeline)
   const screeningSlot = screeningSlotFromTimeline(timeline, detail?.email)
   const showReject = Boolean(detail) && !mismatch && canRejectApplication(detail, timeline)
-  const sessionId = screeningSlot?.sessionId ?? null
+  const sessionId =
+    screeningSlot?.sessionId ?? interviewSessionIdFromTimeline(timeline, detail?.email)
 
   const {
     data: interviewSession,
     isLoading: sessionLoading,
     error: sessionError,
   } = useInterviewSessionQuery(sessionId)
+
+  const showAnalysis = canShowInterviewAnalysis(timeline, interviewSession?.status)
+  const {
+    data: interviewAnalysis,
+    isLoading: analysisLoading,
+    error: analysisError,
+    isError: analysisIsError,
+  } = useInterviewAnalysisQuery(sessionId, {
+    enabled: Boolean(sessionId) && showAnalysis,
+    retry: (failureCount, err) => {
+      if (err instanceof ApiError && err.status === 404) return false
+      return failureCount < 2
+    },
+  })
+
+  const screeningHeader = interviewAnalysisHeader(interviewAnalysis)
 
   async function reload() {
     await Promise.all([refetchDetail(), refetchTimeline()])
@@ -266,10 +287,21 @@ export function OrgAdminApplicationDetailPage() {
             <div className="w-14 h-14 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-headline-sm">
               {candidateInitials(detail)}
             </div>
-            <div>
-              <h1 className="font-headline-md text-headline-md text-on-surface">
-                {candidateName(detail)}
-              </h1>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-sm">
+                <h1 className="font-headline-md text-headline-md text-on-surface">
+                  {candidateName(detail)}
+                </h1>
+                {screeningHeader ? (
+                  <Badge tone={screeningHeader.tone} className="text-body-sm px-md py-xs">
+                    Screening ·{' '}
+                    {screeningHeader.overall != null
+                      ? `${screeningHeader.overall.toFixed(1)}/10`
+                      : '—'}{' '}
+                    · {screeningHeader.label}
+                  </Badge>
+                ) : null}
+              </div>
               <p className="text-body-sm text-on-surface-variant mt-xs">
                 {[
                   detail?.email,
@@ -299,6 +331,20 @@ export function OrgAdminApplicationDetailPage() {
           </div>
         }
       />
+
+      <InterviewAnalysisPanel
+        visible={showAnalysis}
+        analysis={interviewAnalysis}
+        loading={Boolean(sessionId) && showAnalysis && analysisLoading}
+        error={
+          analysisIsError && !(analysisError instanceof ApiError && analysisError.status === 404)
+            ? analysisError instanceof ApiError
+              ? analysisError.message
+              : 'Failed to load screening analysis'
+            : null
+        }
+      />
+
       <ApplicationDetailPanel
         jobId={jobId}
         detail={detail}

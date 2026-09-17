@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +15,25 @@ EvaluationDecision = Literal["ASK_FOLLOW_UP", "NEXT_QUESTION", "REPEAT_QUESTION"
 class SuccessMessageResponse(BaseModel):
     success: bool = True
     message: str
+
+
+class InterviewAnalysisResponse(BaseModel):
+    """HR-facing screening analysis report for a completed (or in-progress) session."""
+
+    id: UUID
+    interview_session_id: UUID
+    application_id: UUID
+    interview_type: str | None = None
+    recording_url: str | None = None
+    analysis_result: dict[str, Any] | None = None
+    question_answer: list[Any] | dict[str, Any] | None = None
+    conversation_transcript: list[Any] = Field(default_factory=list)
+    session_status: str
+    scheduled_at: datetime | None = None
+    completed_at: datetime | None = None
+    gmeet_link: str | None = None
+    questions_planned: int = 0
+    created_at: datetime
 
 
 class QaFollowUpItem(BaseModel):

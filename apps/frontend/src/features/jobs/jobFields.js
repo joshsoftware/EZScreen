@@ -38,9 +38,60 @@ export const JOB_STATUS_OPTIONS = [
   { value: 'closed', label: 'Closed' },
 ]
 
+/** Stable H2 titles used when assembling / splitting structured JD HTML. */
+export const JD_SECTION_DEFS = [
+  {
+    key: 'role_summary',
+    heading: 'Role overview',
+    list: false,
+  },
+  {
+    key: 'about_company',
+    heading: 'About the company',
+    list: false,
+  },
+  {
+    key: 'responsibilities',
+    heading: 'Responsibilities',
+    list: true,
+  },
+  {
+    key: 'must_have_skills_text',
+    heading: 'Must-have skills',
+    list: true,
+  },
+  {
+    key: 'good_to_have_skills_text',
+    heading: 'Good-to-have skills',
+    list: true,
+  },
+  {
+    key: 'qualifications',
+    heading: 'Qualifications',
+    list: true,
+  },
+  {
+    key: 'domain_experience',
+    heading: 'Domain / industry experience',
+    list: true,
+  },
+  {
+    key: 'tools_stack',
+    heading: 'Tools & stack',
+    list: true,
+  },
+]
+
 export const EMPTY_JOB_FORM = {
   title: '',
-  description: '',
+  role_summary: '',
+  about_company: '',
+  responsibilities: '',
+  must_have_skills_text: '',
+  good_to_have_skills_text: '',
+  qualifications: '',
+  domain_experience: '',
+  tools_stack: '',
   job_type: '',
   work_type: '',
   location: '',
@@ -67,6 +118,10 @@ const STATUS_LABELS = {
   closed: 'Closed',
 }
 
+const HEADING_TO_KEY = Object.fromEntries(
+  JD_SECTION_DEFS.map((section) => [section.heading.toLowerCase(), section.key]),
+)
+
 export function formatJobType(value) {
   return JOB_TYPE_LABELS[value] || '—'
 }
@@ -92,10 +147,111 @@ export function formatExperience(min, max) {
   return `Up to ${max} yrs`
 }
 
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function decodeBasicEntities(text) {
+  return String(text)
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+}
+
+function htmlToPlainText(html) {
+  if (!html || typeof html !== 'string') return ''
+  return decodeBasicEntities(
+    html
+      .replace(/<\s*br\s*\/?>/gi, '\n')
+      .replace(/<\/\s*p\s*>/gi, '\n')
+      .replace(/<\/\s*div\s*>/gi, '\n')
+      .replace(/<\/\s*li\s*>/gi, '\n')
+      .replace(/<\/\s*h[1-6]\s*>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+  )
+    .split(/\n+/)
+    .map((line) => line.replace(/^[•\-\*\u2022]\s*/, '').trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
+function linesFromText(value) {
+  if (typeof value !== 'string') return []
+  return value
+    .split(/\n+/)
+    .map((line) => line.replace(/^[•\-\*\u2022]\s*/, '').trim())
+    .filter(Boolean)
+}
+
+function sectionHtml(heading, body, { list }) {
+  const lines = linesFromText(body)
+  if (lines.length === 0) return ''
+  const title = `<h2>${escapeHtml(heading)}</h2>`
+  if (list) {
+    const items = lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')
+    return `${title}<ul>${items}</ul>`
+  }
+  return `${title}${lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}`
+}
+
+/** Build stored description HTML from structured section fields. */
+export function assembleJobDescriptionHtml(values) {
+  const parts = JD_SECTION_DEFS.map((section) =>
+    sectionHtml(section.heading, values[section.key], { list: section.list }),
+  ).filter(Boolean)
+  return parts.length > 0 ? parts.join('') : null
+}
+
+/**
+ * Split stored description HTML back into section fields.
+ * Legacy free-form JDs (no matching H2s) land in role_summary.
+ */
+export function splitJobDescriptionHtml(html) {
+  const sections = Object.fromEntries(JD_SECTION_DEFS.map((s) => [s.key, '']))
+  if (!html || typeof html !== 'string') return sections
+
+  const normalized = html.trim()
+  if (!normalized) return sections
+
+  const headingPattern = /<h2[^>]*>([\s\S]*?)<\/h2>/gi
+  const matches = [...normalized.matchAll(headingPattern)]
+
+  if (matches.length === 0) {
+    sections.role_summary = htmlToPlainText(normalized)
+    return sections
+  }
+
+  for (let i = 0; i < matches.length; i += 1) {
+    const match = matches[i]
+    const headingText = htmlToPlainText(match[1]).trim().toLowerCase()
+    const key = HEADING_TO_KEY[headingText]
+    const start = match.index + match[0].length
+    const end = i + 1 < matches.length ? matches[i + 1].index : normalized.length
+    const bodyHtml = normalized.slice(start, end)
+    if (!key) continue
+    sections[key] = htmlToPlainText(bodyHtml)
+  }
+
+  const anyFilled = JD_SECTION_DEFS.some((s) => sections[s.key])
+  if (!anyFilled) {
+    sections.role_summary = htmlToPlainText(normalized)
+  }
+
+  return sections
+}
+
 export function jobToFormValues(job) {
+  const sections = splitJobDescriptionHtml(job?.description ?? '')
   return {
     title: job.title ?? '',
-    description: job.description ?? '',
+    ...sections,
     job_type: job.job_type ?? '',
     work_type: job.work_type ?? '',
     location: job.location ?? '',
@@ -147,12 +303,6 @@ function emptyToNull(value) {
   return trimmed ? trimmed : null
 }
 
-function emptyHtmlToNull(value) {
-  if (typeof value !== 'string') return null
-  const text = value.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim()
-  return text ? value : null
-}
-
 function parseOptionalInt(value) {
   if (value === '' || value == null) return null
   const parsed = Number(value)
@@ -177,9 +327,14 @@ export function formValuesToPayload(values) {
     throw new Error('Minimum experience cannot be greater than maximum.')
   }
 
+  const description = assembleJobDescriptionHtml(values)
+  if (!description) {
+    throw new Error('Add at least one JD section (overview, responsibilities, or skills).')
+  }
+
   return {
     title,
-    description: emptyHtmlToNull(values.description),
+    description,
     job_type: emptyToNull(values.job_type),
     work_type: emptyToNull(values.work_type),
     location: emptyToNull(values.location),
