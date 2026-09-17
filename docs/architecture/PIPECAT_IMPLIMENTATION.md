@@ -85,10 +85,8 @@ Regenerate using the repository's dependency workflow after changing `pyproject.
 
 #### `services/ai-core-services/src/core/config.py`
 
-Add only configuration required to select the runtime and preserve model settings, for example:
+Add only model and transport configuration required by the Pipecat runtime:
 
-- `PIPECAT_ENABLED=false` initially
-- `PIPECAT_RUNTIME_MODE=legacy|pipecat`
 - Pipecat transport frame settings if they cannot be derived from existing settings
 - Explicit STT endpoint, model name, language, and sample-rate settings if WhisperFast differs from the current hard-coded value
 - Explicit external Kokoro model directory, voices file, voice, language, and speed settings
@@ -103,18 +101,16 @@ Document the new feature flag and any required Pipecat/STT settings without addi
 
 #### `services/ai-core-services/src/screening_pipeline/audio_websocket.py`
 
-Keep the public route and Attendee message contract. Refactor the current handler into a small transport adapter with two runtime choices:
-
-- legacy runtime: existing `InterviewOrchestrator` path
-- Pipecat runtime: new Pipecat session path
+Keep the public route and Attendee message contract. The handler is a small
+transport adapter that always starts the Pipecat session runtime.
 
 The route should remain responsible for accepting the WebSocket, validating/normalizing Attendee messages, selecting user versus mixed audio, and running cleanup. It should not contain interview policy.
 
 Preserve `_should_forward_candidate_audio` behavior and its tests. Avoid a second independent message parser in the Pipecat path.
 
-#### `services/ai-core-services/src/screening_pipeline/orchestrator.py`
+#### `services/ai-core-services/src/screening_pipeline/pipecat_policy.py`
 
-Do not rewrite this file into a large Pipecat processor. First extract its business behavior into a reusable policy/session object, then make both runtimes call that policy.
+Keep interview business behavior in the Pipecat policy/session object.
 
 The safe migration is:
 
@@ -262,9 +258,8 @@ The current worktree already has an unrelated modification in `prompts.py`; do n
 
 ```text
 screening_pipeline/
-├── audio_websocket.py              # Public Attendee WebSocket; runtime switch
-├── orchestrator.py                 # Temporary legacy compatibility wrapper
-├── policy.py                       # Shared interview business policy
+├── audio_websocket.py              # Public Attendee WebSocket; Pipecat entry point
+├── pipecat_policy.py               # Pipecat interview business policy
 ├── pipecat_runtime.py              # Pipecat pipeline lifecycle
 ├── pipecat_transport.py            # Attendee <-> Pipecat audio/message bridge
 ├── pipecat_stt.py                  # WhisperFast/Whisper adapter
@@ -310,10 +305,9 @@ Current implementation checkpoint:
 
 - Phase 2 is in progress.
 - `InterviewPolicy` defines the runtime-facing lifecycle boundary.
-- The legacy orchestrator supports an injected speech sink while retaining its existing default WebSocket/Kokoro path.
-- The Pipecat runtime is disabled by `PIPECAT_ENABLED=false` by default.
-- The existing HTTP Whisper/VAD path is wrapped in a Pipecat processor; no undocumented WhisperFast protocol was invented.
-- Kokoro and Attendee audio adapters plus the runtime bridge are implemented behind the existing public WebSocket route.
+- Pipecat is the only screening runtime.
+- Pipecat owns VAD, segmented HTTP Whisper transcription, Kokoro speech, and the
+  Attendee audio bridge behind the existing public WebSocket route.
 - The live Pipecat path has not yet passed a real Attendee session with externally mounted Kokoro artifacts.
 - Deterministic Pipecat WebSocket coverage now verifies mixed/user/binary audio routing and cleanup.
 - The Pipecat runtime now validates and loads external Kokoro artifacts before starting its pipeline.
@@ -476,7 +470,7 @@ The policy must control when the bot is listening. Pipecat's automatic conversat
 
 ### Phase 7: Feature-flagged shadow and canary testing
 
-Use `PIPECAT_ENABLED=false` by default.
+Pipecat is the production runtime; no runtime-selection feature flag exists.
 
 Test in this order:
 
@@ -493,10 +487,10 @@ Do not run both runtimes against the same live session. Shadow mode may compare 
 
 After compatibility and operational gates pass:
 
-1. Make Pipecat the configured runtime for the selected environment.
-2. Keep the legacy runtime available behind the feature flag for rollback.
-3. Monitor the canary.
-4. Remove old code only in a later branch after an agreed observation period.
+1. Deploy the Pipecat runtime.
+2. Monitor the canary.
+3. Preserve transcript data when a live session fails; do not start a second
+   runtime for that session.
 5. Remove unused dependencies only after verifying no other module uses them.
 
 ## Behavior Compatibility Matrix
@@ -505,15 +499,15 @@ After compatibility and operational gates pass:
 |---|---|---|---|
 | Scheduling | Core API interview session service | None | Session validation, Meet link, invite, reschedule |
 | Bot dispatch | `meeting_bot/client.py` and Attendee API | None | Join time, WebSocket URL, sample rate |
-| Session start | WebSocket route and orchestrator | Runtime startup | Greeting once after connection |
+| Session start | WebSocket route and Pipecat policy | Runtime startup | Greeting once after connection |
 | Input audio | `audio_websocket.py` | Transport adapter | User/mixed selection and sample rate |
-| Turn end | `stt_client.py` VAD/silence | Pipecat turn detection | One transcript per utterance |
+| Turn end | Pipecat VAD/silence | Pipecat turn detection | One transcript per utterance |
 | STT | Whisper client | Pipecat adapter | Same model/service and transcript semantics |
 | Intent | `evaluator.py` | Policy callback | Same prompt and intent handling |
 | Scoring | `evaluator.py` | None | Same formula and decisions |
 | Question routing | `routing_engine.py` | Policy callback | Same queue/chunk/downgrade behavior |
-| TTS | `tts_client.py` Kokoro | Pipecat adapter | Same voice, language, speed, 24 kHz PCM |
-| Silence | `orchestrator.py` constants/logic | Policy/timer integration | Three prompts, timing, cancellation |
+| TTS | Pipecat Kokoro adapter | Pipecat adapter | Same voice, language, speed, 24 kHz PCM |
+| Silence | Pipecat policy constants/logic | Policy/timer integration | Three prompts, timing, cancellation |
 | Persistence | `persistence.py` and Core API | Policy invokes it | Same order and payloads |
 | Close | Orchestrator and Attendee client | Runtime lifecycle hook | Save once, then leave |
 | Webhook status | `webhook_handler.py` | None initially | Existing status updates |
@@ -628,13 +622,9 @@ The real-model test is a release gate, not a substitute for deterministic tests.
 
 Rollback must require only configuration:
 
-```env
-PIPECAT_ENABLED=false
-```
-
-The legacy runtime must remain installed and tested until the migration is accepted. Do not remove the old client or orchestrator during the first cutover branch.
-
-If Pipecat fails during a live session, do not start a second runtime for that same session. Mark the session according to the existing failure policy, preserve available transcript data, and use the legacy runtime for the next test session.
+If Pipecat fails during a live session, do not start a second runtime for that
+same session. Mark the session according to the existing failure policy and
+preserve available transcript data.
 
 ## Operational Requirements
 
@@ -663,8 +653,7 @@ Do not update the Core API scheduling documentation to imply that Pipecat schedu
 
 The migration is ready to merge only when:
 
-- `uv run pytest` passes with the legacy runtime.
-- `uv run pytest` passes with Pipecat enabled.
+- `uv run pytest` passes with Pipecat.
 - Compatibility scenario traces match for all required scenarios.
 - Core API scheduling and rescheduling tests pass without changes to their behavior.
 - Attendee dispatch payload is unchanged except for an explicitly documented runtime flag.
@@ -673,7 +662,6 @@ The migration is ready to merge only when:
 - A real Attendee meeting covers silence termination and closing timeout.
 - No duplicate transcript, evaluation, summary, or leave request is observed.
 - A WebSocket disconnect still finalizes the session as before.
-- Rollback to the legacy runtime works by configuration only.
 - No secrets, model files, model caches, or unrelated worktree changes are committed.
 
 ## Explicit Non-Goals

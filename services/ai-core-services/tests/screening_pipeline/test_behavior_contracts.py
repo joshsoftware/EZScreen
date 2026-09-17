@@ -2,17 +2,18 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import TTSSpeakFrame, VADUserStartedSpeakingFrame
+from pipecat.processors.frame_processor import FrameDirection
 
-from src.screening_pipeline.orchestrator import InterviewOrchestrator
 from src.screening_pipeline.interview_policy import InterviewPolicy
-from src.screening_pipeline.tts_client import LocalKokoroTTSClient
+from src.screening_pipeline.pipecat_policy import PipecatInterviewPolicy
 from src.screening_pipeline.pipecat_stt import WhisperHttpSTTService
-from src.screening_pipeline.pipecat_tts import KokoroTTSService
+from src.screening_pipeline.pipecat_tts import KokoroSynthesizer, KokoroTTSService
 from src.screening_pipeline.pipecat_runtime import (
     AttendeeInputProcessor,
     InterviewPolicyProcessor,
     PipecatInterviewRuntime,
+    SCREENING_TURN_END_SILENCE_SECONDS,
 )
 from src.screening_pipeline.pipecat_transport import SpeechCompleteFrame
 from src.screening_pipeline.prompts import (
@@ -40,110 +41,107 @@ def test_interview_timing_and_prompt_contract_is_explicit():
     assert MAX_FOLLOW_UPS_PER_QUESTION == 1
 
 
-def test_legacy_orchestrator_implements_shared_interview_policy():
-    orchestrator = InterviewOrchestrator(
+def test_pipecat_policy_implements_shared_interview_policy():
+    policy = PipecatInterviewPolicy(
         "session-id",
-        MagicMock(),
-        stt_client=MagicMock(),
-        tts_client=MagicMock(),
         evaluator=MagicMock(),
+        speech_output=AsyncMock(),
     )
 
-    assert isinstance(orchestrator, InterviewPolicy)
+    assert isinstance(policy, InterviewPolicy)
 
 
 @pytest.mark.asyncio
 async def test_finalization_is_idempotent_for_disconnect_and_normal_close():
     persistence = AsyncMock()
-    orchestrator = InterviewOrchestrator(
+    policy = PipecatInterviewPolicy(
         "session-id",
-        MagicMock(),
-        stt_client=MagicMock(),
-        tts_client=MagicMock(),
         evaluator=MagicMock(),
         llm_client=MagicMock(),
         api_client=MagicMock(),
+        speech_output=AsyncMock(),
     )
 
     with patch(
-        "src.screening_pipeline.orchestrator.persist_interview_close",
+        "src.screening_pipeline.pipecat_policy.persist_interview_close",
         persistence,
     ):
-        await orchestrator.finalize(reason="questions_completed")
-        await orchestrator.finalize(reason="session_ended")
+        await policy.finalize(reason="questions_completed")
+        await policy.finalize(reason="session_ended")
 
     persistence.assert_awaited_once_with(
-        orchestrator.api_client,
-        orchestrator.llm_client,
-        orchestrator.analysis_evaluations,
-        orchestrator.transcript_log,
+        policy.api_client,
+        policy.llm_client,
+        policy.analysis_evaluations,
+        policy.transcript_log,
         termination_reason="questions_completed",
     )
-    assert orchestrator.is_finalized is True
+    assert policy.is_finalized is True
 
 
 @pytest.mark.asyncio
 async def test_policy_can_route_speech_to_an_injected_runtime_sink():
     speech_output = AsyncMock()
-    orchestrator = InterviewOrchestrator(
+    policy = PipecatInterviewPolicy(
         "session-id",
-        MagicMock(),
-        stt_client=MagicMock(),
-        tts_client=MagicMock(),
         evaluator=MagicMock(),
         speech_output=speech_output,
     )
-    orchestrator.is_active = True
+    policy.is_active = True
 
-    await orchestrator.speak("A policy response")
+    await policy.speak("A policy response")
 
     speech_output.assert_awaited_once_with("A policy response")
-    assert orchestrator.current_interaction_state == "speaking"
+    assert policy.current_interaction_state == "speaking"
 
 
 @pytest.mark.asyncio
 async def test_kokoro_requires_external_artifacts_by_default(monkeypatch, tmp_path):
-    monkeypatch.setattr("src.screening_pipeline.tts_client.settings.kokoro_allow_download", False)
-    client = LocalKokoroTTSClient(
+    synthesizer = KokoroSynthesizer(
         model_path=str(tmp_path / "missing.onnx"),
         voices_path=str(tmp_path / "missing.bin"),
     )
 
-    with pytest.raises(FileNotFoundError, match="externally provisioned files"):
-        await client._ensure_models()
+    with pytest.raises(FileNotFoundError, match="Kokoro artifacts are missing"):
+        await synthesizer.ensure_ready()
 
 
 def test_kokoro_defaults_to_the_external_model_root(monkeypatch):
     monkeypatch.setattr(
-        "src.screening_pipeline.tts_client.settings.ai_models_host_dir",
+        "src.screening_pipeline.pipecat_tts.settings.ai_models_host_dir",
         "/external/models",
     )
-    monkeypatch.setattr("src.screening_pipeline.tts_client.settings.kokoro_model_path", None)
-    monkeypatch.setattr("src.screening_pipeline.tts_client.settings.kokoro_voices_path", None)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_tts.settings.kokoro_model_path", None)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_tts.settings.kokoro_voices_path", None)
 
-    client = LocalKokoroTTSClient()
+    synthesizer = KokoroSynthesizer()
 
-    assert client.model_path == "/external/models/kokoro/kokoro-v1.0.onnx"
-    assert client.voices_path == "/external/models/kokoro/voices-v1.0.bin"
+    assert synthesizer.model_path == "/external/models/kokoro/kokoro-v1.0.onnx"
+    assert synthesizer.voices_path == "/external/models/kokoro/voices-v1.0.bin"
 
 
-def test_pipecat_whisper_adapter_builds_the_existing_wav_contract():
-    audio = b"\x01\x02" * 12000
+def test_pipecat_whisper_adapter_uses_segmented_stt():
+    assert WhisperHttpSTTService(sample_rate=16000).wants_wav_segments is True
 
-    wav_bytes = WhisperHttpSTTService._wav_bytes(audio, 24000)
 
-    assert wav_bytes.startswith(b"RIFF")
-    assert b"WAVE" in wav_bytes[:12]
+def test_pipecat_runtime_waits_two_seconds_before_finalizing_an_answer():
+    runtime = PipecatInterviewRuntime(MagicMock(), "session-id")
+
+    assert SCREENING_TURN_END_SILENCE_SECONDS == 2.0
+    assert runtime.vad._vad_controller._vad_analyzer.params.stop_secs == 2.0
 
 
 @pytest.mark.asyncio
 async def test_pipecat_kokoro_adapter_preserves_pcm_audio_metadata():
-    class FakeKokoroClient:
+    class FakeKokoroSynthesizer:
+        async def ensure_ready(self):
+            pass
+
         async def synthesize(self, _text):
             yield b"first-frame"
             yield b"second-frame"
 
-    service = KokoroTTSService(client=FakeKokoroClient())
+    service = KokoroTTSService(synthesizer=FakeKokoroSynthesizer())
 
     frames = [frame async for frame in service.run_tts("Hello", "context-1")]
 
@@ -156,20 +154,20 @@ async def test_pipecat_kokoro_adapter_preserves_pcm_audio_metadata():
 
 @pytest.mark.asyncio
 async def test_pipecat_kokoro_adapter_validates_before_pipeline_start():
-    client = MagicMock()
-    client._ensure_models = AsyncMock()
-    service = KokoroTTSService(client=client)
+    synthesizer = MagicMock()
+    synthesizer.ensure_ready = AsyncMock()
+    service = KokoroTTSService(synthesizer=synthesizer)
 
     await service.validate_ready()
 
-    client._ensure_models.assert_awaited_once()
+    synthesizer.ensure_ready.assert_awaited_once()
 
 
 def test_pipecat_runtime_builds_without_starting_a_live_session():
     runtime = PipecatInterviewRuntime(MagicMock(), "session-id")
 
     assert runtime.runner is None
-    assert runtime.task.params.audio_in_sample_rate == 24000
+    assert runtime.task.params.audio_in_sample_rate == 16000
     assert runtime.task.params.audio_out_sample_rate == 24000
     assert runtime.input.ready.is_set() is False
 
@@ -197,6 +195,23 @@ async def test_pipecat_policy_processor_sends_policy_speech_downstream():
     assert sent_frames[0].text == "A policy response"
     assert isinstance(sent_frames[1], SpeechCompleteFrame)
     assert registered_events == [sent_frames[1].event]
+
+
+@pytest.mark.asyncio
+async def test_candidate_speech_interrupts_bot_audio_so_the_answer_is_preserved():
+    policy = MagicMock()
+    processor = InterviewPolicyProcessor(policy)
+    sent_frames = []
+
+    async def push_frame(frame, _direction):
+        sent_frames.append(frame)
+
+    processor.push_frame = push_frame
+
+    await processor.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    policy.handle_candidate_activity.assert_called_once_with()
+    assert any(frame.__class__.__name__ == "InterruptionFrame" for frame in sent_frames)
 
 
 @pytest.mark.asyncio

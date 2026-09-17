@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+import audioop
 from typing import Callable
 
 from pipecat.frames.frames import (
@@ -13,22 +13,27 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
+    VADUserStartedSpeakingFrame,
 )
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.audio.vad_processor import VADProcessor
 
-from src.core.config import settings
 from src.core.logger import logger
 from src.screening_pipeline.interview_policy import InterviewPolicy
-from src.screening_pipeline.orchestrator import InterviewOrchestrator
+from src.screening_pipeline.pipecat_policy import PipecatInterviewPolicy
+from src.screening_pipeline.pipecat_stt import WhisperHttpSTTService
 from src.screening_pipeline.pipecat_transport import (
     AttendeeOutputProcessor,
     SpeechCompleteFrame,
 )
 from src.screening_pipeline.pipecat_tts import KokoroTTSService
-from src.screening_pipeline.stt_client import WhisperCloudSTTClient
+
+SCREENING_TURN_END_SILENCE_SECONDS = 2.0
 
 
 class AttendeeInputProcessor(FrameProcessor):
@@ -41,10 +46,15 @@ class AttendeeInputProcessor(FrameProcessor):
     async def push_audio(self, pcm_bytes: bytes, sample_rate: int) -> None:
         if not self.ready.is_set():
             return
+        sample_rate = int(sample_rate)
+        if sample_rate != 16000:
+            pcm_bytes, _state = audioop.ratecv(
+                pcm_bytes, 2, 1, sample_rate, 16000, None
+            )
         await self.push_frame(
             InputAudioRawFrame(
                 audio=pcm_bytes,
-                sample_rate=sample_rate,
+                sample_rate=16000,
                 num_channels=1,
             ),
             FrameDirection.DOWNSTREAM,
@@ -54,56 +64,6 @@ class AttendeeInputProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
             self.ready.set()
-        await self.push_frame(frame, direction)
-
-
-class ExistingWhisperProcessor(FrameProcessor):
-    """Bridge the existing WebRTC-VAD/HTTP-Whisper client into Pipecat frames."""
-
-    def __init__(
-        self,
-        stt_client: WhisperCloudSTTClient,
-        on_speech_start: Callable[[], None] | None = None,
-        session_id: str | None = None,
-    ):
-        super().__init__(name="existing-whisper")
-        self.stt_client = stt_client
-        self.on_speech_start = on_speech_start
-        self.session_id = session_id
-        self.stt_client.on_transcript = self._on_transcript
-        self.stt_client.on_speech_start = self._on_speech_start
-
-    def _on_speech_start(self) -> None:
-        if self.on_speech_start is not None:
-            self.on_speech_start()
-        asyncio.create_task(
-            self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
-        )
-
-    def _on_transcript(self, transcript: str) -> None:
-        # Log at the STT-to-Pipecat boundary so speech remains visible even if
-        # policy state later rejects it (for example, while the bot is speaking).
-        logger.info(
-            "Pipecat candidate transcript received",
-            extra={"session_id": self.session_id, "transcript": transcript},
-        )
-        asyncio.create_task(
-            self.push_frame(
-                TranscriptionFrame(
-                    text=transcript,
-                    user_id="candidate",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    finalized=True,
-                ),
-                FrameDirection.DOWNSTREAM,
-            )
-        )
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-        if isinstance(frame, InputAudioRawFrame):
-            await self.stt_client.send_audio(frame.audio, frame.sample_rate)
-            return
         await self.push_frame(frame, direction)
 
 
@@ -140,6 +100,12 @@ class InterviewPolicyProcessor(FrameProcessor):
         if isinstance(frame, InterruptionFrame):
             if self._current_speech_event is not None and not self._current_speech_event.is_set():
                 self._current_speech_event.set()
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            self.policy.handle_candidate_activity()
+            # Candidate speech is authoritative in a screening interview.
+            # Interrupt bot audio so the entire response can be captured rather
+            # than dropping a transcript that arrives while policy is speaking.
+            await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
         elif isinstance(frame, TranscriptionFrame):
             if frame.finalized:
                 self.policy.handle_candidate_speech(frame.text)
@@ -148,27 +114,22 @@ class InterviewPolicyProcessor(FrameProcessor):
 
 
 class PipecatInterviewRuntime:
-    """Own one Pipecat pipeline while delegating interview policy to EZScreen."""
+    """Own one Pipecat pipeline for a complete Attendee screening session."""
 
     def __init__(self, websocket, session_id: str):
         self.websocket = websocket
         self.session_id = session_id
         self.input = AttendeeInputProcessor()
-        self.stt_client = WhisperCloudSTTClient(
-            api_url=settings.whisper_api_url,
-            api_key=settings.whisper_api_key,
-            on_transcript=lambda _transcript: None,
-        )
-        self.policy = InterviewOrchestrator(
+        self.policy = PipecatInterviewPolicy(
             session_id=session_id,
-            websocket=websocket,
-            stt_client=self.stt_client,
         )
-        self.whisper = ExistingWhisperProcessor(
-            self.stt_client,
-            on_speech_start=self.policy.handle_candidate_activity,
-            session_id=self.session_id,
+        self.vad = VADProcessor(
+            vad_analyzer=SileroVADAnalyzer(
+                sample_rate=16000,
+                params=VADParams(stop_secs=SCREENING_TURN_END_SILENCE_SECONDS),
+            )
         )
+        self.stt = WhisperHttpSTTService(sample_rate=16000)
         self.tts = KokoroTTSService()
         self.output = AttendeeOutputProcessor(websocket)
         self.policy_processor = InterviewPolicyProcessor(
@@ -177,19 +138,19 @@ class PipecatInterviewRuntime:
         )
         self.policy.speech_output = self.policy_processor.speak
         self.pipeline = Pipeline(
-            [self.input, self.whisper, self.policy_processor, self.tts, self.output]
+            [self.input, self.vad, self.stt, self.policy_processor, self.tts, self.output]
         )
         self.task = PipelineTask(
             self.pipeline,
             params=PipelineParams(
-                audio_in_sample_rate=24000,
+                audio_in_sample_rate=16000,
                 audio_out_sample_rate=24000,
             ),
         )
         self.runner: PipelineRunner | None = None
 
     async def run(self) -> None:
-        """Start the pipeline and then begin the existing greeting flow."""
+        """Start the Pipecat pipeline and begin the greeting flow."""
         logger.info("Pipecat runtime starting", extra={"session_id": self.session_id})
         await self.tts.validate_ready()
         logger.info("Pipecat Kokoro ready", extra={"session_id": self.session_id})
@@ -240,5 +201,4 @@ class PipecatInterviewRuntime:
         if self.policy_processor._current_speech_event is not None:
             self.policy_processor._current_speech_event.set()
         await self.policy.cleanup()
-        await self.stt_client.close()
         await self.task.cancel(reason="session_cleanup")

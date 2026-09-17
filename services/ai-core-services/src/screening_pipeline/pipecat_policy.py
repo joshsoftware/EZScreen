@@ -1,15 +1,11 @@
-"""
-Interview Orchestrator — Main state machine for the AI screening interview.
-Controls the flow: Greeting → Questions → Evaluation → Follow-up → Closing.
-"""
+"""Pipecat interview policy: screening state and business decisions."""
 
 from __future__ import annotations
 
 import asyncio
 
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
-from src.core.config import settings
 from src.core.logger import logger
 from src.llm.client import OllamaClient
 from src.meeting_bot.client import bot_client
@@ -31,10 +27,6 @@ from src.screening_pipeline.prompts import (
 )
 from src.screening_pipeline.session_api import SessionApiClient
 from src.screening_pipeline.speech_filter import is_probable_hallucination
-from src.screening_pipeline.tts_client import LocalKokoroTTSClient
-
-if TYPE_CHECKING:
-    from src.screening_pipeline.stt_client import WhisperCloudSTTClient
 
 
 def _coerce_questions_list(raw: Any) -> list[dict]:
@@ -49,42 +41,26 @@ def _coerce_questions_list(raw: Any) -> list[dict]:
     return [item for item in items if isinstance(item, dict) and item.get("question")]
 
 
-class InterviewOrchestrator:
+class PipecatInterviewPolicy:
     """
     Manages the state machine for the AI interview.
-    Coordinates STT, Intent Router, LLM Evaluator, TTS, and Core-API persistence.
+    Coordinates Pipecat turn events, interview evaluation, and Core API persistence.
     """
 
     def __init__(
         self,
         session_id: str,
-        websocket,
         *,
-        stt_client: Optional[WhisperCloudSTTClient] = None,
-        tts_client: Optional[LocalKokoroTTSClient] = None,
         evaluator: Optional[AnswerEvaluator] = None,
         llm_client: Optional[OllamaClient] = None,
         api_client: Optional[SessionApiClient] = None,
         speech_output: Optional[Callable[[str], Awaitable[None]]] = None,
     ):
         self.session_id = session_id
-        self.websocket = websocket
         self.session: Any = None
         self.questions: list = []
         self.current_question_idx = 0
         self.is_active = False
-
-        if stt_client is not None:
-            self.stt_client = stt_client
-        else:
-            from src.screening_pipeline.stt_client import WhisperCloudSTTClient as _STT
-
-            self.stt_client = _STT(
-                api_url=settings.whisper_api_url,
-                api_key=settings.whisper_api_key,
-                on_transcript=self.handle_candidate_speech,
-            )
-        self.tts_client = tts_client or LocalKokoroTTSClient()
 
         resolved_llm = llm_client or OllamaClient()
         self.llm_client = resolved_llm
@@ -102,13 +78,12 @@ class InterviewOrchestrator:
         self._silence_prompt_count = 0
         self._silence_cycle_started_at: Optional[float] = None
 
-        self.stt_client.on_speech_start = self.handle_candidate_activity
 
     # ──────────────────────────── LIFECYCLE ────────────────────────────
 
     async def start(self):
         """Initializes the interview session and speaks the greeting."""
-        logger.info("Orchestrator starting", extra={"session_id": self.session_id})
+        logger.info("Pipecat interview policy starting", extra={"session_id": self.session_id})
 
         # Path param is interview_session_id (bot_id unknown when WS URL is built).
         self.session = await interview_session_repo.get_by_id(self.session_id)
@@ -125,8 +100,6 @@ class InterviewOrchestrator:
 
         self.questions = _coerce_questions_list(self.session.generated_questions)
         self.is_active = True
-
-        await self.stt_client.connect()
 
         self.transcript_log.append(
             {
@@ -185,12 +158,11 @@ class InterviewOrchestrator:
         self._cancel_silence_prompt()
         self._cancel_closing_reply_timeout()
         await self.finalize(reason="session_ended")
-        await self.stt_client.close()
 
-    # ──────────────────────────── STT CALLBACK ────────────────────────────
+    # ──────────────────────────── PIPECAT TURN EVENTS ────────────────────────────
 
     def handle_candidate_speech(self, transcript: str):
-        """Callback from STT when the candidate finishes speaking."""
+        """Handle one finalized Pipecat transcription."""
         self._cancel_silence_prompt(reason="candidate transcript received")
         if self.current_interaction_state == "closing":
             self._cancel_closing_reply_timeout(reason="closing reply transcript received")
@@ -215,7 +187,7 @@ class InterviewOrchestrator:
         asyncio.create_task(self._process_speech(transcript))
 
     def handle_candidate_activity(self):
-        """Cancel the inactivity prompt as soon as VAD hears candidate speech."""
+        """Cancel inactivity as soon as Pipecat VAD detects candidate speech."""
         self._cancel_silence_prompt(reason="candidate speech detected by VAD")
         if self.current_interaction_state == "closing":
             self._cancel_closing_reply_timeout(reason="closing reply detected by VAD")
@@ -650,19 +622,12 @@ class InterviewOrchestrator:
                 },
             )
 
-    # ──────────────────────────── TTS ────────────────────────────
+    # ──────────────────────────── PIPECAT TTS OUTPUT ────────────────────────────
 
     async def speak(self, text: str):
-        """Synthesizes text via TTS and streams audio to the WebSocket."""
+        """Queue policy-generated speech in the Pipecat TTS pipeline."""
         logger.info("AI speaking", extra={"text": text})
         self.current_interaction_state = "speaking"
-        if self.speech_output is not None:
-            await self.speech_output(text)
-            return
-
-        from src.screening_pipeline.audio_websocket import speak_to_attendee
-
-        async for chunk in self.tts_client.synthesize(text):
-            if not self.is_active:
-                break
-            await speak_to_attendee(self.websocket, chunk)
+        if self.speech_output is None:
+            raise RuntimeError("Pipecat speech output is not configured")
+        await self.speech_output(text)
