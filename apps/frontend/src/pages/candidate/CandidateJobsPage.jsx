@@ -1,12 +1,22 @@
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
 import { usePublicJobsQuery } from '../../features/candidate/usePublicJobs'
 import { ORG_URL_SLUG } from '../../features/candidate/constants'
-import { JobCard } from '../../features/candidate/components/JobCard'
 import { JobFilters } from '../../features/candidate/components/JobFilters'
-import { PageSkeleton } from '../../components/ui/Skeleton'
+import {
+  formatDate,
+  formatExperience,
+  formatJobType,
+  formatWorkType,
+} from '../../features/jobs/jobFields'
+import { Alert } from '../../components/ui/Alert'
+import { EmptyState } from '../../components/ui/EmptyState'
+import { PageHeader, Panel } from '../../components/ui/PageHeader'
+import { TableSkeleton } from '../../components/ui/Skeleton'
+import { Stagger, StaggerItem } from '../../components/motion/Motion'
 
 export function CandidateJobsPage() {
+  const navigate = useNavigate()
   const { org = ORG_URL_SLUG } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -43,86 +53,117 @@ export function CandidateJobsPage() {
     setSearchParams({})
   }
 
-  const firstOrg = jobs[0]
-  const orgName = firstOrg?.organization_name || org
-  const orgLogo = firstOrg?.organization_logo_url
+  const orgName = jobs[0]?.organization_name
   const hasActiveFilters = Boolean(search || jobType || workType)
 
   return (
-    <div className="mx-auto max-w-7xl px-margin-mobile py-lg md:px-lg md:py-xl">
-      {/* Header & Filter Card */}
-      <div className="mb-lg rounded-2xl bg-surface-container-lowest border border-outline-variant/70 p-lg shadow-lift">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-md">
-          <div>
-            {orgName ? (
-              <div className="flex items-center gap-sm mb-xs">
-                {orgLogo ? (
-                  <img
-                    src={orgLogo}
-                    alt={orgName}
-                    className="w-8 h-8 rounded-lg object-contain bg-surface border border-outline-variant/60 p-xs"
-                  />
-                ) : null}
-                <span className="text-body-md font-semibold text-on-surface">{orgName}</span>
-              </div>
-            ) : null}
-            <h1 className="text-headline-md font-bold text-on-surface tracking-tight">
-              Open Positions
-            </h1>
-          </div>
+    <>
+      <PageHeader
+        title="Open positions"
+        description={
+          orgName
+            ? `Published roles at ${orgName}. Apply with your resume.`
+            : 'Browse published roles and apply with your resume.'
+        }
+      />
 
-          <div className="inline-flex items-center gap-xs rounded-xl bg-surface-container-low border border-outline-variant/60 px-md py-xs text-body-sm font-medium text-on-surface">
-            <span>{isLoading ? '...' : `${jobs.length} Role${jobs.length === 1 ? '' : 's'}`}</span>
-          </div>
-        </div>
+      <JobFilters
+        searchInput={searchInput}
+        onSearchInputChange={setSearchInput}
+        onSearchSubmit={handleSearchSubmit}
+        jobType={jobType}
+        onJobTypeChange={(val) => updateParam('job_type', val)}
+        workType={workType}
+        onWorkTypeChange={(val) => updateParam('work_type', val)}
+        onClearFilters={handleClearFilters}
+        hasActiveFilters={hasActiveFilters}
+      />
 
-        {/* Filter Controls */}
-        <JobFilters
-          searchInput={searchInput}
-          onSearchInputChange={setSearchInput}
-          onSearchSubmit={handleSearchSubmit}
-          jobType={jobType}
-          onJobTypeChange={(val) => updateParam('job_type', val)}
-          workType={workType}
-          onWorkTypeChange={(val) => updateParam('work_type', val)}
-          onClearFilters={handleClearFilters}
-          hasActiveFilters={hasActiveFilters}
-        />
-      </div>
+      {isError ? <Alert className="mb-md">{error?.message || 'Failed to load jobs'}</Alert> : null}
 
-      {/* Jobs Grid */}
-      {isLoading ? (
-        <PageSkeleton />
-      ) : isError ? (
-        <div className="rounded-2xl border border-error/30 bg-error-container/30 p-xl text-center">
-          <h3 className="text-headline-sm font-semibold text-on-surface">Unable to load job listings</h3>
-          <p className="mt-xs text-body-sm text-on-surface-variant">
-            {error?.message || 'Failed to fetch public jobs. Please try again later.'}
-          </p>
+      <Panel bodyClassName="p-0 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-surface-container-low/60 border-b border-outline-variant/80">
+                <th className="ez-table-head">Title</th>
+                <th className="ez-table-head">Type</th>
+                <th className="ez-table-head">Work mode</th>
+                <th className="ez-table-head">Location</th>
+                <th className="ez-table-head">Experience</th>
+                <th className="ez-table-head">Posted</th>
+              </tr>
+            </thead>
+            {isLoading ? (
+              <tbody>
+                <tr>
+                  <td colSpan={6} className="p-0">
+                    <TableSkeleton rows={5} cols={6} />
+                  </td>
+                </tr>
+              </tbody>
+            ) : jobs.length === 0 ? (
+              <tbody>
+                <tr>
+                  <td colSpan={6}>
+                    <EmptyState
+                      icon="work"
+                      title="No open positions"
+                      description={
+                        hasActiveFilters
+                          ? 'No active job postings match your filters.'
+                          : 'There are no published roles right now. Check back soon.'
+                      }
+                      actionLabel={hasActiveFilters ? 'Clear filters' : undefined}
+                      onAction={hasActiveFilters ? handleClearFilters : undefined}
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            ) : (
+              <Stagger as="tbody" className="divide-y divide-outline-variant/70">
+                {jobs.map((job) => (
+                  <StaggerItem
+                    as="tr"
+                    key={job.id}
+                    className="ez-table-row cursor-pointer"
+                    role="link"
+                    tabIndex={0}
+                    onClick={() => navigate(`/${org}/jobs/${job.id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        navigate(`/${org}/jobs/${job.id}`)
+                      }
+                    }}
+                  >
+                    <td className="py-md px-md">
+                      <span className="text-body-sm font-medium text-on-surface group-hover:text-secondary">
+                        {job.title || 'Untitled position'}
+                      </span>
+                    </td>
+                    <td className="py-md px-md text-body-sm text-on-surface-variant">
+                      {formatJobType(job.job_type)}
+                    </td>
+                    <td className="py-md px-md text-body-sm text-on-surface-variant">
+                      {formatWorkType(job.work_type)}
+                    </td>
+                    <td className="py-md px-md text-body-sm text-on-surface-variant">
+                      {job.location || '—'}
+                    </td>
+                    <td className="py-md px-md text-body-sm text-on-surface-variant">
+                      {formatExperience(job.experience_min, job.experience_max)}
+                    </td>
+                    <td className="py-md px-md text-body-sm text-on-surface-variant">
+                      {formatDate(job.published_at || job.created_at)}
+                    </td>
+                  </StaggerItem>
+                ))}
+              </Stagger>
+            )}
+          </table>
         </div>
-      ) : jobs.length === 0 ? (
-        <div className="rounded-2xl border border-outline-variant/70 bg-surface-container-lowest p-2xl text-center shadow-soft">
-          <h3 className="text-headline-sm font-semibold text-on-surface">No open positions found</h3>
-          <p className="mt-xs text-body-md text-on-surface-variant">
-            No active job postings match your filter criteria.
-          </p>
-          {hasActiveFilters && (
-            <button
-              type="button"
-              onClick={handleClearFilters}
-              className="mt-md inline-flex items-center gap-xs rounded-xl bg-surface-container-high px-md py-sm text-body-sm font-medium text-on-surface hover:bg-outline-variant transition-colors"
-            >
-              <span>Clear Filters</span>
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="grid gap-md md:grid-cols-2 lg:grid-cols-3">
-          {jobs.map((job) => (
-            <JobCard key={job.id} job={job} org={org} />
-          ))}
-        </div>
-      )}
-    </div>
+      </Panel>
+    </>
   )
 }

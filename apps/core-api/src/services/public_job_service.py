@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -45,14 +45,28 @@ __all__ = [
 ]
 
 
-def _normalize_org_name(value: str) -> str:
-    """Normalize org slug or name for case-insensitive comparison (hyphens → spaces)."""
+def _normalize_org_key(value: str) -> str:
+    """Normalize URL slug / name for comparison (hyphens ↔ spaces, lowercased)."""
     return " ".join(value.strip().lower().replace("-", " ").split())
 
 
-def _org_name_filter(org_name: str):
-    normalized = _normalize_org_name(org_name)
-    return func.lower(Organization.name) == normalized
+def _org_lookup_filter(org_key: str):
+    """Match public URL segment against organization domain or name.
+
+    Careers URLs use the subdomain (`josh-software`), which is stored on
+    `organizations.domain`, not necessarily the display `name`.
+    """
+    raw = org_key.strip().lower()
+    normalized = _normalize_org_key(org_key)
+    slug = raw.replace(" ", "-")
+    name_as_slug = func.replace(func.lower(Organization.name), " ", "-")
+    return or_(
+        func.lower(Organization.domain) == raw,
+        func.lower(Organization.domain) == slug,
+        func.lower(Organization.name) == normalized,
+        name_as_slug == slug,
+        name_as_slug == raw,
+    )
 
 
 def list_public_jobs(
@@ -78,7 +92,7 @@ def list_public_jobs(
         )
     )
 
-    stmt = stmt.where(_org_name_filter(org_name))
+    stmt = stmt.where(_org_lookup_filter(org_name))
 
     if search:
         pattern = f"%{search.strip()}%"
@@ -138,7 +152,7 @@ def get_public_job(
         )
     )
 
-    stmt = stmt.where(_org_name_filter(org_name))
+    stmt = stmt.where(_org_lookup_filter(org_name))
 
     row = db.execute(stmt).first()
     if row is None:
