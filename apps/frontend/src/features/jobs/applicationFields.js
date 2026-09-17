@@ -286,6 +286,35 @@ export function screeningSlotFromTimeline(timeline, candidateEmail = null) {
   }
 }
 
+/** Session id for analysis/report — falls back to completed/in-progress events. */
+export function interviewSessionIdFromTimeline(timeline, candidateEmail = null) {
+  const fromSlot = screeningSlotFromTimeline(timeline, candidateEmail)?.sessionId
+  if (fromSlot) return fromSlot
+
+  const list = Array.isArray(timeline) ? timeline : []
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const event = list[i]
+    if (
+      event?.event_type === 'screening_completed' ||
+      event?.event_type === 'screening_in_progress' ||
+      event?.event_type === 'analysis_ready'
+    ) {
+      const id = event?.metadata?.interview_session_id
+      if (typeof id === 'string' && id) return id
+    }
+  }
+  return null
+}
+
+export function canShowInterviewAnalysis(timeline, sessionStatus = null) {
+  if (sessionStatus === 'completed') return true
+  const types = timelineEventTypes(timeline)
+  return (
+    types.has('screening_completed') ||
+    types.has('analysis_ready')
+  )
+}
+
 export function canRejectApplication(detail, timeline) {
   if (!detail) return false
   if (detail.status === 'rejected' || detail.status === 'shortlist_for_l1') return false

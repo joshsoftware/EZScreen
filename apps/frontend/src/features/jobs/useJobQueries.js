@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getApplicationDetailRequest,
   getApplicationTimelineRequest,
+  getInterviewAnalysisRequest,
   getInterviewSessionRequest,
   getJobApplicantsRequest,
   getJobRequest,
@@ -61,6 +62,15 @@ export function useInterviewSessionQuery(sessionId, options = {}) {
   })
 }
 
+export function useInterviewAnalysisQuery(sessionId, options = {}) {
+  return useQuery({
+    queryKey: queryKeys.interviewAnalysis(sessionId),
+    queryFn: () => getInterviewAnalysisRequest(sessionId),
+    enabled: Boolean(sessionId),
+    ...options,
+  })
+}
+
 export function useJobQueryClient() {
   const queryClient = useQueryClient()
 
@@ -95,6 +105,12 @@ export function useJobQueryClient() {
       if (!sessionId) return
       return queryClient.invalidateQueries({
         queryKey: queryKeys.interviewSession(sessionId),
+      })
+    },
+    invalidateInterviewAnalysis(sessionId) {
+      if (!sessionId) return
+      return queryClient.invalidateQueries({
+        queryKey: queryKeys.interviewAnalysis(sessionId),
       })
     },
   }
