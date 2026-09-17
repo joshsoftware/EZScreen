@@ -96,25 +96,6 @@ function FinalSummarySection({ summary, overall, lines }) {
         ) : null}
       </div>
 
-      {summary?.total_score != null && summary?.max_possible_score != null ? (
-        <p className="text-label-md text-on-surface-variant">
-          Raw · {asNumber(summary.total_score) ?? '—'} /{' '}
-          {asNumber(summary.max_possible_score) ?? '—'}
-          {asNumber(summary.raw_must_have_score) != null
-            ? ` · Must-have ${asNumber(summary.raw_must_have_score).toFixed(1)}`
-            : ''}
-          {asNumber(summary.raw_domain_expertise_score) != null
-            ? ` · Domain ${asNumber(summary.raw_domain_expertise_score).toFixed(1)}`
-            : ''}
-          {asNumber(summary.raw_good_to_have_score) != null
-            ? ` · Good to have ${asNumber(summary.raw_good_to_have_score).toFixed(1)}`
-            : ''}
-          {asNumber(summary.raw_lacking_skill_score) != null
-            ? ` · Skill gaps ${asNumber(summary.raw_lacking_skill_score).toFixed(1)}`
-            : ''}
-        </p>
-      ) : null}
-
       {lines.length === 1 ? (
         <p className="text-body-sm text-on-surface leading-relaxed whitespace-pre-wrap">
           {lines[0]}
@@ -380,7 +361,6 @@ function TranscriptTurn({ turn }) {
 function Scorecard({
   overall,
   tone,
-  lines,
   breakdown,
   planned,
   evaluated,
@@ -449,32 +429,7 @@ function Scorecard({
         </div>
       ) : null}
 
-      {lines.length === 1 ? (
-        <p className="text-body-sm text-on-surface leading-relaxed">
-          <span className="text-on-surface-variant">Recommendation · </span>
-          {lines[0]}
-        </p>
-      ) : lines.length > 1 ? (
-        <div className="space-y-xs">
-          <p className="font-label-md text-label-md text-on-surface-variant tracking-wide">
-            Recommendation
-          </p>
-          <ul className="text-body-sm text-on-surface space-y-xs list-disc pl-md">
-            {lines.slice(0, 4).map((point) => (
-              <li key={point.slice(0, 64)} className="leading-relaxed">
-                {point}
-              </li>
-            ))}
-          </ul>
-          {lines.length > 4 ? (
-            <p className="text-label-md text-on-surface-variant">
-              See full summary below
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {(recordingUrl) && (
+      {recordingUrl ? (
         <div className="flex flex-col gap-xs pt-xs border-t border-outline-variant/50">
           <a
             href={recordingUrl}
@@ -485,7 +440,7 @@ function Scorecard({
             Session recording
           </a>
         </div>
-      )}
+      ) : null}
     </aside>
   )
 }
@@ -566,7 +521,6 @@ export function InterviewAnalysisPanel({
             <Scorecard
               overall={overall}
               tone={tone}
-              lines={lines}
               breakdown={breakdown}
               planned={planned}
               evaluated={evaluated}
