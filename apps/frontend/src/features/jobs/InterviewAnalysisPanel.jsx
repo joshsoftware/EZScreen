@@ -96,25 +96,6 @@ function FinalSummarySection({ summary, overall, lines }) {
         ) : null}
       </div>
 
-      {summary?.total_score != null && summary?.max_possible_score != null ? (
-        <p className="text-label-md text-on-surface-variant">
-          Raw · {asNumber(summary.total_score) ?? '—'} /{' '}
-          {asNumber(summary.max_possible_score) ?? '—'}
-          {asNumber(summary.raw_must_have_score) != null
-            ? ` · Must-have ${asNumber(summary.raw_must_have_score).toFixed(1)}`
-            : ''}
-          {asNumber(summary.raw_domain_expertise_score) != null
-            ? ` · Domain ${asNumber(summary.raw_domain_expertise_score).toFixed(1)}`
-            : ''}
-          {asNumber(summary.raw_good_to_have_score) != null
-            ? ` · Good to have ${asNumber(summary.raw_good_to_have_score).toFixed(1)}`
-            : ''}
-          {asNumber(summary.raw_lacking_skill_score) != null
-            ? ` · Skill gaps ${asNumber(summary.raw_lacking_skill_score).toFixed(1)}`
-            : ''}
-        </p>
-      ) : null}
-
       {lines.length === 1 ? (
         <p className="text-body-sm text-on-surface leading-relaxed whitespace-pre-wrap">
           {lines[0]}
