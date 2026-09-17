@@ -538,11 +538,10 @@ export function InterviewAnalysisPanel({
             </p>
             {evaluations.length > 0 ? (
               <div className="rounded-xl border border-outline-variant/70 px-md bg-surface-container-lowest/60">
-                {evaluations.map((evaluation, index) => (
+                {evaluations.map((evaluation) => (
                   <EvaluationRow
                     key={evaluation?.question_id ?? evaluation?.question}
                     evaluation={evaluation}
-                    defaultOpen={index === 0}
                   />
                 ))}
               </div>

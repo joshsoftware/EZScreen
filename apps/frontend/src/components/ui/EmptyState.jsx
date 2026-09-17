@@ -7,6 +7,7 @@ export function EmptyState({
   description,
   actionLabel,
   actionTo,
+  onAction,
   className,
 }) {
   return (
@@ -27,6 +28,11 @@ export function EmptyState({
       ) : null}
       {actionLabel && actionTo ? (
         <Button to={actionTo} size="md">
+          {actionLabel}
+        </Button>
+      ) : null}
+      {actionLabel && !actionTo && onAction ? (
+        <Button type="button" size="md" onClick={onAction}>
           {actionLabel}
         </Button>
       ) : null}
