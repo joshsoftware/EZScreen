@@ -25,6 +25,8 @@ dependencies = [
     "kokoro-onnx>=0.1.6",
     "soundfile>=0.12.1",
     "numpy>=1.26.0",
+    "pipecat-ai==1.10.0",
+    "setuptools>=68.0.0,<82.0.0",
 ]
 
 [build-system]

@@ -82,3 +82,15 @@ async def test_persist_interview_close_calls_summary_and_metadata():
 
     api_client.save_final_summary.assert_awaited_once()
     api_client.save_interview_metadata.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_persist_interview_close_saves_metadata_when_no_answer_was_scored():
+    api_client = MagicMock()
+    api_client.save_final_summary = AsyncMock()
+    api_client.save_interview_metadata = AsyncMock()
+
+    await persist_interview_close(api_client, MagicMock(), [], [{"bot_speech": "hi"}])
+
+    api_client.save_final_summary.assert_not_awaited()
+    api_client.save_interview_metadata.assert_awaited_once()

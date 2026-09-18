@@ -96,6 +96,9 @@ services:
     environment:
       CORE_API_URL: "http://core-api:8000"
       CORE_API_BASE_URL: "http://core-api:8000"
+      # The host model directory is mounted below; use the container path here.
+      KOKORO_MODEL_PATH: /app/.models/kokoro-v1.0.onnx
+      KOKORO_VOICES_PATH: /app/.models/voices-v1.0.bin
       # Keep HF downloads on the host bind mount (not ephemeral container FS).
       HF_HOME: /root/.cache/huggingface
       TRANSFORMERS_CACHE: /root/.cache/huggingface

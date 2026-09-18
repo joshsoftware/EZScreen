@@ -13,7 +13,11 @@ class AttendeeWebsocketSettings(BaseModel):
 
 class AttendeeWebhookConfig(BaseModel):
     url: str
-    triggers: list[str] = ["bot.state_change", "participant_events.speech_start_stop"]
+    triggers: list[str] = [
+        "bot.state_change",
+        "participant_events.speech_start_stop",
+        "participant_events.join_leave",
+    ]
 
 
 class AttendeeScheduleBotRequest(BaseModel):
