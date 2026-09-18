@@ -54,7 +54,10 @@ async def persist_interview_close(
     termination_reason: str = "questions_completed",
 ) -> None:
     """Persist final summary and full conversational transcript."""
+    # The conversation itself is valuable audit data even if the candidate
+    # leaves before producing a scoreable answer.  Always save it.
     if not evaluations:
+        await api_client.save_interview_metadata(transcript_log)
         return
         
     summary_math = calculate_final_weighted_score(evaluations)

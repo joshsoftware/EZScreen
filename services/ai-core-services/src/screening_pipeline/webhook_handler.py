@@ -50,10 +50,15 @@ async def process_state_change(payload: Dict[str, Any]):
         pass
     
     elif new_state in ["ended", "left"]:
-        # Bot left the meeting or it concluded
+        # A live runtime owns the transcript and must finalize before this
+        # confirmation webhook marks the session complete.  It is safe to
+        # receive this after normal completion: end_interview is idempotent.
+        from src.screening_pipeline.audio_websocket import active_sessions
+
+        runtime = active_sessions.get(str(session.id))
+        if runtime:
+            await runtime.policy.end_interview("meeting_ended")
         await update_session_status(session.id, "completed")
-        # TODO: Trigger final LLM summary & store to interview_analysis
-        pass
         
     elif new_state == "fatal_error":
         # Bot crashed or failed to join
@@ -61,14 +66,45 @@ async def process_state_change(payload: Dict[str, Any]):
 
 
 async def process_participant_event(payload: Dict[str, Any]):
-    """Background task to handle participant events (like barge-in)."""
+    """Handle barge-in plus provider participant/meeting end events."""
     data = payload.get("data", {})
-    bot_id = data.get("bot_id")
-    event = data.get("event")
+    bot_id = data.get("bot_id") or payload.get("bot_id")
+    event = str(data.get("event") or data.get("event_type") or "").lower()
     
     if event == "speech_started":
-        # TODO: Signal the TTS engine / orchestrator to STOP speaking (barge-in)
+        # Live audio VAD performs the actual interruption; this remains useful
+        # diagnostic coverage when provider webhook delivery races audio.
         logger.debug("Barge-in detected via webhook", extra={"bot_id": bot_id})
+
+    # Provider event spelling varies by meeting platform, so accept the
+    # canonical leave/end values without making a speech event terminal.
+    if event not in {"participant_left", "participant_leave", "leave", "left", "meeting_ended"} or not bot_id:
+        return
+
+    session = await interview_session_repo.get_by_bot_id(bot_id)
+    if not session:
+        logger.warning("Participant event for unknown bot", extra={"bot_id": bot_id, "event": event})
+        return
+
+    # A meeting can include recruiters or observers.  Never terminate an
+    # interview merely because an arbitrary participant left; the dispatch
+    # metadata identifies the intended candidate when that signal is needed.
+    metadata = getattr(session, "interview_metadata", None)
+    candidate_uuid = metadata.get("candidate_participant_uuid") if isinstance(metadata, dict) else None
+    participant_uuid = data.get("participant_uuid")
+    if event != "meeting_ended" and (not candidate_uuid or candidate_uuid != participant_uuid):
+        logger.info(
+            "Ignored non-candidate participant leave",
+            extra={"bot_id": bot_id, "participant_uuid": participant_uuid},
+        )
+        return
+
+    from src.screening_pipeline.audio_websocket import active_sessions
+
+    runtime = active_sessions.get(str(session.id))
+    if runtime:
+        await runtime.policy.end_interview("candidate_left")
+    await update_session_status(session.id, "completed")
 
 
 @router.post("/webhook", status_code=status.HTTP_200_OK)
@@ -84,7 +120,7 @@ async def handle_attendee_webhook(request: Request, background_tasks: Background
         if trigger == "bot.state_change":
             background_tasks.add_task(process_state_change, payload)
             
-        elif trigger == "participant_events.speech_start_stop":
+        elif trigger in {"participant_events.speech_start_stop", "participant_events.join_leave"}:
             background_tasks.add_task(process_participant_event, payload)
             
         else:

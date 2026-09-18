@@ -17,6 +17,7 @@ from src.screening_pipeline.pipecat_runtime import (
 )
 from src.screening_pipeline.pipecat_transport import SpeechCompleteFrame
 from src.screening_pipeline.prompts import (
+    ANSWER_SETTLE_SECONDS,
     CLOSING_REPLY_TIMEOUT_SECONDS,
     CLOSING_TEXT,
     GREETING_TEXT,
@@ -34,9 +35,10 @@ def test_interview_timing_and_prompt_contract_is_explicit():
     assert CLOSING_TEXT == (
         "Thank you for your time today. Our HR team will be in touch shortly."
     )
-    assert SILENCE_PROMPT_TEXT == "Are you there?"
     assert SILENCE_PROMPT_SECONDS == 30
-    assert MAX_SILENCE_PROMPTS == 3
+    assert SILENCE_PROMPT_TEXT == "Are you there?"
+    assert MAX_SILENCE_PROMPTS == 2
+    assert ANSWER_SETTLE_SECONDS == 3
     assert CLOSING_REPLY_TIMEOUT_SECONDS == 30
     assert MAX_FOLLOW_UPS_PER_QUESTION == 1
 
@@ -67,7 +69,7 @@ async def test_finalization_is_idempotent_for_disconnect_and_normal_close():
         persistence,
     ):
         await policy.finalize(reason="questions_completed")
-        await policy.finalize(reason="session_ended")
+        await policy.finalize(reason="transport_disconnected")
 
     persistence.assert_awaited_once_with(
         policy.api_client,
@@ -93,6 +95,94 @@ async def test_policy_can_route_speech_to_an_injected_runtime_sink():
 
     speech_output.assert_awaited_once_with("A policy response")
     assert policy.current_interaction_state == "speaking"
+
+
+@pytest.mark.asyncio
+async def test_answer_segments_are_combined_before_evaluation(monkeypatch):
+    speech_output = AsyncMock()
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        speech_output=speech_output,
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "listening"
+    policy._process_speech = AsyncMock()
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0)
+
+    policy.handle_candidate_speech("Docker packages")
+    policy.handle_candidate_speech("applications and dependencies")
+    await policy._answer_settle_task
+
+    policy._process_speech.assert_awaited_once_with(
+        "Docker packages applications and dependencies"
+    )
+
+
+@pytest.mark.asyncio
+async def test_inactivity_finalizes_and_requests_bot_leave(monkeypatch):
+    api_client = MagicMock()
+    api_client.update_status = AsyncMock(return_value=True)
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        llm_client=MagicMock(),
+        api_client=api_client,
+        speech_output=AsyncMock(),
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "listening"
+    now = asyncio.get_running_loop().time()
+    policy._last_candidate_activity_at = now
+    policy._inactivity_cycle_started_at = now
+    policy._leave_bot_after_close = AsyncMock()
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.SILENCE_PROMPT_SECONDS", 0)
+
+    with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()) as persistence:
+        await policy._end_after_inactivity()
+
+    assert policy.termination_reason == "candidate_silence"
+    persistence.assert_awaited_once()
+    api_client.update_status.assert_awaited_once_with("completed")
+    policy._leave_bot_after_close.assert_awaited_once()
+    assert [call.args[0] for call in policy.speech_output.await_args_list] == [
+        SILENCE_PROMPT_TEXT,
+        SILENCE_PROMPT_TEXT,
+        CLOSING_TEXT,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_question_is_repeated_at_most_once():
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        speech_output=AsyncMock(),
+    )
+    policy.is_active = True
+    policy.evaluator.evaluate_answer = AsyncMock(
+        return_value={"decision": "REPEAT_QUESTION"}
+    )
+    policy.transcript_log = [
+        {
+            "interaction_type": "question",
+            "candidate_answer": "",
+            "follow_ups": [],
+            "question_repeat_count": 0,
+        }
+    ]
+    question = {"question": "What is Docker?", "expected_keywords": []}
+
+    await policy._handle_answer(question, "What is Docker?", "Please repeat.")
+    policy._cancel_inactivity_deadline()
+    await policy._handle_answer(question, "What is Docker?", "Repeat it again.")
+    policy._cancel_inactivity_deadline()
+
+    first_response = policy.speech_output.await_args_list[0].args[0]
+    second_response = policy.speech_output.await_args_list[1].args[0]
+    assert first_response == "Let me repeat the question: What is Docker?"
+    assert "already repeated" in second_response
+    assert "What is Docker?" not in second_response
 
 
 @pytest.mark.asyncio

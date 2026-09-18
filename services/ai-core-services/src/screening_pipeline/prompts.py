@@ -57,10 +57,12 @@ GREETING_TEXT = "Hi! I am your interviewer for today's interview. Let's start wi
 CLOSING_TEXT = "Thank you for your time today. Our HR team will be in touch shortly."
 SILENCE_PROMPT_TEXT = "Are you there?"
 SILENCE_PROMPT_SECONDS = 30
-MAX_SILENCE_PROMPTS = 3
-# Allows small scheduler/TTS timing variation while ensuring attempts from an
-# old, delayed cycle never combine to close an interview.
-SILENCE_PROMPT_CYCLE_GRACE_SECONDS = 5
+# Prompt twice at 30-second intervals, then close after the final 30-second
+# unanswered interval (90 seconds total).
+MAX_SILENCE_PROMPTS = 2
+# A candidate may pause briefly between clauses.  A final STT segment is held
+# for this short period so a continuation is evaluated as one answer.
+ANSWER_SETTLE_SECONDS = 3
 # This is intentionally separate from SILENCE_PROMPT_SECONDS: the closing
 # reply window must never speak the inactivity prompt.
 CLOSING_REPLY_TIMEOUT_SECONDS = 30

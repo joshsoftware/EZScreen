@@ -48,7 +48,10 @@ async def _run_pipecat_session(websocket: WebSocket, session_id: str):
                 break
 
             if raw_ws_message.get("bytes"):
-                if runtime.policy.current_interaction_state in {"listening", "closing"}:
+                # Binary frames are candidate-only in this transport.  Keep
+                # accepting them while evaluation/TTS is in flight so a
+                # resumed answer can interrupt stale bot work.
+                if runtime.policy.is_active:
                     await runtime.push_audio(raw_ws_message["bytes"], 24000)
                 continue
 

@@ -16,12 +16,12 @@ from src.screening_pipeline.persistence import (
     persist_interview_close,
 )
 from src.screening_pipeline.prompts import (
+    ANSWER_SETTLE_SECONDS,
     CLOSING_REPLY_TIMEOUT_SECONDS,
     CLOSING_TEXT,
     GREETING_TEXT,
     MAX_FOLLOW_UPS_PER_QUESTION,
     MAX_SILENCE_PROMPTS,
-    SILENCE_PROMPT_CYCLE_GRACE_SECONDS,
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
 )
@@ -72,11 +72,17 @@ class PipecatInterviewPolicy:
         self.transcript_log: list = []
         self.analysis_evaluations: list = []
         self.is_finalized = False
-        self._silence_prompt_task: Optional[asyncio.Task] = None
+        self._inactivity_task: Optional[asyncio.Task] = None
+        self._answer_settle_task: Optional[asyncio.Task] = None
+        self._processing_task: Optional[asyncio.Task] = None
         self._closing_reply_timeout_task: Optional[asyncio.Task] = None
-        self._awaiting_silence_reply = False
+        self._last_candidate_activity_at: Optional[float] = None
+        self._inactivity_cycle_started_at: Optional[float] = None
         self._silence_prompt_count = 0
-        self._silence_cycle_started_at: Optional[float] = None
+        self._answer_buffer: list[str] = []
+        self._end_lock = asyncio.Lock()
+        self._ending = False
+        self.termination_reason: Optional[str] = None
 
 
     # ──────────────────────────── LIFECYCLE ────────────────────────────
@@ -152,21 +158,40 @@ class PipecatInterviewPolicy:
                 extra={"session_id": self.session_id, "reason": reason, "error": str(err)},
             )
 
+    async def end_interview(self, reason: str, *, leave_bot: bool = False) -> None:
+        """End a session exactly once, regardless of which transport event won."""
+        async with self._end_lock:
+            if self._ending or self.is_finalized:
+                return
+            self._ending = True
+            self.termination_reason = reason
+            self.is_active = False
+            self.current_interaction_state = "ending"
+            self._cancel_inactivity_deadline()
+            self._cancel_answer_settle()
+            self._cancel_closing_reply_timeout()
+            self._cancel_processing()
+            await self.finalize(reason=reason)
+            # The status endpoint has no termination-reason field yet; the
+            # reason remains in this orchestration's durable finalization log.
+            if self.api_client is not None:
+                await self.api_client.update_status("completed")
+            if leave_bot:
+                await self._leave_bot_after_close()
+
     async def cleanup(self):
         """Teardown connections, persisting the interview first if it ended early."""
-        self.is_active = False
-        self._cancel_silence_prompt()
-        self._cancel_closing_reply_timeout()
-        await self.finalize(reason="session_ended")
+        await self.end_interview("transport_disconnected")
 
     # ──────────────────────────── PIPECAT TURN EVENTS ────────────────────────────
 
     def handle_candidate_speech(self, transcript: str):
         """Handle one finalized Pipecat transcription."""
-        self._cancel_silence_prompt(reason="candidate transcript received")
         if self.current_interaction_state == "closing":
             self._cancel_closing_reply_timeout(reason="closing reply transcript received")
-        if not self.is_active or self.current_interaction_state not in {"listening", "closing"}:
+        if not self.is_active or self.current_interaction_state not in {
+            "listening", "collecting_answer", "evaluating", "speaking", "closing"
+        }:
             return
 
         is_closing_reply = (
@@ -181,40 +206,70 @@ class PipecatInterviewPolicy:
             )
             return
 
-        self._record_silence_reply(transcript)
         logger.info("Candidate speech received", extra={"transcript": transcript})
-        self.current_interaction_state = "evaluating"
-        asyncio.create_task(self._process_speech(transcript))
+        if self.transcript_log:
+            silence_prompts = self.transcript_log[-1].get("silence_prompts", [])
+            if silence_prompts and not silence_prompts[-1].get("candidate_reply"):
+                silence_prompts[-1]["candidate_reply"] = transcript
+        if self.current_interaction_state == "closing":
+            self._processing_task = asyncio.create_task(self._process_speech(transcript))
+            return
+
+        self._answer_buffer.append(transcript.strip())
+        self.current_interaction_state = "collecting_answer"
+        self._cancel_answer_settle()
+        self._answer_settle_task = asyncio.create_task(self._process_after_answer_settles())
 
     def handle_candidate_activity(self):
-        """Cancel inactivity as soon as Pipecat VAD detects candidate speech."""
-        self._cancel_silence_prompt(reason="candidate speech detected by VAD")
+        """Extend the deadline and invalidate stale work as soon as VAD fires."""
+        if not self.is_active:
+            return
+        now = asyncio.get_running_loop().time()
+        self._last_candidate_activity_at = now
+        self._inactivity_cycle_started_at = now
         if self.current_interaction_state == "closing":
             self._cancel_closing_reply_timeout(reason="closing reply detected by VAD")
+            return
+        if self.current_interaction_state == "evaluating":
+            self._cancel_processing()
+            self.current_interaction_state = "collecting_answer"
+        self._cancel_answer_settle()
 
     def _begin_listening(self):
-        """Enter an eligible listening turn and start its silence-prompt cycle."""
+        """Enter an eligible listening turn and start its hard inactivity deadline."""
         self.current_interaction_state = "listening"
-        self._cancel_silence_prompt(reason="new listening turn")
-        self._silence_prompt_count = 0
-        self._silence_cycle_started_at = asyncio.get_running_loop().time()
-        self._awaiting_silence_reply = False
-        self._silence_prompt_task = asyncio.create_task(self._prompt_after_silence())
+        self._answer_buffer.clear()
+        self._start_inactivity_deadline()
         logger.info(
             "Started 30-second candidate inactivity timer",
             extra={"session_id": self.session_id},
         )
 
-    def _cancel_silence_prompt(self, *, reason: str = "session cleanup"):
-        """Stop a pending inactivity prompt, if any."""
-        task = self._silence_prompt_task
+    def _start_inactivity_deadline(self):
+        self._cancel_inactivity_deadline()
+        now = asyncio.get_running_loop().time()
+        self._last_candidate_activity_at = now
+        self._inactivity_cycle_started_at = now
+        self._silence_prompt_count = 0
+        self._inactivity_task = asyncio.create_task(self._end_after_inactivity())
+
+    def _cancel_inactivity_deadline(self):
+        task = self._inactivity_task
         if task and not task.done() and task is not asyncio.current_task():
             task.cancel()
-            logger.info(
-                "Cancelled candidate inactivity timer",
-                extra={"session_id": self.session_id, "reason": reason},
-            )
-        self._silence_prompt_task = None
+        self._inactivity_task = None
+
+    def _cancel_answer_settle(self):
+        task = self._answer_settle_task
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+        self._answer_settle_task = None
+
+    def _cancel_processing(self):
+        task = self._processing_task
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+        self._processing_task = None
 
     def _cancel_closing_reply_timeout(self, *, reason: str = "session cleanup"):
         """Stop the silent closing-reply timeout, if it is pending."""
@@ -227,91 +282,63 @@ class PipecatInterviewPolicy:
             )
         self._closing_reply_timeout_task = None
 
-    def _record_silence_reply(self, transcript: str):
-        """Attach the reply to the most recent "Are you there?" prompt."""
-        if not self._awaiting_silence_reply:
-            return
-
-        self._awaiting_silence_reply = False
-        if not self.transcript_log:
-            return
-
-        silence_prompts = self.transcript_log[-1].get("silence_prompts", [])
-        if silence_prompts and isinstance(silence_prompts[-1], dict):
-            silence_prompts[-1]["candidate_reply"] = transcript
-
-    async def _prompt_after_silence(self):
-        """Prompt up to three times, then close after continuous silence."""
+    async def _end_after_inactivity(self):
+        """Prompt twice, then end after a third unanswered 30-second window."""
         try:
-            await asyncio.sleep(SILENCE_PROMPT_SECONDS)
+            while self.is_active:
+                cycle_started_at = self._inactivity_cycle_started_at
+                if cycle_started_at is None:
+                    return
+                remaining = SILENCE_PROMPT_SECONDS - (
+                    asyncio.get_running_loop().time() - cycle_started_at
+                )
+                if remaining > 0:
+                    await asyncio.sleep(remaining)
+                    continue
+                if self.current_interaction_state in {"listening", "collecting_answer"}:
+                    if self._silence_prompt_count < MAX_SILENCE_PROMPTS:
+                        self._silence_prompt_count += 1
+                        logger.info(
+                            "Candidate inactive; sending silence prompt",
+                            extra={
+                                "session_id": self.session_id,
+                                "attempt": self._silence_prompt_count,
+                                "max_attempts": MAX_SILENCE_PROMPTS,
+                            },
+                        )
+                        if self.transcript_log:
+                            self.transcript_log[-1].setdefault("silence_prompts", []).append(
+                                {"bot_speech": SILENCE_PROMPT_TEXT, "candidate_reply": ""}
+                            )
+                        # A bot prompt starts a new 30-second response window;
+                        # only candidate VAD activity can reset it early.
+                        self._inactivity_cycle_started_at = asyncio.get_running_loop().time()
+                        await self.speak(SILENCE_PROMPT_TEXT)
+                        if self.is_active and self.current_interaction_state == "speaking":
+                            self.current_interaction_state = "listening"
+                        continue
+
+                    logger.info("Candidate inactivity deadline reached", extra={"session_id": self.session_id})
+                    await self.speak(CLOSING_TEXT)
+                    await self.end_interview("candidate_silence", leave_bot=True)
+                return
         except asyncio.CancelledError:
             return
 
-        if not self.is_active or self.current_interaction_state != "listening":
+    async def _process_after_answer_settles(self):
+        try:
+            await asyncio.sleep(ANSWER_SETTLE_SECONDS)
+            if not self.is_active or self.current_interaction_state != "collecting_answer":
+                return
+            transcript = " ".join(part for part in self._answer_buffer if part).strip()
+            if not transcript:
+                return
+            self.current_interaction_state = "evaluating"
+            self._cancel_inactivity_deadline()
+            self._processing_task = asyncio.create_task(self._process_speech(transcript))
+            await self._processing_task
+        except asyncio.CancelledError:
             return
-
-        now = asyncio.get_running_loop().time()
-        max_cycle_seconds = (
-            SILENCE_PROMPT_SECONDS * MAX_SILENCE_PROMPTS
-            + SILENCE_PROMPT_CYCLE_GRACE_SECONDS
-        )
-        if (
-            self._silence_cycle_started_at is None
-            or now - self._silence_cycle_started_at > max_cycle_seconds
-        ):
-            if self._silence_prompt_count:
-                logger.warning(
-                    "Silence prompt cycle exceeded its time window; restarting cycle",
-                    extra={
-                        "session_id": self.session_id,
-                        "previous_attempts": self._silence_prompt_count,
-                        "max_cycle_seconds": max_cycle_seconds,
-                    },
-                )
-            self._silence_prompt_count = 0
-            self._silence_cycle_started_at = now
-
-        self._silence_prompt_count += 1
-        logger.info(
-            "Candidate inactive; sending silence prompt",
-            extra={
-                "session_id": self.session_id,
-                "attempt": self._silence_prompt_count,
-                "max_attempts": MAX_SILENCE_PROMPTS,
-            },
-        )
-        if self.transcript_log:
-            self.transcript_log[-1].setdefault("silence_prompts", []).append(
-                {
-                    "bot_speech": SILENCE_PROMPT_TEXT,
-                    "candidate_reply": "",
-                }
-            )
-        is_final_silence_prompt = self._silence_prompt_count >= MAX_SILENCE_PROMPTS
-        if not is_final_silence_prompt:
-            # Start the next 30-second interval now, rather than after the
-            # short prompt finishes playing. This keeps the three prompts in
-            # one continuous ~90-second silence window: 0:30, 1:00, 1:30.
-            self._silence_prompt_task = asyncio.create_task(self._prompt_after_silence())
-
-        self._awaiting_silence_reply = True
-        await self.speak(SILENCE_PROMPT_TEXT)
-        self.current_interaction_state = "listening"
-
-        if is_final_silence_prompt:
-            logger.info(
-                "Silence prompt limit reached; closing interview",
-                extra={"session_id": self.session_id, "attempts": self._silence_prompt_count},
-            )
-            self._silence_prompt_task = None
-            self._awaiting_silence_reply = False
-            self._silence_cycle_started_at = None
-            self.termination_reason = "candidate_silence"
-            await self._close_interview()
-            return
-
-        # Candidate VAD or transcript activity cancels the already-scheduled
-        # next interval before another prompt can be sent.
 
     # ──────────────────────────── MAIN PROCESSING ────────────────────────────
 
@@ -360,9 +387,9 @@ class PipecatInterviewPolicy:
             )
 
         await self.speak(ai_response)
-        # Inactivity prompts apply only to greeting, main questions, and
-        # follow-up questions—not to conversational clarification turns.
-        self.current_interaction_state = "listening"
+        # A request for time is still a response turn. Never leave a session
+        # indefinitely waiting after conversational speech.
+        self._begin_listening()
 
     async def _handle_skip(self, question_obj: dict, current_q: str, transcript: str):
         """Handles SKIP intent — saves 0-score evaluation and moves on."""
@@ -426,14 +453,22 @@ class PipecatInterviewPolicy:
                 )
             else:
                 repeat_text = current_q
-            if self.transcript_log:
-                self.transcript_log[-1].setdefault("conversational_turns", []).append(
-                    {
-                        "candidate_speech": transcript,
-                        "ai_response": f"Let me repeat the question: {repeat_text}",
-                    }
+            interaction = self.transcript_log[-1] if self.transcript_log else None
+            repeat_count = interaction.get("question_repeat_count", 0) if interaction else 0
+            if repeat_count < 1:
+                ai_response = f"Let me repeat the question: {repeat_text}"
+                if interaction:
+                    interaction["question_repeat_count"] = repeat_count + 1
+            else:
+                ai_response = (
+                    "I have already repeated the question once. "
+                    "Please share your best answer when you are ready."
                 )
-            await self.speak(f"Let me repeat the question: {repeat_text}")
+            if interaction:
+                interaction.setdefault("conversational_turns", []).append(
+                    {"candidate_speech": transcript, "ai_response": ai_response}
+                )
+            await self.speak(ai_response)
             self._begin_listening()
             return
 
@@ -533,6 +568,7 @@ class PipecatInterviewPolicy:
                 "bot_speech": q_text,
                 "candidate_answer": "",
                 "follow_ups": [],
+                "question_repeat_count": 0,
             }
         )
 
@@ -579,12 +615,8 @@ class PipecatInterviewPolicy:
 
     async def _persist_closing_and_leave(self):
         """Persist the closing interaction, then request the bot leave."""
-        self.current_interaction_state = "closing_persisting"
-        self._cancel_closing_reply_timeout(reason="closing interaction completed")
         reason = getattr(self, "termination_reason", "questions_completed")
-        await self.finalize(reason=reason)
-        await self._leave_bot_after_close()
-        self.is_active = False
+        await self.end_interview(reason or "questions_completed", leave_bot=True)
 
     async def _leave_bot_after_close(self):
         """Ask Attendee to leave after the closing reply has been persisted."""
