@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # Kokoro TTS (Cloud API)
     kokoro_api_url: str | None = None
     kokoro_api_key: str | None = None
+    ai_models_host_dir: str | None = None
+    kokoro_model_path: str | None = None
+    kokoro_voices_path: str | None = None
+    kokoro_allow_download: bool = False
 
     # Docling
     docling_do_ocr: bool = True
