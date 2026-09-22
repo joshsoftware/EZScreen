@@ -21,6 +21,16 @@ class SkillItem(BaseModel):
             return value.strip()
         return value
 
+    @field_validator("skill")
+    @classmethod
+    def skill_must_be_meaningful(cls, value: str) -> str:
+        if not any(ch.isalnum() for ch in value):
+            raise ValueError(
+                "Skill name must include letters or numbers — "
+                "special characters alone are not allowed"
+            )
+        return value
+
 
 class JobSkills(BaseModel):
     must_have: list[SkillItem] = Field(default_factory=list)
@@ -61,6 +71,28 @@ class JobCreate(BaseModel):
             return value.strip() or None
         return value
 
+    @field_validator("title")
+    @classmethod
+    def title_must_be_meaningful(cls, value: str) -> str:
+        if not any(ch.isalnum() for ch in value):
+            raise ValueError(
+                "Job title must include letters or numbers — "
+                "special characters alone are not allowed"
+            )
+        return value
+
+    @field_validator("location")
+    @classmethod
+    def location_must_be_meaningful(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return value
+        if not any(ch.isalnum() for ch in value):
+            raise ValueError(
+                "Location must include letters or numbers — "
+                "special characters alone are not allowed"
+            )
+        return value
+
     @model_validator(mode="after")
     def check_experience_range(self) -> JobCreate:
         if (
@@ -90,6 +122,29 @@ class JobUpdate(BaseModel):
             return value.strip() or None
         return value
 
+    @field_validator("title")
+    @classmethod
+    def title_must_be_meaningful(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return value
+        if not any(ch.isalnum() for ch in value):
+            raise ValueError(
+                "Job title must include letters or numbers — "
+                "special characters alone are not allowed"
+            )
+        return value
+
+    @field_validator("location")
+    @classmethod
+    def location_must_be_meaningful(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return value
+        if not any(ch.isalnum() for ch in value):
+            raise ValueError(
+                "Location must include letters or numbers — "
+                "special characters alone are not allowed"
+            )
+        return value
 
 class JobListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)

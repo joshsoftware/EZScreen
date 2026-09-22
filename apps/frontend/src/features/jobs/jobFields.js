@@ -315,12 +315,45 @@ function parseOptionalInt(value) {
   return parsed
 }
 
+/** True when the string has at least one letter or digit (Unicode-aware). */
+export function hasMeaningfulText(value) {
+  if (typeof value !== 'string') return false
+  return /[\p{L}\p{N}]/u.test(value)
+}
+
+function assertMeaningfulText(label, value, { required = false } = {}) {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text) {
+    if (required) throw new Error(`${label} is required.`)
+    return
+  }
+  if (!hasMeaningfulText(text)) {
+    throw new Error(
+      `${label} must include letters or numbers — special characters alone are not allowed.`,
+    )
+  }
+}
+
+const SECTION_FIELD_LABELS = {
+  role_summary: 'Role summary',
+  about_company: 'Company or team',
+  responsibilities: 'Responsibilities',
+  must_have_skills_text: 'Must-have skills',
+  good_to_have_skills_text: 'Good-to-have skills',
+  qualifications: 'Qualifications',
+  domain_experience: 'Domain experience',
+  tools_stack: 'Tools & stack',
+}
+
 export function formValuesToPayload(values) {
-  const title = values.title.trim()
-  if (!title) {
-    throw new Error('Title is required.')
+  assertMeaningfulText('Job title', values.title, { required: true })
+  assertMeaningfulText('Location', values.location)
+
+  for (const [key, label] of Object.entries(SECTION_FIELD_LABELS)) {
+    assertMeaningfulText(label, values[key])
   }
 
+  const title = values.title.trim()
   const experienceMin = parseOptionalInt(values.experience_min)
   const experienceMax = parseOptionalInt(values.experience_max)
   if (experienceMin != null && experienceMax != null && experienceMin > experienceMax) {

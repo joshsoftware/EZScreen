@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from src.config.settings import settings
 from src.db.session import SessionLocal
 from src.models.application import Application
 from src.models.enums import (
@@ -50,6 +51,12 @@ from src.services.application_ingest_progress import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Shared pool — caps concurrent OCR/LLM + DB work across all bulk batches.
+_ingest_executor = ThreadPoolExecutor(
+    max_workers=max(1, settings.ingest_max_workers),
+    thread_name_prefix="resume-ingest",
+)
 
 __all__ = [
     "assert_job_accepts_applications",
@@ -113,13 +120,14 @@ def enqueue_bulk_resumes(
     batch_id = start_batch(job.id, queued)
 
     for resume in body.resumes:
-        thread = threading.Thread(
-            target=_process_resume,
-            args=(job.id, resume.s3_key, resume.file_name, actor_id, batch_id),
-            daemon=True,
-            name=f"resume-{resume.file_name[:40]}",
+        _ingest_executor.submit(
+            _process_resume,
+            job.id,
+            resume.s3_key,
+            resume.file_name,
+            actor_id,
+            batch_id,
         )
-        thread.start()
 
     return BulkCreateResponse(job_id=job.id, queued=queued, batch_id=batch_id)
 
@@ -150,13 +158,10 @@ def _process_resume(
     actor_id: UUID | None = None,
     batch_id: str | None = None,
 ) -> None:
-    db = SessionLocal()
+    # Parse first without a DB session — OCR/LLM can take minutes and must not
+    # hold a pooled connection (that caused QueuePool timeouts on large batches).
+    db: Session | None = None
     try:
-        job = db.get(JobDescription, job_id)
-        if job is None:
-            logger.error("Job %s not found while processing %s", job_id, file_name)
-            raise ValueError(f"Job {job_id} not found")
-
         parse_payload = call_parse_resume(s3_key=s3_key, file_name=file_name)
         if parse_payload.get("status") != "success":
             raise ValueError(
@@ -176,6 +181,12 @@ def _process_resume(
         email = _extract_email(personal)
         if not email:
             raise ValueError("Could not extract candidate email from parsed resume")
+
+        db = SessionLocal()
+        job = db.get(JobDescription, job_id)
+        if job is None:
+            logger.error("Job %s not found while processing %s", job_id, file_name)
+            raise ValueError(f"Job {job_id} not found")
 
         application_id = uuid4()
         candidate = find_or_create_candidate(
@@ -225,9 +236,11 @@ def _process_resume(
         if batch_id:
             mark_item_failure(batch_id, error=entry)
         logger.exception("Failed processing resume %s for job %s", file_name, job_id)
-        db.rollback()
+        if db is not None:
+            db.rollback()
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 def _classify_ingest_error(exc: Exception) -> tuple[str, str]:
