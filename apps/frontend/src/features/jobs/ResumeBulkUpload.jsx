@@ -8,6 +8,7 @@ import {
 } from './api'
 
 const ALLOWED_TYPES = new Set(['application/pdf'])
+const MAX_FILES_PER_UPLOAD = 10
 
 function isGoogleDriveConfigured() {
   return Boolean(
@@ -58,26 +59,31 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
       if (isAllowedResumeFile(file)) allowed.push(file)
       else rejected.push(file.name)
     }
-    if (rejected.length) {
-      const sample = rejected.slice(0, 3).join(', ')
-      const more = rejected.length > 3 ? ` (+${rejected.length - 3} more)` : ''
-      setError(
-        `Only PDF resumes are supported. Skipped: ${sample}${more}`,
-      )
-    }
-    if (!allowed.length) return
+
     setFiles((current) => {
       const existing = new Set(current.map((file) => `${file.name}-${file.size}`))
       const next = [...current]
       for (const file of allowed) {
         const key = `${file.name}-${file.size}`
-        if (!existing.has(key)) {
-          next.push(file)
-          existing.add(key)
-        }
+        if (existing.has(key)) continue
+        if (next.length >= MAX_FILES_PER_UPLOAD) break
+        next.push(file)
+        existing.add(key)
       }
       return next
     })
+
+    if (rejected.length) {
+      const sample = rejected.slice(0, 3).join(', ')
+      const more = rejected.length > 3 ? ` (+${rejected.length - 3} more)` : ''
+      setError(`Only PDF resumes are supported. Skipped: ${sample}${more}`)
+      return
+    }
+    if (files.length + allowed.length > MAX_FILES_PER_UPLOAD) {
+      setError(
+        `You can upload up to ${MAX_FILES_PER_UPLOAD} resumes at a time. Extra files were not added.`,
+      )
+    }
   }
 
   function onFileChange(event) {
@@ -145,6 +151,12 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
 
   async function onSubmit() {
     if (!hasFiles || busy) return
+    if (files.length > MAX_FILES_PER_UPLOAD) {
+      setError(
+        `You can upload up to ${MAX_FILES_PER_UPLOAD} resumes at a time. Remove some files and try again.`,
+      )
+      return
+    }
     setUploading(true)
     setError(null)
 
@@ -229,7 +241,8 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
           <p className="text-body-sm text-on-surface">{fileLabel}</p>
           <p className="text-label-md text-on-surface-variant">
             Supports PDF only
-            {driveConfigured ? ' · device or Google Drive' : ''} · up to 50 files
+            {driveConfigured ? ' · device or Google Drive' : ''} · up to{' '}
+            {MAX_FILES_PER_UPLOAD} files
           </p>
           <div className="flex flex-wrap gap-sm justify-center">
             <Button

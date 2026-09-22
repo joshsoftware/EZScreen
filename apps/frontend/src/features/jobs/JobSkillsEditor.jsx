@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
+import { hasMeaningfulText } from './jobFields'
 
 function parseYears(raw) {
   if (raw === '' || raw == null) return null
@@ -51,10 +52,18 @@ function SkillRow({ item, onSkillChange, onYearsChange, onRemove }) {
 function AddSkillRow({ onAdd }) {
   const [name, setName] = useState('')
   const [years, setYears] = useState('')
+  const [localError, setLocalError] = useState(null)
 
   function submit() {
     const trimmed = name.trim()
     if (!trimmed) return
+    if (!hasMeaningfulText(trimmed)) {
+      setLocalError(
+        'Skill name must include letters or numbers — special characters alone are not allowed.',
+      )
+      return
+    }
+    setLocalError(null)
     onAdd({
       skill: trimmed,
       required_years: parseYears(years),
@@ -64,52 +73,60 @@ function AddSkillRow({ onAdd }) {
   }
 
   return (
-    <div className="flex items-start gap-sm pt-sm mt-sm border-t border-dashed border-outline-variant">
-      <div className="flex-1 min-w-0">
-        <Input
-          aria-label="New skill name"
-          className="h-10"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              submit()
-            }
-          }}
-          placeholder="Add a skill"
-        />
+    <div className="space-y-xs pt-sm mt-sm border-t border-dashed border-outline-variant">
+      <div className="flex items-start gap-sm">
+        <div className="flex-1 min-w-0">
+          <Input
+            aria-label="New skill name"
+            className="h-10"
+            value={name}
+            onChange={(event) => {
+              setName(event.target.value)
+              if (localError) setLocalError(null)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                submit()
+              }
+            }}
+            placeholder="Add a skill"
+          />
+        </div>
+        <div className="w-24 shrink-0">
+          <Input
+            aria-label="New skill years"
+            type="number"
+            min={0}
+            max={50}
+            step={0.5}
+            className="h-10"
+            value={years}
+            onChange={(event) => setYears(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                submit()
+              }
+            }}
+            placeholder="Years"
+          />
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          icon="add"
+          className="shrink-0"
+          disabled={!name.trim()}
+          onClick={submit}
+        >
+          Add
+        </Button>
       </div>
-      <div className="w-24 shrink-0">
-        <Input
-          aria-label="New skill years"
-          type="number"
-          min={0}
-          max={50}
-          step={0.5}
-          className="h-10"
-          value={years}
-          onChange={(event) => setYears(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              submit()
-            }
-          }}
-          placeholder="Years"
-        />
-      </div>
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        icon="add"
-        className="shrink-0"
-        disabled={!name.trim()}
-        onClick={submit}
-      >
-        Add
-      </Button>
+      {localError ? (
+        <p className="text-label-md text-error">{localError}</p>
+      ) : null}
     </div>
   )
 }
@@ -123,7 +140,7 @@ function normalizeSkillList(items) {
           ? null
           : Number(item.required_years),
     }))
-    .filter((item) => item.skill)
+    .filter((item) => item.skill && hasMeaningfulText(item.skill))
     .map((item) => ({
       skill: item.skill,
       required_years:

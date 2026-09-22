@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     ai_services_scheme: str = "http"
     parsing_service_url: str | None = None
 
+    # Bulk resume ingest: cap parallel workers so we do not exhaust the DB pool
+    # or overwhelm ai-core (OCR + LLM). Keep workers <= pool_size.
+    ingest_max_workers: int = 3
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+
     @field_validator("parsing_service_url", mode="before")
     @classmethod
     def _optional_parsing_url(cls, value: object) -> object:

@@ -40,7 +40,7 @@ class UploadFileRequest(BaseModel):
 
 
 class UploadUrlsRequest(BaseModel):
-    files: list[UploadFileRequest] = Field(min_length=1, max_length=50)
+    files: list[UploadFileRequest] = Field(min_length=1, max_length=10)
 
 
 class UploadUrlItem(BaseModel):
@@ -67,7 +67,7 @@ class BulkResumeItem(BaseModel):
 
 
 class BulkCreateRequest(BaseModel):
-    resumes: list[BulkResumeItem] = Field(min_length=1, max_length=50)
+    resumes: list[BulkResumeItem] = Field(min_length=1, max_length=10)
 
 
 class BulkCreateResponse(BaseModel):
