@@ -68,9 +68,10 @@ class Settings(BaseSettings):
     email_mode: str = "console"
     email_from: str = "noreply@ezscreen.io"
 
-    # Dev only: when set, store candidate emails as
-    # local+<application_id>@domain from the resume address, and add these
-    # address(es) as default additional invite recipients (comma-separated).
+    # Dev only: when set, rewrite candidate emails / Meet attendees to
+    #   <first-override-local>+<candidate_at_domain>@<first-override-domain>
+    # so invites never hit real candidate inboxes. Extra comma-separated
+    # addresses are still added as additional invite recipients.
     # Empty / prod = real emails. Never default a real mailbox here —
     # prod images must stay safe.
     screening_invite_override_email: str | None = None

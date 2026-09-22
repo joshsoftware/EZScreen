@@ -30,7 +30,11 @@ from src.services.application_timeline_service import (
     timeline_event_types,
 )
 from src.services.bot_dispatch_service import dispatch_screening_bot
-from src.services.candidate_email_masking import default_additional_invite_emails
+from src.services.candidate_email_masking import (
+    default_additional_invite_emails,
+    mask_email_for_application,
+    masking_enabled,
+)
 from src.services.email_service import (
     ScreeningInvitePayload,
     ScreeningInviteResult,
@@ -137,14 +141,40 @@ def _candidate_label(application: Application) -> str:
     return name or candidate.email or "Candidate"
 
 
+def _resume_personal_email(application: Application) -> str | None:
+    parsed = application.parsed_resume
+    if not isinstance(parsed, dict):
+        return None
+    personal = parsed.get("personal_info")
+    if not isinstance(personal, dict):
+        return None
+    value = personal.get("email")
+    if isinstance(value, str) and "@" in value.strip():
+        return value.strip().lower()
+    return None
+
+
 def _attendee_emails(
     application: Application,
     additional_emails: list[str],
 ) -> list[str]:
+    """Build Meet / invite recipients.
+
+    In dev with ``SCREENING_INVITE_OVERRIDE_EMAIL``, the candidate address is
+    rewritten to the staging sink (``sink+candidate_at_domain@…``) so invites
+    never go to the real resume email.
+    """
     emails: list[str] = []
     candidate = application.candidate
     if candidate is not None and isinstance(candidate.email, str) and candidate.email.strip():
-        emails.append(candidate.email.strip().lower())
+        stored = candidate.email.strip().lower()
+        if masking_enabled():
+            source = _resume_personal_email(application) or stored
+            masked = mask_email_for_application(source, application.id)
+            if masked:
+                emails.append(masked)
+        else:
+            emails.append(stored)
     for email in additional_emails:
         if isinstance(email, str) and email.strip():
             emails.append(email.strip().lower())

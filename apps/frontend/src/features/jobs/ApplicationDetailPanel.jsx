@@ -192,6 +192,34 @@ function SkillChipList({ title, items, tone = 'neutral', previewCount = 14 }) {
   )
 }
 
+function RoleHighlights({ highlights, previewCount = 3 }) {
+  const [expanded, setExpanded] = useState(false)
+  const total = highlights?.length ?? 0
+  if (!total) return null
+
+  const hidden = total > previewCount
+  const visible = expanded || !hidden ? highlights : highlights.slice(0, previewCount)
+
+  return (
+    <div className="mt-xs">
+      <ul className="text-body-sm text-on-surface-variant list-disc pl-md space-y-xs">
+        {visible.map((highlight) => (
+          <li key={highlight}>{highlight}</li>
+        ))}
+      </ul>
+      {hidden ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-xs text-label-md text-primary hover:underline"
+        >
+          {expanded ? 'Show less' : `Show ${total - previewCount} more`}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 function ExperienceTimeline({ roles }) {
   if (!roles?.length) {
     return <p className="text-body-sm text-on-surface-variant">No experience extracted.</p>
@@ -208,13 +236,7 @@ function ExperienceTimeline({ roles }) {
               {role.company ? ` · ${role.company}` : ''}
             </p>
             <p className="text-label-md text-on-surface-variant">{period}</p>
-            {Array.isArray(role.highlights) && role.highlights.length > 0 ? (
-              <ul className="mt-xs text-body-sm text-on-surface-variant list-disc pl-md space-y-xs">
-                {role.highlights.slice(0, 3).map((highlight) => (
-                  <li key={highlight}>{highlight}</li>
-                ))}
-              </ul>
-            ) : null}
+            <RoleHighlights highlights={role.highlights} />
           </div>
         )
       })}
