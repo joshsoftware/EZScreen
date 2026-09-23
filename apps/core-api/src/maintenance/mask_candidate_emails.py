@@ -1,10 +1,23 @@
 #!/usr/bin/env python3
-"""Rewrite existing candidate emails to local+<application_id>@domain.
+"""Rewrite existing candidate emails onto the staging invite sink.
 
 Uses the original address from ``applications.parsed_resume.personal_info.email``
-when available; otherwise tags the current mailbox local-part. Candidates with
-several applications use their earliest one; candidates with none fall back to
-their user id.
+when available. Also recovers addresses previously masked as
+``local+<application_id>@domain``.
+
+Result shape (dev + SCREENING_INVITE_OVERRIDE_EMAIL)::
+
+    <sink_local>+<candidate_at_domain>.<userid8>@<sink_domain>
+
+Example (SCREENING_INVITE_OVERRIDE_EMAIL=nikhil.gosavi@joshsoftware.com)::
+
+    jane.doe@acme.com
+      → nikhil.gosavi+jane.doe_at_acme.com.a1b2c3d4@joshsoftware.com
+
+The short user-id suffix keeps ``users.email`` unique when several old
+per-application rows share the same resume mailbox. Meet / invite sending
+still rewrites from the resume address to the sink without needing that
+suffix (see ``_attendee_emails``).
 
 Only candidates are touched — org admin, HR, and super admin logins are left alone.
 
@@ -19,6 +32,7 @@ Usage (inside the core-api container):
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from uuid import UUID
 
@@ -32,12 +46,21 @@ from src.models.user import User
 from src.services.candidate_email_masking import (
     mask_email_for_application,
     masking_enabled,
+    primary_invite_sink,
+)
+
+_UUID_TAG_RE = re.compile(
+    r"^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$",
+    re.IGNORECASE,
 )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Mask stored candidate emails as local+<application_id>@domain.",
+        description=(
+            "Mask stored candidate emails as "
+            "<sink>+<candidate_at_domain>.<userid8>@<sink_domain>."
+        ),
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -67,7 +90,7 @@ def _earliest_application_by_candidate(db: Session) -> dict[UUID, Application]:
     return by_candidate
 
 
-def _original_email_from_application(application: Application | None) -> str | None:
+def _email_from_application(application: Application | None) -> str | None:
     if application is None:
         return None
     parsed = application.parsed_resume
@@ -82,6 +105,60 @@ def _original_email_from_application(application: Application | None) -> str | N
     return None
 
 
+def _recover_original_email(email: str | None) -> str | None:
+    """Normalize stored / resume emails back to a candidate identity source.
+
+    - Already on the current sink → strip ``.<userid8>`` suffix if present,
+      then return the sink address (mask helper is idempotent on sink form).
+    - Old style ``local+<uuid>@domain`` → ``local@domain``.
+    - Otherwise return the email unchanged.
+    """
+    if not isinstance(email, str) or "@" not in email.strip():
+        return None
+    normalized = email.strip().lower()
+    sink = primary_invite_sink()
+    if sink:
+        sink_local, _, sink_domain = sink.partition("@")
+        sink_local = sink_local.split("+", 1)[0]
+        if (
+            sink_local
+            and sink_domain
+            and normalized.startswith(f"{sink_local}+")
+            and normalized.endswith(f"@{sink_domain}")
+        ):
+            return normalized
+
+    local, _, domain = normalized.partition("@")
+    if "+" not in local or not domain:
+        return normalized
+    base, tag = local.split("+", 1)
+    if base and _UUID_TAG_RE.match(tag):
+        return f"{base}@{domain}"
+    compact = tag.replace("-", "")
+    if base and len(compact) == 32 and re.fullmatch(r"[0-9a-f]+", compact, re.IGNORECASE):
+        return f"{base}@{domain}"
+    return normalized
+
+
+def _stored_mask(original: str, candidate_id: UUID) -> str | None:
+    """Sink mask plus a short user-id suffix so ``users.email`` stays unique."""
+    base = mask_email_for_application(original, candidate_id)
+    if base is None:
+        return None
+    suffix = candidate_id.hex[:8]
+    local, _, domain = base.partition("@")
+    if local.endswith(f".{suffix}"):
+        return base
+    # Drop a previous 8-hex uniquifier only (do not strip ``.com`` from tags).
+    if "+" in local:
+        plus_local, plus_tag = local.split("+", 1)
+        if "." in plus_tag:
+            core, maybe_id = plus_tag.rsplit(".", 1)
+            if re.fullmatch(r"[0-9a-f]{8}", maybe_id, re.IGNORECASE):
+                local = f"{plus_local}+{core}"
+    return f"{local}.{suffix}@{domain}"
+
+
 def main() -> int:
     args = parse_args()
 
@@ -91,12 +168,19 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    print("Masking as local+<application_id>@domain from resume emails")
+
+    sink = primary_invite_sink()
+    print(f"Invite sink: {sink}")
+    print("Masking as <sink>+<candidate_at_domain>.<userid8>@<sink_domain>")
 
     db = SessionLocal()
     try:
         candidates = list(
-            db.scalars(select(User).where(User.role == UserRole.candidate))
+            db.scalars(
+                select(User)
+                .where(User.role == UserRole.candidate)
+                .order_by(User.created_at.asc(), User.id.asc())
+            )
         )
         if not candidates:
             print("No candidate users found.")
@@ -109,9 +193,12 @@ def main() -> int:
         skipped = 0
         for candidate in candidates:
             application = app_by_candidate.get(candidate.id)
-            tag = application.id if application is not None else candidate.id
-            original = _original_email_from_application(application) or candidate.email
-            masked = mask_email_for_application(original, tag)
+            raw = _email_from_application(application) or candidate.email
+            original = _recover_original_email(raw)
+            if original is None:
+                skipped += 1
+                continue
+            masked = _stored_mask(original, candidate.id)
             if masked is None:
                 skipped += 1
                 continue

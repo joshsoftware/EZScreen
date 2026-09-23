@@ -44,11 +44,8 @@ function parseEmailList(raw) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-/** Default additional invite recipients (staging). Backend also injects these. */
-const DEFAULT_ADDITIONAL_EMAILS = [
-  'nikhil.gosavi@joshsoftware.com',
-  'shubhangi.durbe@joshsoftware.com',
-]
+/** Extra invite recipients — leave empty in dev; backend injects override sink. */
+const DEFAULT_ADDITIONAL_EMAILS = []
 
 /** Normalize legacy IANA names from Intl (e.g. Asia/Calcutta → Asia/Kolkata). */
 function normalizeTimeZone(tz) {
