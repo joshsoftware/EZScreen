@@ -108,6 +108,10 @@ class Settings(BaseSettings):
     google_meet_mode: str = "mock"
     google_calendar_id: str = "primary"
     google_calendar_send_updates: str = "all"
+    # After Calendar creates a Meet, PATCH space accessType via Meet API.
+    # OPEN = anyone with the link joins without knocking (needed for anonymous bots).
+    # Empty / "default" = skip the Meet API patch.
+    google_meet_access_type: str = "OPEN"
     google_service_account_file: str | None = None
     google_meet_delegated_user: str | None = None
     google_oauth_client_id: str | None = None

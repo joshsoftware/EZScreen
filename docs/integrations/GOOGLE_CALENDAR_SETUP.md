@@ -1,8 +1,6 @@
 # Google Calendar + Meet setup (EZScreen screening)
 
-EZScreen **`GOOGLE_MEET_MODE=live`** creates a **Google Calendar event** with an auto-generated **Google Meet** link and sends calendar invites to attendees.
-
-You only need **Google Calendar API** — no separate Google Meet API.
+EZScreen **`GOOGLE_MEET_MODE=live`** creates a **Google Calendar event** with an auto-generated **Google Meet** link, sends calendar invites to attendees, then (by default) sets the Meet space to **`OPEN`** via the **Google Meet API** so anonymous bots can join without knocking.
 
 ---
 
@@ -15,14 +13,13 @@ You only need **Google Calendar API** — no separate Google Meet API.
 
 ---
 
-## Step 1 — Enable Google Calendar API
+## Step 1 — Enable APIs
 
 1. Open [Google Cloud Console](https://console.cloud.google.com/) → select your project
 2. **APIs & Services → Library**
-3. Search **Google Calendar API**
-4. Click **Enable**
-
-You do **not** need to enable Google Meet API for this flow.
+3. Enable:
+   - **Google Calendar API**
+   - **Google Meet API** (required for `GOOGLE_MEET_ACCESS_TYPE=OPEN`)
 
 ---
 
@@ -37,6 +34,8 @@ You do **not** need to enable Google Meet API for this flow.
 
    ```text
    https://www.googleapis.com/auth/calendar.events
+   https://www.googleapis.com/auth/meetings.space.created
+   https://www.googleapis.com/auth/meetings.space.settings
    ```
 
 5. Save
@@ -66,12 +65,15 @@ If `python3 -m venv` fails, install: `sudo apt install python3-venv`
 
 Sign in as the **organizer** Google account (the calendar owner).
 
+If the script prints “No refresh token returned”, revoke prior access at [Google Account permissions](https://myaccount.google.com/permissions) and re-run (needed after adding Meet scopes to an older token).
+
 Copy the printed values into `apps/core-api/.env`:
 
 ```env
 GOOGLE_MEET_MODE=live
 GOOGLE_CALENDAR_ID=primary
 GOOGLE_CALENDAR_SEND_UPDATES=all
+GOOGLE_MEET_ACCESS_TYPE=OPEN
 GOOGLE_OAUTH_CLIENT_ID=....apps.googleusercontent.com
 GOOGLE_OAUTH_CLIENT_SECRET=....
 GOOGLE_OAUTH_REFRESH_TOKEN=....
@@ -88,10 +90,12 @@ Use when HR should not run OAuth manually.
 3. **Google Workspace Admin** ([admin.google.com](https://admin.google.com))
    - **Security → Access and data control → API controls → Domain-wide delegation**
    - Add service account **Client ID**
-   - Scope:
+   - Scopes:
 
      ```text
      https://www.googleapis.com/auth/calendar.events
+     https://www.googleapis.com/auth/meetings.space.created
+     https://www.googleapis.com/auth/meetings.space.settings
      ```
 
 4. In `apps/core-api/.env`:
@@ -100,6 +104,7 @@ Use when HR should not run OAuth manually.
 GOOGLE_MEET_MODE=live
 GOOGLE_CALENDAR_ID=primary
 GOOGLE_CALENDAR_SEND_UPDATES=all
+GOOGLE_MEET_ACCESS_TYPE=OPEN
 GOOGLE_SERVICE_ACCOUNT_FILE=/run/secrets/google-sa.json
 GOOGLE_MEET_DELEGATED_USER=scheduler@yourdomain.com
 ```
@@ -121,6 +126,7 @@ core-api:
 | `GOOGLE_MEET_MODE` | `mock` (dev) or `live` (Calendar + Meet) |
 | `GOOGLE_CALENDAR_ID` | `primary` or organizer email calendar |
 | `GOOGLE_CALENDAR_SEND_UPDATES` | `all` sends Google invites to attendees |
+| `GOOGLE_MEET_ACCESS_TYPE` | `OPEN` (default), `TRUSTED`, `RESTRICTED`, or empty to skip Meet API patch |
 | OAuth trio **or** service account + delegated user | See above |
 
 Restart core-api:
@@ -128,6 +134,14 @@ Restart core-api:
 ```bash
 docker compose up -d --build core-api
 ```
+
+### How OPEN works
+
+1. Calendar creates the event + Meet conference (as before)
+2. Meet API `GET spaces/{meetingCode}` resolves the resource name
+3. Meet API `PATCH` sets `config.accessType=OPEN`
+
+If the patch fails (missing scope, Meet API disabled, or Workspace policy), scheduling still succeeds — check core-api logs for `Meet API accessType=… failed`. Org Meet admin settings can pin access type and override API changes (up to ~24h to propagate).
 
 ---
 
@@ -139,6 +153,7 @@ docker compose up -d --build core-api
    - Timeline shows real `meet.google.com/...` link
    - Organizer Google Calendar has the event
    - Candidate receives Google calendar invite (if `GOOGLE_CALENDAR_SEND_UPDATES=all`)
+   - Meet join settings show open / no knock (or core-api log: `Set Meet space … accessType=OPEN`)
    - `interview_metadata` contains `calendar_event_id`, `calendar_html_link`, `provider: google_calendar`
 
 ---
@@ -149,8 +164,9 @@ docker compose up -d --build core-api
 |-------|-----|
 | `Calendar API error: 403` | Enable Calendar API; check OAuth scope |
 | `No Google Meet link was returned` | Workspace Meet not enabled for organizer |
+| `Meet API accessType=… failed: 403` | Enable Meet API; re-mint refresh token with `meetings.space.*` scopes; check Workspace Meet access policies |
 | `Invalid time_zone` | Use IANA name e.g. `Asia/Kolkata` |
-| Service account fails | Set `GOOGLE_MEET_DELEGATED_USER`; verify domain-wide delegation |
+| Service account fails | Set `GOOGLE_MEET_DELEGATED_USER`; verify domain-wide delegation includes all three scopes |
 | Attendees not invited | Set `GOOGLE_CALENDAR_SEND_UPDATES=all` |
 
 ---
