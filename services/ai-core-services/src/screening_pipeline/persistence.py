@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.screening_pipeline.evaluator import AnswerEvaluator
 from src.screening_pipeline.session_api import SessionApiClient
@@ -13,24 +13,25 @@ from src.common.llm_utils import parse_llm_json
 import json
 
 
-async def persist_completed_question(
-    api_client: SessionApiClient,
-    analysis_evaluations: List[Dict[str, Any]],
+def build_completed_question_payload(
     *,
     question_obj: dict,
     current_q: str,
     transcript: str,
-    primary_eval: dict,
+    primary_eval: Optional[dict],
     current_eval: dict,
     question_number: int,
     follow_ups: Optional[list],
-) -> Optional[Dict[str, Any]]:
-    """Save Q&A and evaluation; retain only evaluations saved by Core API."""
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Pure: build the Q&A entry and evaluation block for a completed question.
+
+    Split out from persist_qa_and_evaluation (no I/O here) so the caller can
+    update in-memory routing state (analysis_evaluations) synchronously, then
+    persist to Core API in the background without blocking the next question.
+    """
     qa_entry = AnswerEvaluator.build_qa_entry(
         question_obj, current_q, transcript, question_number, follow_ups
     )
-    await api_client.save_transcript(qa_entry)
-
     evaluation = AnswerEvaluator.build_evaluation_block(
         question_obj,
         current_q,
@@ -40,10 +41,22 @@ async def persist_completed_question(
         question_number,
         follow_ups,
     )
-    if await api_client.save_evaluation(evaluation):
-        analysis_evaluations.append(evaluation)
-        return evaluation
-    return None
+    return qa_entry, evaluation
+
+
+async def persist_qa_and_evaluation(
+    api_client: SessionApiClient,
+    qa_entry: Dict[str, Any],
+    evaluation: Dict[str, Any],
+) -> None:
+    """I/O only: save an already-built Q&A entry and evaluation to Core API.
+
+    Saves transcript before evaluation, matching the previous synchronous
+    order. Failures are logged inside SessionApiClient and do not raise —
+    callers running this in the background rely on that.
+    """
+    await api_client.save_transcript(qa_entry)
+    await api_client.save_evaluation(evaluation)
 
 
 async def persist_interview_close(

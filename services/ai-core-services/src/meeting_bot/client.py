@@ -3,6 +3,7 @@ from src.core.logger import logger
 from src.core.config import settings
 from src.meeting_bot.repository import interview_session_repo
 from src.meeting_bot.attendee import attendee_client
+from src.screening_pipeline.tts_prewarm import coerce_questions_list, tts_prewarm_registry
 from src.meeting_bot.schemas import (
     AttendeeAudioSettings,
     AttendeeWebsocketSettings,
@@ -23,6 +24,7 @@ class AttendeeBotClient:
 
         meeting_url = request.meeting_url
         scheduled_at = None
+        scheduled_at_dt: datetime | None = None
         if session_detail:
             scheduled_at = session_detail.scheduled_at
             if scheduled_at:
@@ -33,6 +35,7 @@ class AttendeeBotClient:
                         raise ValueError(
                             "Cannot dispatch bot. The scheduled interview time is in the past."
                         )
+                    scheduled_at_dt = dt
                     scheduled_at = dt.isoformat()
                 except ValueError:
                     raise
@@ -68,6 +71,18 @@ class AttendeeBotClient:
 
         attendee_res = await attendee_client.schedule_bot(attendee_req)
         dispatched_at = datetime.now(timezone.utc).isoformat()
+
+        if session_detail:
+            # Fire-and-forget: warms this session's TTS cache ahead of the
+            # bot actually joining, instead of only starting once Attendee's
+            # WebSocket connects (see tts_prewarm.py for why). Never blocks
+            # the dispatch response and never raises on failure.
+            questions = coerce_questions_list(
+                getattr(session_detail, "generated_questions", None)
+            )
+            tts_prewarm_registry.schedule(
+                request.interview_session_id, questions, join_at=scheduled_at_dt
+            )
 
         return DispatchBotResponse(
             bot_id=attendee_res.id,

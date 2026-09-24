@@ -63,6 +63,15 @@ class Settings(BaseSettings):
     core_api_base_url: str = "http://127.0.0.1:8000"
     internal_service_token: str | None = None
 
+    # Screening turn-latency tuning (docs/architecture/SCREENING_BOT_LATENCY_OPTIMIZATION.md Phase 2).
+    # Time Pipecat's VAD waits after the candidate stops talking before finalizing
+    # the STT segment. Hard floor is 1.0s — do not go lower without UX sign-off.
+    screening_turn_end_silence_seconds: float = 1.5
+    # Time the policy holds a finalized STT segment before evaluating it, so a
+    # brief pause mid-answer is merged into one answer instead of two. Hard
+    # floor is 1.5s — do not go lower without UX sign-off.
+    screening_answer_settle_seconds: float = 2.0
+
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),
         env_file_encoding="utf-8",

@@ -12,13 +12,7 @@ from typing import Dict, List, Optional
 class ScreeningPromptBuilder:
     """Builds LLM user prompts for intent routing and answer evaluation."""
 
-    def build_intent_prompt(self, current_question: str, transcript: str) -> str:
-        return (
-            f"Current Interview Question: {current_question}\n"
-            f"Candidate Speech: {transcript}"
-        )
-
-    def build_evaluation_prompt(
+    def build_unified_prompt(
         self,
         current_question: str,
         transcript: str,
@@ -26,17 +20,23 @@ class ScreeningPromptBuilder:
         answer_depth: str,
         follow_up_context: Optional[List[Dict]] = None,
     ) -> str:
+        """Build the single user prompt for combined intent classification + evaluation.
+
+        Always carries evaluation context (question, keywords, strictness) even though
+        it is only relevant when the system prompt determines intent is ANSWERING —
+        the candidate's intent is not known until the LLM responds.
+        """
         parts = [
-            "You are evaluating a candidate's answer in a FIRST SCREENING interview.\n",
+            "You are processing one candidate turn in a FIRST SCREENING interview.\n",
         ]
 
         if follow_up_context:
             parts.append(
-                "NOTE: This is a FOLLOW-UP evaluation. "
+                "NOTE: If the candidate is ANSWERING, this is a FOLLOW-UP evaluation. "
                 "The candidate had an insufficient primary answer.\n"
             )
 
-        parts.append(f"QUESTION: {current_question}\n")
+        parts.append(f"CURRENT INTERVIEW QUESTION: {current_question}\n")
 
         candidate_answer = ""
         if follow_up_context:
@@ -45,13 +45,14 @@ class ScreeningPromptBuilder:
                     f"AI: {fu.get('ai_response', '')}\n"
                     f"Candidate: {fu.get('candidate_speech', '')}\n"
                 )
-        candidate_answer += f"Candidate Latest Answer: {transcript}"
+        candidate_answer += f"Candidate Latest Speech: {transcript}"
 
-        parts.append(f"CANDIDATE ANSWER: {candidate_answer}\n")
+        parts.append(f"CANDIDATE SPEECH: {candidate_answer}\n")
         parts.append(
+            "EVALUATION CONTEXT (use only if intent is ANSWERING):\n"
             f"EXPECTED KEYWORDS (answer should address most of these): {expected_keywords}\n"
+            f"EVALUATION STRICTNESS LEVEL: {answer_depth}\n"
         )
-        parts.append(f"EVALUATION STRICTNESS LEVEL: {answer_depth}\n")
 
         return "\n".join(parts)
 

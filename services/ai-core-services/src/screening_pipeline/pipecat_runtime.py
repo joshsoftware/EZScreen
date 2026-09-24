@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TTSSpeakFrame,
     VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -23,6 +24,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.audio.vad_processor import VADProcessor
 
+from src.core.config import settings
 from src.core.logger import logger
 from src.screening_pipeline.interview_policy import InterviewPolicy
 from src.screening_pipeline.pipecat_policy import PipecatInterviewPolicy
@@ -32,8 +34,12 @@ from src.screening_pipeline.pipecat_transport import (
     SpeechCompleteFrame,
 )
 from src.screening_pipeline.pipecat_tts import KokoroTTSService
+from src.screening_pipeline.tts_prewarm import tts_prewarm_registry
 
-SCREENING_TURN_END_SILENCE_SECONDS = 2.0
+# Env-overridable via SCREENING_TURN_END_SILENCE_SECONDS (default 1.5s). See
+# docs/architecture/SCREENING_BOT_LATENCY_OPTIMIZATION.md Phase 2 for the tuning
+# rationale and hard floor (1.0s).
+SCREENING_TURN_END_SILENCE_SECONDS = settings.screening_turn_end_silence_seconds
 
 
 class AttendeeInputProcessor(FrameProcessor):
@@ -106,6 +112,8 @@ class InterviewPolicyProcessor(FrameProcessor):
             # Interrupt bot audio so the entire response can be captured rather
             # than dropping a transcript that arrives while policy is speaking.
             await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self.policy.handle_candidate_speech_stopped()
         elif isinstance(frame, TranscriptionFrame):
             if frame.finalized:
                 self.policy.handle_candidate_speech(frame.text)
@@ -130,13 +138,20 @@ class PipecatInterviewRuntime:
             )
         )
         self.stt = WhisperHttpSTTService(sample_rate=16000)
-        self.tts = KokoroTTSService()
+        # If dispatch_bot() scheduled a pre-warm job (see tts_prewarm.py) that
+        # finished before the bot joined, reuse its already-warmed
+        # KokoroSynthesizer instead of starting from an empty cache. A miss
+        # here (too early, still running, expired, or none scheduled) falls
+        # back to a fresh synthesizer — PipecatInterviewPolicy.start() still
+        # warms it on session start exactly as before this existed.
+        self.tts = KokoroTTSService(synthesizer=tts_prewarm_registry.claim(session_id))
         self.output = AttendeeOutputProcessor(websocket)
         self.policy_processor = InterviewPolicyProcessor(
             self.policy,
             register_speech_event=self.output.register_speech_event,
         )
         self.policy.speech_output = self.policy_processor.speak
+        self.policy.tts_cache_warmer = self.tts.warm_cache
         self.pipeline = Pipeline(
             [self.input, self.vad, self.stt, self.policy_processor, self.tts, self.output]
         )
