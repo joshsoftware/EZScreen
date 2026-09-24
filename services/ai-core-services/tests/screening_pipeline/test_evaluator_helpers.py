@@ -4,7 +4,7 @@ from src.screening_pipeline.evaluation_builders import (
     build_skip_evaluation,
 )
 from src.screening_pipeline.prompt_builder import screening_prompt_builder
-from src.screening_pipeline.prompts import ANSWER_EVALUATION_SYSTEM
+from src.screening_pipeline.prompts import UNIFIED_SCREENING_SYSTEM
 from src.screening_pipeline.speech_filter import is_probable_hallucination
 
 
@@ -77,14 +77,21 @@ def test_build_evaluation_block_uses_primary_eval_when_present():
     assert result["follow_ups"][0]["score"] == 8
 
 
-def test_build_intent_prompt():
-    prompt = screening_prompt_builder.build_intent_prompt("What is Python?", "It is a language")
+def test_build_unified_prompt_includes_question_and_transcript():
+    prompt = screening_prompt_builder.build_unified_prompt(
+        current_question="What is Python?",
+        transcript="It is a language",
+        expected_keywords="Python, interpreted",
+        answer_depth="partial_depth",
+    )
     assert "What is Python?" in prompt
     assert "It is a language" in prompt
+    assert "Python, interpreted" in prompt
+    assert "partial_depth" in prompt
 
 
-def test_build_evaluation_prompt_marks_follow_up():
-    prompt = screening_prompt_builder.build_evaluation_prompt(
+def test_build_unified_prompt_marks_follow_up():
+    prompt = screening_prompt_builder.build_unified_prompt(
         current_question="What is Docker?",
         transcript="Containers",
         expected_keywords="container, image",
@@ -97,16 +104,25 @@ def test_build_evaluation_prompt_marks_follow_up():
     assert "partial_depth" in prompt
 
 
-def test_evaluation_system_uses_equal_keyword_and_quality_weights():
-    assert "MANDATORY 50/50 SPLIT" in ANSWER_EVALUATION_SYSTEM
-    assert "Each component contributes exactly 50%" in ANSWER_EVALUATION_SYSTEM
-    assert "round((keyword_match_score + answer_quality_score) / 2)" in ANSWER_EVALUATION_SYSTEM
-    assert "Strictness changes only the ANSWER QUALITY SCORE" in ANSWER_EVALUATION_SYSTEM
-    assert '"keyword_match_score"' in ANSWER_EVALUATION_SYSTEM
-    assert '"answer_quality_score"' in ANSWER_EVALUATION_SYSTEM
-    assert '"aware": Score 10 when the answer shows initial/basic' in ANSWER_EVALUATION_SYSTEM
-    assert '"partial_depth": Score 6-7 when the answer shows initial/basic' in ANSWER_EVALUATION_SYSTEM
-    assert '"full_depth": Score 3-4 when the answer shows only initial/basic' in ANSWER_EVALUATION_SYSTEM
+def test_unified_system_uses_equal_keyword_and_quality_weights():
+    assert "MANDATORY 50/50 SPLIT" in UNIFIED_SCREENING_SYSTEM
+    assert "Each component contributes exactly 50%" in UNIFIED_SCREENING_SYSTEM
+    assert "round((keyword_match_score + answer_quality_score) / 2)" in UNIFIED_SCREENING_SYSTEM
+    assert "Strictness changes only the ANSWER QUALITY SCORE" in UNIFIED_SCREENING_SYSTEM
+    assert '"answer_quality_score"' in UNIFIED_SCREENING_SYSTEM
+    assert '"aware": Score 10 when the answer shows initial/basic' in UNIFIED_SCREENING_SYSTEM
+    assert '"partial_depth": Score 6-7 when the answer shows initial/basic' in UNIFIED_SCREENING_SYSTEM
+    assert '"full_depth": Score 3-4 when the answer shows only initial/basic' in UNIFIED_SCREENING_SYSTEM
+
+
+def test_unified_system_classifies_intent_before_gating_evaluation():
+    assert "STEP 1" in UNIFIED_SCREENING_SYSTEM
+    assert "ANSWERING" in UNIFIED_SCREENING_SYSTEM
+    assert "CLARIFICATION" in UNIFIED_SCREENING_SYSTEM
+    assert "SMALL_TALK" in UNIFIED_SCREENING_SYSTEM
+    assert "SKIP" in UNIFIED_SCREENING_SYSTEM
+    assert "only if intent is ANSWERING" in UNIFIED_SCREENING_SYSTEM
+    assert '"intent": "ANSWERING | CLARIFICATION | SMALL_TALK | SKIP"' in UNIFIED_SCREENING_SYSTEM
 
 
 def test_is_probable_hallucination_filters_noise():

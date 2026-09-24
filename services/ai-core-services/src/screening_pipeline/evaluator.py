@@ -5,7 +5,7 @@ Handles intent routing, answer evaluation, and evaluation result building.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from src.common.llm_utils import parse_llm_json
 from src.core.logger import logger
@@ -17,10 +17,7 @@ from src.screening_pipeline.evaluation_builders import (
 )
 from src.screening_pipeline.keyword_matcher import calculate_keyword_coverage
 from src.screening_pipeline.prompt_builder import screening_prompt_builder
-from src.screening_pipeline.prompts import (
-    ANSWER_EVALUATION_SYSTEM,
-    INTENT_ROUTER_SYSTEM,
-)
+from src.screening_pipeline.prompts import UNIFIED_SCREENING_SYSTEM
 
 _EVAL_FAILURE_FALLBACK = {
     "score": 0,
@@ -48,32 +45,7 @@ class AnswerEvaluator:
     def __init__(self, llm_client: OllamaClient):
         self.llm_client = llm_client
 
-    async def route_intent(self, current_question: str, transcript: str) -> Tuple[str, str]:
-        """Classify candidate speech. Returns (intent, ai_response)."""
-        intent_prompt = screening_prompt_builder.build_intent_prompt(
-            current_question, transcript
-        )
-
-        try:
-            intent_res = await self.llm_client.openai_chat_generate(
-                prompt=intent_prompt,
-                system=INTENT_ROUTER_SYSTEM,
-                temperature=0.1,
-            )
-            data = parse_llm_json(intent_res.response)
-            if not isinstance(data, dict):
-                raise ValueError("Intent router expected a JSON object")
-            intent = data.get("intent", "ANSWERING")
-            ai_response = data.get("response", "")
-        except Exception as e:
-            logger.error("Intent routing failed", extra={"error": str(e)})
-            intent = "ANSWERING"
-            ai_response = ""
-
-        logger.info("Intent routed", extra={"intent": intent})
-        return intent, ai_response
-
-    async def evaluate_answer(
+    async def classify_and_evaluate(
         self,
         current_question: str,
         transcript: str,
@@ -81,9 +53,14 @@ class AnswerEvaluator:
         answer_depth: str,
         follow_up_context: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
-        """Evaluate answer with deterministic keyword and LLM quality scores."""
-        keyword_coverage = calculate_keyword_coverage(transcript, expected_keywords)
-        full_context = screening_prompt_builder.build_evaluation_prompt(
+        """Single LLM call: classify candidate intent and, if ANSWERING, score the answer.
+
+        Replaces the previous two-call route_intent + evaluate_answer sequence to cut
+        one full model round-trip off every turn. Returns at least {"intent", "response"};
+        when intent is ANSWERING it also carries the same evaluation fields
+        evaluate_answer used to return (score, decision, feedback, etc.).
+        """
+        prompt = screening_prompt_builder.build_unified_prompt(
             current_question=current_question,
             transcript=transcript,
             expected_keywords=expected_keywords,
@@ -92,18 +69,54 @@ class AnswerEvaluator:
         )
 
         try:
-            eval_res = await self.llm_client.openai_chat_generate(
-                prompt=full_context,
-                system=ANSWER_EVALUATION_SYSTEM,
+            res = await self.llm_client.openai_chat_generate(
+                prompt=prompt,
+                system=UNIFIED_SCREENING_SYSTEM,
                 temperature=0.2,
             )
-            eval_data = parse_llm_json(eval_res.response)
-            if not isinstance(eval_data, dict):
-                raise ValueError("Answer evaluation expected a JSON object")
+            data = parse_llm_json(res.response)
+            if not isinstance(data, dict):
+                raise ValueError("Unified screening call expected a JSON object")
         except Exception as e:
-            logger.error("Answer evaluation failed", extra={"error": str(e)})
-            eval_data = dict(_EVAL_FAILURE_FALLBACK)
+            logger.error("Unified screening call failed", extra={"error": str(e)})
+            # A failed classification is treated as an attempted answer that failed
+            # evaluation, matching the old behavior where a route_intent failure
+            # defaulted to ANSWERING and then evaluate_answer scored it as 0.
+            data = {"intent": "ANSWERING", "response": "", **_EVAL_FAILURE_FALLBACK}
 
+        intent = data.get("intent", "ANSWERING")
+        ai_response = data.get("response", "")
+
+        logger.info("Intent routed", extra={"intent": intent})
+
+        if intent != "ANSWERING":
+            return {"intent": intent, "response": ai_response}
+
+        eval_data = self._apply_deterministic_scores(data, transcript, expected_keywords)
+        eval_data["intent"] = intent
+        eval_data["response"] = ai_response
+
+        logger.info(
+            "Answer evaluated",
+            extra={
+                "decision": eval_data.get("decision"),
+                "score": eval_data.get("score"),
+                "keywords_missing": eval_data.get("keywords_missing", []),
+            },
+        )
+
+        return eval_data
+
+    @staticmethod
+    def _apply_deterministic_scores(
+        eval_data: Dict[str, Any], transcript: str, expected_keywords: str
+    ) -> Dict[str, Any]:
+        """Overlay Python-authoritative keyword coverage and the 50/50 final score.
+
+        Same merge logic the old evaluate_answer used — the application, not the
+        LLM, is authoritative for keyword coverage, the final score, and decision.
+        """
+        keyword_coverage = calculate_keyword_coverage(transcript, expected_keywords)
         answer_quality_score = _coerce_score(
             eval_data.get("answer_quality_score", eval_data.get("score"))
         )
@@ -112,8 +125,6 @@ class AnswerEvaluator:
         )
         final_score = round((keyword_match_score + answer_quality_score) / 2)
 
-        # The application, rather than the LLM, is authoritative for keyword
-        # coverage, the 50/50 final score, and the resulting next-step decision.
         eval_data["keywords_found"] = keyword_coverage.found
         eval_data["keywords_missing"] = keyword_coverage.missing
         eval_data["coverage_percent"] = keyword_coverage.coverage_percent
@@ -131,15 +142,6 @@ class AnswerEvaluator:
             decision = "NEXT_QUESTION" if final_score >= 6 else "ASK_FOLLOW_UP"
             eval_data["decision"] = decision
             eval_data["is_sufficient"] = decision == "NEXT_QUESTION"
-
-        logger.info(
-            "Answer evaluated",
-            extra={
-                "decision": decision,
-                "score": eval_data.get("score"),
-                "keywords_missing": eval_data.get("keywords_missing", []),
-            },
-        )
 
         return eval_data
 

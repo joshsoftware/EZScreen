@@ -721,57 +721,61 @@ Return a JSON array only. No markdown, no commentary.
 ]
 ```
 
-### 5.3 Answer Evaluation Prompts
+### 5.3 Unified Turn Prompt (Intent + Evaluation)
 
-**Standard Answer Evaluation Prompt:**
+Each candidate utterance is processed with **one** LLM call that classifies intent and,
+only when the candidate is answering, evaluates the answer in the same response. This
+replaced an earlier two-call design (a separate intent-router call followed by a
+separate evaluation call) to remove one full model round-trip from every turn's latency
+budget — see `docs/architecture/SCREENING_BOT_LATENCY_OPTIMIZATION.md` Phase 1.
+
+**User prompt** (`ScreeningPromptBuilder.build_unified_prompt`):
 ```text
-You are evaluating a candidate's answer in a FIRST SCREENING interview.
+You are processing one candidate turn in a FIRST SCREENING interview.
 
-QUESTION: {question}
-CANDIDATE ANSWER: {answer}
+[NOTE: If the candidate is ANSWERING, this is a FOLLOW-UP evaluation. The candidate had
+ an insufficient primary answer. — only present when a follow-up is in progress]
+
+CURRENT INTERVIEW QUESTION: {question}
+CANDIDATE SPEECH: {follow-up history, if any}Candidate Latest Speech: {transcript}
+
+EVALUATION CONTEXT (use only if intent is ANSWERING):
 EXPECTED KEYWORDS (answer should address most of these): {keywords}
 EVALUATION STRICTNESS LEVEL: {depth}
+```
 
-STRICTNESS DEFINITIONS:
-- "aware": A reasonable, relevant attempt that shows basic understanding can receive a strong answer-quality score.
-- "partial_depth": Require a basic, accurate explanation that demonstrates partial understanding for a strong answer-quality score.
-- "full_depth": Require a clear, accurate, and sufficiently complete explanation for a strong answer-quality score. Vague or incomplete answers are not sufficient.
-- Strictness changes only the answer-quality score. Keyword coverage remains a separate 50% component.
+**System prompt** (`UNIFIED_SCREENING_SYSTEM` in `prompts.py`) instructs the model in three steps:
 
-SCORING RULES:
-- Return an independent `answer_quality_score` from 0–10. Do not calculate keyword coverage, keyword score, final score, or the final decision; Python is authoritative for those fields.
-- Assess conceptual correctness, relevance, clarity, explanation depth, and the evaluation strictness level.
-- Score 0–2 when the answer is incorrect, irrelevant, contradictory, or contains no meaningful understanding.
-- "aware": Score 10 for initial/basic but correct and relevant understanding, or a clear accurate explanation; score 7–9 when correct but incomplete; score 3–6 when loosely relevant, vague, or substantially incomplete.
-- "partial_depth": Score 6–7 for initial/basic but correct and relevant understanding; score 8–9 for a clear, accurate basic explanation; score 10 when it sufficiently covers the main concept; score 3–5 when relevant but vague or insufficiently explained.
-- "full_depth": Score 3–4 for only initial/basic but correct and relevant understanding; score 5–7 when accurate but materially incomplete; score 8–9 when clear and accurate but not sufficiently detailed; score 10 only when clear, accurate, detailed, and sufficiently complete.
-- Do NOT penalize for informal phrasing if the technical concept is correct.
-
-DECISION:
-- Python applies `NEXT_QUESTION` when the balanced final score is at least 6; otherwise it applies `ASK_FOLLOW_UP`.
-- "REPEAT_QUESTION" if the candidate asked you to repeat the question, or if their response was completely unrelated to the interview (e.g. "I can't hear you", "Hold on a second").
+1. **STEP 1 — INTENT (always):** classify exactly one of `ANSWERING`, `CLARIFICATION`,
+   `SMALL_TALK`, `SKIP`.
+2. **STEP 2 — RESPONSE (conditional):** a short conversational `response` when intent is
+   `CLARIFICATION` or `SMALL_TALK`; empty string otherwise.
+3. **STEP 3 — EVALUATION (only if intent is ANSWERING):** the same strictness
+   definitions, answer-quality calibration by strictness, 50/50 scoring-weight rules,
+   and decision rules as before — unchanged from the prior evaluation prompt, so scoring
+   behavior is identical to pre-Phase-1.
 
 Return STRICT JSON only. No markdown:
+```json
 {
-  "answer_quality_score": <0-10>,
-  "decision": "NEXT_QUESTION | ASK_FOLLOW_UP | REPEAT_QUESTION",
-  "feedback": "2-3 sentences: what was good, what was missing, pass/fail on this topic for screening",
-  "suggested_follow_up": "If decision is ASK_FOLLOW_UP and this is NOT a follow-up evaluation itself, write a specific, conversational follow-up question here to probe what they missed based on the missing keywords. If REPEAT_QUESTION, omit this field."
+  "intent": "ANSWERING | CLARIFICATION | SMALL_TALK | SKIP",
+  "response": "<required for CLARIFICATION or SMALL_TALK; empty string otherwise>",
+  "answer_quality_score": "<0-10; ANSWERING only>",
+  "decision": "NEXT_QUESTION | ASK_FOLLOW_UP | REPEAT_QUESTION — ANSWERING only",
+  "feedback": "2-3 sentences — ANSWERING only",
+  "suggested_follow_up": "ASK_FOLLOW_UP only; omitted for REPEAT_QUESTION or non-ANSWERING"
 }
 ```
 
-> **Note on Evaluation Output Calculation:** 
-> * The LLM determines only **`answer_quality_score`** from conceptual correctness, relevance, clarity, and the requested answer depth.
+> **Note on Evaluation Output Calculation (unchanged from the prior design):**
+> * The LLM determines only **`answer_quality_score`** from conceptual correctness, relevance, clarity, and the requested answer depth. It does **not** return keyword lists, coverage, or a final score — Python is authoritative for those and always recomputes them, so trimming them from the LLM's JSON output only shortens generation time, it does not change behavior.
 > * Python deterministically calculates **`keywords_found`**, **`keywords_missing`**, and **`coverage_percent`** from the candidate transcript and expected-keyword array. Matching is case-insensitive and supports punctuation-normalized phrases, camel-case identifiers, and high-confidence STT variants.
 > * Python calculates **`keyword_match_score = coverage_percent / 10`** and **`final_score = round((keyword_match_score + answer_quality_score) / 2)`**. Each component has exactly 50% weight.
 > * Python is authoritative for the final score and normal `NEXT_QUESTION` / `ASK_FOLLOW_UP` decision. `REPEAT_QUESTION` remains a conversational repeat path.
 
-**Follow-up Answer Evaluation Prompt:**
-The prompt is **identical** to the standard Answer Evaluation Prompt above, except this exact string is injected at the very top of the context:
-```text
-NOTE: This is a FOLLOW-UP evaluation. The candidate had an insufficient primary answer.
-```
-*(The LLM uses this to understand that the candidate is attempting to recover from a previously missed keyword).*
+**Follow-up evaluation:** carried via the same unified prompt — when a follow-up is in
+progress, the `NOTE: ... FOLLOW-UP evaluation` line and the prior follow-up exchange are
+included in `CANDIDATE SPEECH`, exactly as the old follow-up prompt variant did.
 
 ### 5.4 Final Summary Calculation Engine
 

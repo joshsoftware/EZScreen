@@ -3,17 +3,20 @@ LLM Prompt Templates for the AI Screening Pipeline.
 Source of truth: docs/architecture/AI_PROCESSING.md (Section 5.3)
 """
 
-INTENT_ROUTER_SYSTEM = (
-    "You are an AI Interview Intent Router. "
-    "Your job is to read the candidate's speech and classify it into one of four intents:\n"
+from src.core.config import settings
+
+UNIFIED_SCREENING_SYSTEM = (
+    "You are an AI Screening Interview turn processor. For every candidate utterance, "
+    "first classify intent, then \u2014 only if the candidate is answering \u2014 evaluate the answer.\n\n"
+    "STEP 1 \u2014 INTENT (always classify exactly one):\n"
     "- ANSWERING: The candidate is attempting to answer the technical question. (Even if their answer is completely wrong, confusing, or poorly transcribed, if they are using technical terms or trying to answer, choose this!).\n"
     "- CLARIFICATION: The candidate is asking you to repeat, clarify, or rephrase the question.\n"
     "- SMALL_TALK: The candidate is ONLY asking for a moment to think (e.g. 'give me a second'), apologizing for a delay, confirming they are present (e.g. 'Yes I am here'), or responding to a greeting/closing. DO NOT use this for rambling. If classified as SMALL_TALK, provide a polite conversational response that encourages them or repeats the question to get them back on track.\n"
     "- SKIP: The candidate explicitly states they do not know the answer and want to move on.\n\n"
-    "Respond in JSON format: {\"intent\": \"<INTENT>\", \"response\": \"<Conversational response if CLARIFICATION or SMALL_TALK>\"}"
-)
-
-ANSWER_EVALUATION_SYSTEM = (
+    "STEP 2 \u2014 RESPONSE (conditional):\n"
+    "- If intent is CLARIFICATION or SMALL_TALK: set \"response\" to a polite, brief conversational reply (per the STEP 1 guidance above).\n"
+    "- Otherwise: set \"response\" to \"\".\n\n"
+    "STEP 3 \u2014 EVALUATION (only if intent is ANSWERING; omit all evaluation fields for every other intent):\n\n"
     "STRICTNESS DEFINITIONS:\n"
     "- \"aware\": Assess the candidate answer generously. A reasonable, relevant attempt that shows basic understanding can receive a strong ANSWER QUALITY SCORE.\n"
     "- \"partial_depth\": Require a basic, accurate explanation that demonstrates partial understanding for a strong ANSWER QUALITY SCORE.\n"
@@ -26,10 +29,10 @@ ANSWER_EVALUATION_SYSTEM = (
     "- \"full_depth\": Score 3-4 when the answer shows only initial/basic but correct and relevant understanding. Score 5-7 when it is accurate and relevant but misses material details, reasoning, examples, edge cases, or completeness. Score 8-9 when it is clear and accurate but not sufficiently detailed or complete. Score 10 only when it is clear, accurate, detailed, and sufficiently complete for the question.\n\n"
     "SCORING WEIGHTS (MANDATORY 50/50 SPLIT):\n"
     "- Score two independent components on a 0-10 scale. Each component contributes exactly 50% of the final score.\n"
-    "- KEYWORD MATCH SCORE (50%): The application deterministically calculates this from case-insensitive whole-word, punctuation-normalized, camel-case, high-confidence speech-to-text, and ordered abbreviated compound-name matches. Identify the expected keywords addressed, but do not infer semantic equivalents, vague references, or unrelated wording as keyword matches.\n"
+    "- KEYWORD MATCH SCORE (50%): The application deterministically calculates this from case-insensitive whole-word, punctuation-normalized, camel-case, high-confidence speech-to-text, and ordered abbreviated compound-name matches. You do not compute or return this value.\n"
     "- ANSWER QUALITY SCORE (50%): Independently assess conceptual correctness, relevance, clarity, explanation depth, and the EVALUATION STRICTNESS LEVEL. Do not penalize informal phrasing when the technical concept is correct.\n"
     "- Evaluate the candidate's actual answer against the current interview question; do not score an answer that was not given.\n"
-    "- The application validates coverage_percent, keyword_match_score, FINAL score, and the final decision. Supply an independent answer_quality_score.\n"
+    "- The application computes coverage_percent, keyword_match_score, the FINAL score, and validates the final decision from your answer_quality_score. Supply only an independent answer_quality_score.\n"
     "- FINAL score = round((keyword_match_score + answer_quality_score) / 2) to the nearest whole number. Never let one component outweigh the other.\n"
     "- Apply \"aware\" generously to the ANSWER QUALITY SCORE when the candidate shows basic understanding; apply \"partial_depth\" and \"full_depth\" according to the required explanation depth and accuracy.\n"
     "- Score 5\u20136: The balanced final score shows partial understanding but material gaps. Score 0\u20134: The answer is wrong, confused, vague, or has little meaningful understanding.\n\n"
@@ -39,36 +42,78 @@ ANSWER_EVALUATION_SYSTEM = (
     "- \"REPEAT_QUESTION\" if the candidate asked you to repeat the question, or if their response was completely unrelated to the interview (e.g. \"I can't hear you\", \"Hold on a second\").\n\n"
     "Return STRICT JSON only. No markdown:\n"
     "{\n"
-    "  \"score\": <0-10>,\n"
-    "  \"keyword_match_score\": <0-10>,\n"
-    "  \"answer_quality_score\": <0-10>,\n"
-    "  \"coverage_percent\": <0-100>,\n"
-    "  \"keywords_found\": [\"...\"],\n"
-    "  \"keywords_missing\": [\"...\"],\n"
-    "  \"is_sufficient\": <true only when decision is NEXT_QUESTION>,\n"
-    "  \"decision\": \"NEXT_QUESTION | ASK_FOLLOW_UP | REPEAT_QUESTION\",\n"
-    "  \"feedback\": \"2-3 sentences: what was good, what was missing, pass/fail on this topic for screening\",\n"
-    "  \"suggested_follow_up\": \"If decision is ASK_FOLLOW_UP and this is NOT a follow-up evaluation itself, write one specific, conversational follow-up question that addresses the weakest keyword or answer-quality gap. If REPEAT_QUESTION, omit this field.\"\n"
+    "  \"intent\": \"ANSWERING | CLARIFICATION | SMALL_TALK | SKIP\",\n"
+    "  \"response\": \"<required for CLARIFICATION or SMALL_TALK per STEP 2; empty string otherwise>\",\n"
+    "  \"answer_quality_score\": <0-10; required only when intent is ANSWERING>,\n"
+    "  \"decision\": \"NEXT_QUESTION | ASK_FOLLOW_UP | REPEAT_QUESTION; required only when intent is ANSWERING\",\n"
+    "  \"feedback\": \"2-3 sentences: what was good, what was missing, pass/fail on this topic for screening; required only when intent is ANSWERING\",\n"
+    "  \"suggested_follow_up\": \"If intent is ANSWERING and decision is ASK_FOLLOW_UP and this is NOT a follow-up evaluation itself, write one specific, conversational follow-up question that addresses the weakest keyword or answer-quality gap. If REPEAT_QUESTION or not ANSWERING, omit this field.\"\n"
     "}"
 )
 
 # Greeting and closing messages
-GREETING_TEXT = "Hi! I am your interviewer for today's interview. Let's start with some technical questions."
+GREETING_TEXT = "Hi! I am your interviewer for today's interview. We’ll begin with a few technical questions. Let me know when you’re ready."
 CLOSING_TEXT = "Thank you for your time today. Our HR team will be in touch shortly."
 SILENCE_PROMPT_TEXT = "Are you there?"
+# Spoken after every completed question (except REPEAT_QUESTION). Named as a
+# constant, not an inline literal, so the TTS warm cache (see
+# PipecatInterviewPolicy._warm_tts_cache) pre-synthesizes the exact same string.
+ANSWER_ACKNOWLEDGEMENT_TEXT = "Thank you for answering the question."
+# Spoken as its own utterance, immediately followed by a second speak() of
+# the question text itself — never concatenated into one string. Keeping
+# them separate means the question half is spoken verbatim and hits the TTS
+# cache (it was pre-warmed as-is); "Let me repeat the question: <question>"
+# as a single string never would, since the cache is keyed on exact text.
+REPEAT_QUESTION_PREFIX_TEXT = "Let me repeat the question."
+REPEAT_QUESTION_LIMIT_TEXT = (
+    "I have already repeated the question once. "
+    "Please share your best answer when you are ready."
+)
 SILENCE_PROMPT_SECONDS = 30
 # Prompt twice at 30-second intervals, then close after the final 30-second
 # unanswered interval (90 seconds total).
 MAX_SILENCE_PROMPTS = 2
 # A candidate may pause briefly between clauses.  A final STT segment is held
 # for this short period so a continuation is evaluated as one answer.
-ANSWER_SETTLE_SECONDS = 3
+# Env-overridable via SCREENING_ANSWER_SETTLE_SECONDS (default 2.0s). See
+# docs/architecture/SCREENING_BOT_LATENCY_OPTIMIZATION.md Phase 2 for the tuning
+# rationale and hard floor (1.5s).
+ANSWER_SETTLE_SECONDS = settings.screening_answer_settle_seconds
 # This is intentionally separate from SILENCE_PROMPT_SECONDS: the closing
 # reply window must never speak the inactivity prompt.
 CLOSING_REPLY_TIMEOUT_SECONDS = 30
 
 # Follow-up limit per question
 MAX_FOLLOW_UPS_PER_QUESTION = 1
+
+# Spoken while waiting on a slow LLM turn (classify_and_evaluate), so a
+# multi-second gap doesn't read as dead air. Named constants (not inline
+# literals) so the TTS warm cache pre-synthesizes the exact same strings —
+# see PipecatInterviewPolicy._run_filler_schedule and tts_prewarm.known_bot_texts.
+FILLER_TEXTS = [
+    "Alright, one moment.",
+    "Just a moment, please.",
+    "Okay, give me a second.",
+]
+# Absolute seconds after the candidate stopped talking at which each
+# successive filler should fire — not gaps between them (see
+# PipecatInterviewPolicy._run_filler_schedule, which measures from
+# handle_candidate_speech_stopped, not from when the LLM call happens to
+# start, and can fire *during* the ANSWER_SETTLE_SECONDS wait, not only after
+# it — a candidate resuming speech mid-settle already gets the same
+# InterruptionFrame barge-in as any other bot utterance, so there's no
+# safety reason to hold the first filler back until settle ends). Loosens up
+# over time so a quick early reassurance doesn't turn into a repetitive,
+# noticeable beat on a genuinely long wait. The task is cancelled (see
+# _cancel_filler_schedule) the instant classify_and_evaluate resolves, so a
+# filler never overlaps the real response that follows; once this list is
+# exhausted with no result yet, the policy just keeps waiting silently.
+FILLER_SCHEDULE_SECONDS = [1.5, 4.5, 8.0]
+
+# How often _end_after_inactivity rechecks whether the candidate has stopped
+# talking, while they're still mid-answer past SILENCE_PROMPT_SECONDS. A
+# named constant (not an inline literal) purely so tests can shrink it.
+CANDIDATE_SPEAKING_POLL_SECONDS = 1.0
 
 # Recommendation threshold (AI_PROCESSING.md Section 5.4)
 RECOMMENDATION_THRESHOLD = 6.0
