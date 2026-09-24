@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,8 +42,8 @@ class JobDescription(Base):
         nullable=True,
     )
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    experience_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    experience_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    experience_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    experience_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     skills: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[JobStatus] = mapped_column(
         Enum(

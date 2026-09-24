@@ -253,6 +253,27 @@ def _maybe_generate_screening_questions(
     return
 
 
+def _sync_experience_into_parsed_jd(
+    parsed_jd: dict | None,
+    *,
+    experience_min: float | None,
+    experience_max: float | None,
+) -> dict | None:
+    """Prefer form overall experience over LLM rounding when the user set a range."""
+    if experience_min is None and experience_max is None:
+        return parsed_jd
+    parsed = dict(parsed_jd) if isinstance(parsed_jd, dict) else {}
+    required = parsed.get("experience_required")
+    if not isinstance(required, dict):
+        required = {}
+    else:
+        required = dict(required)
+    required["min_years"] = experience_min
+    required["max_years"] = experience_max
+    parsed["experience_required"] = required
+    return parsed
+
+
 def create_job(
     db: Session,
     *,
@@ -262,7 +283,11 @@ def create_job(
 ) -> JobDescription:
     _assert_org_active(db, organization_id)
     payload = data.model_dump(exclude={"organization_id", "skills"})
-    parsed_jd = _call_parse_jd(data)
+    parsed_jd = _sync_experience_into_parsed_jd(
+        _call_parse_jd(data),
+        experience_min=data.experience_min,
+        experience_max=data.experience_max,
+    )
     job = JobDescription(
         organization_id=organization_id,
         created_by=created_by,
@@ -373,7 +398,11 @@ def update_job(db: Session, job: JobDescription, data: JobUpdate) -> JobDescript
     jd_reparsed = False
     old_parsed_jd = dict(job.parsed_jd) if isinstance(job.parsed_jd, dict) else None
     if any(field in payload for field in _JD_PARSE_FIELDS):
-        job.parsed_jd = _call_parse_jd(job)
+        job.parsed_jd = _sync_experience_into_parsed_jd(
+            _call_parse_jd(job),
+            experience_min=job.experience_min,
+            experience_max=job.experience_max,
+        )
         jd_reparsed = True
     if skills_set:
         _apply_skills(job, skills)

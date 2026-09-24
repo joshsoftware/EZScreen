@@ -151,6 +151,7 @@ export function JobForm({
             type="number"
             min={0}
             max={50}
+            step={0.1}
             value={values.experience_min}
             onChange={(e) => setField('experience_min', e.target.value)}
           />
@@ -160,10 +161,14 @@ export function JobForm({
             type="number"
             min={0}
             max={50}
+            step={0.1}
             value={values.experience_max}
             onChange={(e) => setField('experience_max', e.target.value)}
           />
         </div>
+        <p className="text-label-md text-on-surface-variant -mt-sm">
+          Up to one decimal place (e.g. 2, 2.5, 5.7). Same rule for min and max.
+        </p>
         <Select
           id="job-status"
           label="Status"

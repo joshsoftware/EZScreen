@@ -140,11 +140,22 @@ export function jobStatusTone(status) {
   return 'warning'
 }
 
+/** Format years for display: 2 → "2", 2.5 → "2.5", 5.7 → "5.7". */
+export function formatYearsValue(value) {
+  if (value == null || value === '') return null
+  const n = Number(value)
+  if (!Number.isFinite(n)) return String(value)
+  const normalized = Math.round(n * 10) / 10
+  return Number.isInteger(normalized) ? String(normalized) : String(normalized)
+}
+
 export function formatExperience(min, max) {
-  if (min == null && max == null) return '—'
-  if (min != null && max != null) return `${min}–${max} yrs`
-  if (min != null) return `${min}+ yrs`
-  return `Up to ${max} yrs`
+  const minLabel = formatYearsValue(min)
+  const maxLabel = formatYearsValue(max)
+  if (minLabel == null && maxLabel == null) return '—'
+  if (minLabel != null && maxLabel != null) return `${minLabel}–${maxLabel} yrs`
+  if (minLabel != null) return `${minLabel}+ yrs`
+  return `Up to ${maxLabel} yrs`
 }
 
 function escapeHtml(text) {
@@ -303,16 +314,23 @@ function emptyToNull(value) {
   return trimmed ? trimmed : null
 }
 
-function parseOptionalInt(value) {
+function parseOptionalExperienceYears(value) {
   if (value === '' || value == null) return null
   const parsed = Number(value)
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error('Experience years must be a whole number from 0 to 50.')
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(
+      'Experience years must be a number from 0 to 50 with at most one decimal.',
+    )
   }
   if (parsed > 50) {
     throw new Error('Experience years must be 50 or less.')
   }
-  return parsed
+  if (Math.abs(parsed * 10 - Math.round(parsed * 10)) > 1e-6) {
+    throw new Error(
+      'Experience years must have at most one decimal place (e.g. 2, 2.5, 5.7).',
+    )
+  }
+  return Math.round(parsed * 10) / 10
 }
 
 /** True when the string has at least one letter or digit (Unicode-aware). */
@@ -354,8 +372,8 @@ export function formValuesToPayload(values) {
   }
 
   const title = values.title.trim()
-  const experienceMin = parseOptionalInt(values.experience_min)
-  const experienceMax = parseOptionalInt(values.experience_max)
+  const experienceMin = parseOptionalExperienceYears(values.experience_min)
+  const experienceMax = parseOptionalExperienceYears(values.experience_max)
   if (experienceMin != null && experienceMax != null && experienceMin > experienceMax) {
     throw new Error('Minimum experience cannot be greater than maximum.')
   }

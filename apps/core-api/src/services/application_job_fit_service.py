@@ -119,7 +119,11 @@ def apply_job_fit(
 
     analysis = fit.get("job_fit_analysis")
     if isinstance(analysis, dict):
-        application.job_fit_analysis = analysis
+        # Keep JSON match_score aligned with the persisted resume_score (1 dp).
+        synced = dict(analysis)
+        if score is not None:
+            synced["match_score"] = score
+        application.job_fit_analysis = synced
         wrote_fit = True
     elif fit.get("status") == "success":
         # Some AI deployments return the analysis payload at the top level.
@@ -129,6 +133,8 @@ def apply_job_fit(
             if key not in {"status", "error_message", "candidate_yoe"}
         }
         if flat_analysis:
+            if score is not None:
+                flat_analysis["match_score"] = score
             application.job_fit_analysis = flat_analysis
             wrote_fit = True
 
