@@ -10,6 +10,39 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from src.models.enums import JobStatus, JobType, WorkType
 
 
+def _normalize_experience_years(value: object) -> float | None:
+    """Allow blank → None; require 0–50 with at most one decimal place."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        try:
+            value = float(trimmed)
+        except ValueError as exc:
+            raise ValueError(
+                "Experience years must be a number from 0 to 50 with at most one decimal"
+            ) from exc
+    if isinstance(value, bool):
+        raise ValueError(
+            "Experience years must be a number from 0 to 50 with at most one decimal"
+        )
+    if not isinstance(value, (int, float)):
+        raise ValueError(
+            "Experience years must be a number from 0 to 50 with at most one decimal"
+        )
+    years = float(value)
+    if years < 0 or years > 50:
+        raise ValueError("Experience years must be between 0 and 50")
+    # At most one decimal place (tolerate float noise)
+    if abs(years * 10 - round(years * 10)) > 1e-6:
+        raise ValueError(
+            "Experience years must have at most one decimal place (e.g. 2, 2.5, 5.7)"
+        )
+    return round(years * 10) / 10
+
+
 class SkillItem(BaseModel):
     skill: str = Field(min_length=1, max_length=255)
     required_years: float | None = Field(default=None, ge=0, le=50)
@@ -58,8 +91,8 @@ class JobCreate(BaseModel):
     job_type: JobType | None = None
     work_type: WorkType | None = None
     location: str | None = Field(default=None, max_length=255)
-    experience_min: int | None = Field(default=None, ge=0, le=50)
-    experience_max: int | None = Field(default=None, ge=0, le=50)
+    experience_min: float | None = None
+    experience_max: float | None = None
     skills: JobSkills | None = None
     status: JobStatus = JobStatus.draft
     organization_id: UUID | None = None
@@ -70,6 +103,11 @@ class JobCreate(BaseModel):
         if isinstance(value, str):
             return value.strip() or None
         return value
+
+    @field_validator("experience_min", "experience_max", mode="before")
+    @classmethod
+    def coerce_experience_years(cls, value: object) -> float | None:
+        return _normalize_experience_years(value)
 
     @field_validator("title")
     @classmethod
@@ -110,8 +148,8 @@ class JobUpdate(BaseModel):
     job_type: JobType | None = None
     work_type: WorkType | None = None
     location: str | None = Field(default=None, max_length=255)
-    experience_min: int | None = Field(default=None, ge=0, le=50)
-    experience_max: int | None = Field(default=None, ge=0, le=50)
+    experience_min: float | None = None
+    experience_max: float | None = None
     skills: JobSkills | None = None
     status: JobStatus | None = None
 
@@ -121,6 +159,11 @@ class JobUpdate(BaseModel):
         if isinstance(value, str):
             return value.strip() or None
         return value
+
+    @field_validator("experience_min", "experience_max", mode="before")
+    @classmethod
+    def coerce_experience_years(cls, value: object) -> float | None:
+        return _normalize_experience_years(value)
 
     @field_validator("title")
     @classmethod
@@ -146,6 +189,17 @@ class JobUpdate(BaseModel):
             )
         return value
 
+    @model_validator(mode="after")
+    def check_experience_range(self) -> JobUpdate:
+        if (
+            self.experience_min is not None
+            and self.experience_max is not None
+            and self.experience_min > self.experience_max
+        ):
+            raise ValueError("Minimum experience cannot be greater than maximum")
+        return self
+
+
 class JobListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -156,8 +210,8 @@ class JobListItem(BaseModel):
     job_type: JobType | None
     work_type: WorkType | None
     location: str | None
-    experience_min: int | None
-    experience_max: int | None
+    experience_min: float | None
+    experience_max: float | None
     skills: JobSkills | None = None
     status: JobStatus
     created_at: datetime | None = None
@@ -175,8 +229,8 @@ class JobResponse(BaseModel):
     job_type: JobType | None
     work_type: WorkType | None
     location: str | None
-    experience_min: int | None
-    experience_max: int | None
+    experience_min: float | None
+    experience_max: float | None
     skills: JobSkills | None = None
     status: JobStatus
     parsed_jd: dict | None = None

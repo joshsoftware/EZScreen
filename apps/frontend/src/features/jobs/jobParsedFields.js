@@ -161,9 +161,15 @@ export function jdExperienceRange(parsedJd) {
   const min = exp.min_years
   const max = exp.max_years
   if (min == null && max == null) return null
-  if (min != null && max != null) return `${min}–${max} years`
-  if (min != null) return `${min}+ years`
-  return `Up to ${max} years`
+  const format = (value) => {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return String(value)
+    const normalized = Math.round(n * 10) / 10
+    return Number.isInteger(normalized) ? String(normalized) : String(normalized)
+  }
+  if (min != null && max != null) return `${format(min)}–${format(max)} years`
+  if (min != null) return `${format(min)}+ years`
+  return `Up to ${format(max)} years`
 }
 
 export function jdStatCards(parsedJd) {

@@ -120,7 +120,14 @@ export function JobParsedDetailPanel({ job, loading, error }) {
               label="Employment type"
               value={safe(parsedJd.employment_type) || formatJobType(job.job_type)}
             />
-            <Row label="Experience" value={parsedExperience || formExperience} />
+            <Row
+              label="Experience"
+              value={
+                job.experience_min != null || job.experience_max != null
+                  ? formExperience
+                  : parsedExperience
+              }
+            />
             <Row label="Work mode" value={formatWorkType(job.work_type)} />
           </div>
           {companyDesc ? (

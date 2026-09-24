@@ -23,8 +23,8 @@ class PublicJobListItem(BaseModel):
     job_type: JobType | None = None
     work_type: WorkType | None = None
     location: str | None = None
-    experience_min: int | None = None
-    experience_max: int | None = None
+    experience_min: float | None = None
+    experience_max: float | None = None
     skills: JobSkills | dict | str | None = None
     created_at: datetime | None = None
     published_at: datetime | None = None
@@ -43,8 +43,8 @@ class PublicJobResponse(BaseModel):
     job_type: JobType | None = None
     work_type: WorkType | None = None
     location: str | None = None
-    experience_min: int | None = None
-    experience_max: int | None = None
+    experience_min: float | None = None
+    experience_max: float | None = None
     skills: JobSkills | dict | str | None = None
     created_at: datetime | None = None
     published_at: datetime | None = None

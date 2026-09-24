@@ -335,8 +335,9 @@ export function resolveMatchScore(detail) {
 }
 
 function formatOutOfTen(score) {
-  if (score == null) return '—'
-  return `${score.toFixed(1)}/10`
+  const normalized = normalizeMatchScore(score)
+  if (normalized == null) return '—'
+  return `${normalized.toFixed(1)}/10`
 }
 
 function skillsScoreFromBreakdown(breakdown) {
@@ -350,22 +351,31 @@ function skillsScoreFromBreakdown(breakdown) {
   return ((mustHave ?? 0) * 40 + (goodToHave ?? 0) * 20) / 60
 }
 
-export function scoreBreakdownCards(analysis) {
+/**
+ * Score cards for the application detail header.
+ * @param {object|null|undefined} analysis job_fit_analysis payload
+ * @param {number|null|undefined} overallScore canonical score (prefer resume_score via resolveMatchScore)
+ */
+export function scoreBreakdownCards(analysis, overallScore = null) {
   if (!analysis || typeof analysis !== 'object') return []
+
+  const overall =
+    overallScore != null
+      ? normalizeMatchScore(overallScore)
+      : normalizeMatchScore(analysis.match_score)
 
   const breakdown = analysis.score_breakdown
   if (!breakdown || typeof breakdown !== 'object') {
-    const overall = numericScore(analysis.match_score)
     return overall == null
       ? []
       : [{ label: 'Overall', value: formatOutOfTen(overall) }]
   }
 
-  // BE score_breakdown values are already on a 0–10 scale.
+  // Prefer the persisted resume_score for Overall so it matches lists / AI match header.
   return [
     {
       label: 'Overall',
-      value: formatOutOfTen(numericScore(analysis.match_score)),
+      value: formatOutOfTen(overall),
     },
     {
       label: 'Skills',
@@ -413,8 +423,17 @@ function formatWorkType(value) {
 }
 
 function formatExperienceRange(min, max) {
-  if (min == null && max == null) return null
-  if (min != null && max != null) return `${min}–${max} YOE`
-  if (min != null) return `${min}+ YOE`
-  return `Up to ${max} YOE`
+  const format = (value) => {
+    if (value == null || value === '') return null
+    const n = Number(value)
+    if (!Number.isFinite(n)) return String(value)
+    const normalized = Math.round(n * 10) / 10
+    return Number.isInteger(normalized) ? String(normalized) : String(normalized)
+  }
+  const minLabel = format(min)
+  const maxLabel = format(max)
+  if (minLabel == null && maxLabel == null) return null
+  if (minLabel != null && maxLabel != null) return `${minLabel}–${maxLabel} YOE`
+  if (minLabel != null) return `${minLabel}+ YOE`
+  return `Up to ${maxLabel} YOE`
 }

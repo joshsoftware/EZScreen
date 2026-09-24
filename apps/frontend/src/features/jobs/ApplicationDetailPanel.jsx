@@ -258,7 +258,7 @@ export function ApplicationDetailPanel({
   const score = resolveMatchScore(detail)
   const analysis = detail?.job_fit_analysis
   const parsed = detail?.parsed_resume
-  const breakdownCards = scoreBreakdownCards(analysis)
+  const breakdownCards = scoreBreakdownCards(analysis, score)
   const tone = fitTone(score, fitLabels)
   const weakFit = tone === 'danger'
 
