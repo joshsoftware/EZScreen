@@ -42,6 +42,15 @@ export function updateJobRequest(jobId, body) {
   })
 }
 
+export function importJdFileRequest(file) {
+  const body = new FormData()
+  body.append('file', file)
+  return apiRequest('/api/v1/jobs/import-jd', {
+    method: 'POST',
+    body,
+  })
+}
+
 export function getJobApplicantsRequest(jobId, { page = 1, limit = 50 } = {}) {
   const search = new URLSearchParams()
   search.set('page', String(page))

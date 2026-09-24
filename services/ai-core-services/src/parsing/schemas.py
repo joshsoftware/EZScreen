@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 
 class ParseResumeRequest(BaseModel):
@@ -84,4 +84,65 @@ class ParsedJDData(BaseModel):
 class ParsedJDResponse(BaseModel):
     status: str
     parsed_jd: Optional[ParsedJDData] = None
+    error_message: Optional[str] = None
+
+
+class NeedsReviewItem(BaseModel):
+    label: str = "Other"
+    content: str = ""
+
+
+def _coerce_str_list(value: object) -> object:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        lines = [line.strip() for line in value.replace("\r\n", "\n").split("\n")]
+        return [line for line in lines if line]
+    return value
+
+
+class JDFormPrefillData(BaseModel):
+    title: Optional[str] = None
+    location: Optional[str] = None
+    job_type: Optional[str] = None
+    work_type: Optional[str] = None
+    experience_min: Optional[float] = None
+    experience_max: Optional[float] = None
+    role_summary: Optional[str] = None
+    about_company: Optional[str] = None
+    responsibilities: List[str] = Field(default_factory=list)
+    must_have_skills_text: List[str] = Field(default_factory=list)
+    good_to_have_skills_text: List[str] = Field(default_factory=list)
+    qualifications: List[str] = Field(default_factory=list)
+    domain_experience: List[str] = Field(default_factory=list)
+    tools_stack: List[str] = Field(default_factory=list)
+    needs_review: List[NeedsReviewItem] = Field(default_factory=list)
+
+    @field_validator(
+        "responsibilities",
+        "must_have_skills_text",
+        "good_to_have_skills_text",
+        "qualifications",
+        "domain_experience",
+        "tools_stack",
+        mode="before",
+    )
+    @classmethod
+    def coerce_lists(cls, value: object) -> object:
+        return _coerce_str_list(value)
+
+    @field_validator("needs_review", mode="before")
+    @classmethod
+    def coerce_needs_review(cls, value: object) -> object:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            return [{"label": "Other", "content": text}] if text else []
+        return value
+
+
+class JDFormPrefillResponse(BaseModel):
+    status: str
+    form: Optional[JDFormPrefillData] = None
     error_message: Optional[str] = None

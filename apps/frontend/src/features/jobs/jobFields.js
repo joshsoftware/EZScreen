@@ -100,6 +100,56 @@ export const EMPTY_JOB_FORM = {
   status: 'draft',
 }
 
+const FORM_PREFILL_KEYS = [
+  'title',
+  'role_summary',
+  'about_company',
+  'responsibilities',
+  'must_have_skills_text',
+  'good_to_have_skills_text',
+  'qualifications',
+  'domain_experience',
+  'tools_stack',
+  'job_type',
+  'work_type',
+  'location',
+  'experience_min',
+  'experience_max',
+]
+
+/** Map /jobs/import-jd response.form onto JobForm values (keeps status). */
+export function importFormToValues(form, current = EMPTY_JOB_FORM) {
+  const next = { ...EMPTY_JOB_FORM, ...current }
+  if (!form || typeof form !== 'object') return next
+
+  for (const key of FORM_PREFILL_KEYS) {
+    const value = form[key]
+    if (value == null || value === '') continue
+    next[key] = String(value)
+  }
+  if (!next.status) next.status = current.status || 'draft'
+  return next
+}
+
+export function normalizeNeedsReview(items) {
+  if (!Array.isArray(items)) return []
+  return items
+    .map((item) => {
+      if (typeof item === 'string') {
+        const content = item.trim()
+        return content ? { label: 'Other', content } : null
+      }
+      if (!item || typeof item !== 'object') return null
+      const content = String(item.content || '').trim()
+      if (!content) return null
+      return {
+        label: String(item.label || 'Other').trim() || 'Other',
+        content,
+      }
+    })
+    .filter(Boolean)
+}
+
 const JOB_TYPE_LABELS = {
   full_time: 'Full time',
   part_time: 'Part time',

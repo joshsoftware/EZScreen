@@ -9,6 +9,7 @@ import {
   WORK_TYPE_OPTIONS,
   formValuesToPayload,
 } from './jobFields'
+import { JdUploadPrefill } from './JdUploadPrefill'
 
 function SectionBlock({ title, hint, children }) {
   return (
@@ -49,8 +50,14 @@ export function JobForm({
   submitLabel = 'Save job',
   submittingLabel = 'Saving…',
   cancelTo = '/org-admin/jobs',
+  /** When true (create flow), hide status and always save as draft. */
+  forceDraftStatus = false,
 }) {
-  const [values, setValues] = useState(() => ({ ...EMPTY_JOB_FORM, ...initialValues }))
+  const [values, setValues] = useState(() => ({
+    ...EMPTY_JOB_FORM,
+    ...initialValues,
+    ...(forceDraftStatus ? { status: 'draft' } : {}),
+  }))
   const [error, setError] = useState(null)
 
   function setField(name, value) {
@@ -62,7 +69,10 @@ export function JobForm({
     setError(null)
     let payload
     try {
-      payload = formValuesToPayload(values)
+      payload = formValuesToPayload({
+        ...values,
+        status: forceDraftStatus ? 'draft' : values.status,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Check the form and try again.')
       return
@@ -76,6 +86,17 @@ export function JobForm({
 
   return (
     <form className="space-y-lg" onSubmit={(event) => void handleSubmit(event)}>
+      <JdUploadPrefill
+        values={values}
+        disabled={submitting}
+        onPrefill={(next) => {
+          setValues({
+            ...next,
+            ...(forceDraftStatus ? { status: 'draft' } : {}),
+          })
+          setError(null)
+        }}
+      />
       <SectionBlock title="Role overview" hint="Title and a short summary of the role.">
         <Input
           id="job-title"
@@ -169,18 +190,20 @@ export function JobForm({
         <p className="text-label-md text-on-surface-variant -mt-sm">
           Up to one decimal place (e.g. 2, 2.5, 5.7). Same rule for min and max.
         </p>
-        <Select
-          id="job-status"
-          label="Status"
-          value={values.status}
-          onChange={(e) => setField('status', e.target.value)}
-        >
-          {JOB_STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
+        {forceDraftStatus ? null : (
+          <Select
+            id="job-status"
+            label="Status"
+            value={values.status}
+            onChange={(e) => setField('status', e.target.value)}
+          >
+            {JOB_STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        )}
       </SectionBlock>
 
       <SectionBlock title="Responsibilities" hint="What the person will do day to day.">

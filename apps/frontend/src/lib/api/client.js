@@ -64,8 +64,9 @@ export async function apiRequest(path, options = {}) {
   } = options
   const headers = new Headers(initHeaders)
   const bearer = token ?? getAccessToken()
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
 
-  if (body !== undefined && !headers.has('Content-Type')) {
+  if (body !== undefined && !isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
   if (bearer) {
@@ -76,7 +77,7 @@ export async function apiRequest(path, options = {}) {
     ...rest,
     headers,
     credentials: 'include',
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : isFormData ? body : JSON.stringify(body),
   })
 
   if (

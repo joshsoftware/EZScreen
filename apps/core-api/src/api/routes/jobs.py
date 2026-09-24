@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
 from src.api.deps import DbSession, require_roles
 from src.models.enums import JobStatus, UserRole
@@ -16,9 +16,11 @@ from src.schemas.job import (
     JobResponse,
     JobUpdate,
     JobUpdateResponse,
+    JdImportResponse,
     ScreeningQuestionsUpdate,
 )
 from src.services import job_service
+from src.services import job_import_service
 
 router = APIRouter(prefix="/jobs", tags=["Job Descriptions"])
 
@@ -117,6 +119,33 @@ def create_job(
         )
         raise HTTPException(status_code=code, detail=detail) from exc
     return JobResponse.model_validate(job)
+
+
+@router.post(
+    "/import-jd",
+    response_model=JdImportResponse,
+    summary="Upload a JD file and prefill Create Job form sections",
+)
+async def import_jd(
+    current_user: JobActor,
+    file: UploadFile = File(...),
+) -> JdImportResponse:
+    _ = current_user
+    try:
+        content = await file.read()
+        return job_import_service.import_jd_file(
+            file_name=file.filename or "jd.pdf",
+            content=content,
+            content_type=file.content_type,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        code = (
+            status.HTTP_502_BAD_GATEWAY
+            if "unavailable" in detail.lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=code, detail=detail) from exc
 
 
 @router.post(

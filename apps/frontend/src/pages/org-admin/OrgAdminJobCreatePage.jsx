@@ -93,7 +93,7 @@ export function OrgAdminJobCreatePage() {
             </>
           ) : (
             <>
-              Step 1 is the structured JD template.
+              Optional: upload a JD to prefill step 1.
               <br />
               Step 2 extracts skills and years so you can edit, add, or remove them.
             </>
@@ -116,6 +116,7 @@ export function OrgAdminJobCreatePage() {
             submitting={submitting}
             submitLabel="Continue"
             submittingLabel="Parsing skills…"
+            forceDraftStatus
           />
         ) : (
           <JobSkillsEditor

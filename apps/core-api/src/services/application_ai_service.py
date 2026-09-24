@@ -13,6 +13,7 @@ from src.config.settings import settings
 __all__ = [
     "call_parse_resume",
     "call_match_resume_jd",
+    "call_jd_form_prefill",
 ]
 
 
@@ -107,6 +108,25 @@ def call_parse_resume(*, s3_key: str, file_name: str) -> dict:
     data = response.json()
     if not isinstance(data, dict):
         raise ValueError("Invalid response from resume parsing service")
+    return data
+
+
+def call_jd_form_prefill(*, file_name: str, content: bytes, content_type: str | None) -> dict:
+    """Forward uploaded JD bytes to AI form-prefill endpoint."""
+    mime = (content_type or "application/octet-stream").split(";")[0].strip()
+    files = {"file": (file_name, content, mime)}
+    try:
+        with httpx.Client(timeout=180.0) as client:
+            response = client.post(_ai_url("parse/jd/form-prefill"), files=files)
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise ValueError(
+            f"JD import service unavailable: {_http_error_detail(exc)}"
+        ) from exc
+
+    data = response.json()
+    if not isinstance(data, dict):
+        raise ValueError("Invalid response from JD import service")
     return data
 
 

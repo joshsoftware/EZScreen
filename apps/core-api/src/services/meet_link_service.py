@@ -24,8 +24,15 @@ __all__ = [
     "create_screening_meet",
 ]
 
-_SCOPES = ("https://www.googleapis.com/auth/calendar.events",)
+_SCOPES = (
+    "https://www.googleapis.com/auth/calendar.events",
+    # Required to PATCH Meet space accessType after Calendar creates the conference.
+    "https://www.googleapis.com/auth/meetings.space.created",
+    "https://www.googleapis.com/auth/meetings.space.settings",
+)
 _CALENDAR_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
+_MEET_SPACES_URL = "https://meet.googleapis.com/v2/spaces/{space_id}"
+_MEET_ACCESS_TYPES = frozenset({"OPEN", "TRUSTED", "RESTRICTED"})
 _MEET_CODE_ALPHABET = string.ascii_lowercase
 
 # Browser/OS legacy names not always present in Python tzdata.
@@ -210,8 +217,173 @@ def _extract_meeting_code(meet_link: str) -> str | None:
     prefix = "https://meet.google.com/"
     if meet_link.startswith(prefix):
         code = meet_link[len(prefix) :].strip("/")
+        # Strip query/fragment if present (e.g. ?hs=122).
+        code = code.split("?", 1)[0].split("#", 1)[0].strip("/")
         return code or None
     return None
+
+
+def _extract_conference_id(event: dict[str, Any]) -> str | None:
+    """Calendar conferenceId is often the same identifier Meet GET accepts."""
+    conference = event.get("conferenceData")
+    if not isinstance(conference, dict):
+        return None
+    conference_id = conference.get("conferenceId")
+    if isinstance(conference_id, str) and conference_id.strip():
+        return conference_id.strip()
+    return None
+
+
+def _configured_meet_access_type() -> str | None:
+    raw = (settings.google_meet_access_type or "").strip().upper()
+    if not raw or raw in {"DEFAULT", "NONE", "SKIP"}:
+        return None
+    if raw not in _MEET_ACCESS_TYPES:
+        raise ValueError(
+            "GOOGLE_MEET_ACCESS_TYPE must be one of: OPEN, TRUSTED, RESTRICTED "
+            "(or empty to skip)"
+        )
+    return raw
+
+
+def _meet_space_url(space_id: str) -> str:
+    # space_id may be a meeting code ("abc-defg-hij") or resource id ("jQCFfuBOdN5z").
+    # Do not encode hyphens; quote everything else.
+    encoded = quote(space_id, safe="-_")
+    return _MEET_SPACES_URL.format(space_id=encoded)
+
+
+def _resolve_meet_space_name(
+    client: httpx.Client,
+    *,
+    token: str,
+    lookup_id: str,
+) -> str | None:
+    """GET space by meeting code / conferenceId → resource name ``spaces/{id}``."""
+    response = client.get(
+        _meet_space_url(lookup_id),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict):
+        return None
+    name = data.get("name")
+    if isinstance(name, str) and name.startswith("spaces/"):
+        return name
+    return None
+
+
+def _patch_meet_access_type(
+    client: httpx.Client,
+    *,
+    token: str,
+    space_name: str,
+    access_type: str,
+) -> None:
+    """PATCH requires the resource name, not a meeting code."""
+    space_id = space_name.removeprefix("spaces/")
+    response = client.patch(
+        _meet_space_url(space_id),
+        params={"updateMask": "config.accessType"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json={"config": {"accessType": access_type}},
+    )
+    response.raise_for_status()
+
+
+def _apply_meet_access_type(
+    *,
+    token: str,
+    meeting_code: str | None,
+    conference_id: str | None,
+) -> str | None:
+    """
+    Set Meet space accessType (e.g. OPEN) so anonymous bots can join without knocking.
+
+    Non-fatal on failure: returns space name on success, None otherwise.
+    """
+    access_type = _configured_meet_access_type()
+    if access_type is None:
+        return None
+
+    lookup_ids = list(
+        dict.fromkeys(
+            item for item in (meeting_code, conference_id) if item
+        )
+    )
+    if not lookup_ids:
+        logger.warning(
+            "Skipping Meet accessType=%s — no meeting code/conferenceId on event",
+            access_type,
+        )
+        return None
+
+    try:
+        with _google_http_client(timeout=30.0) as client:
+            space_name: str | None = None
+            last_error: Exception | None = None
+            for lookup_id in lookup_ids:
+                try:
+                    space_name = _resolve_meet_space_name(
+                        client, token=token, lookup_id=lookup_id
+                    )
+                    if space_name:
+                        break
+                except httpx.HTTPError as exc:
+                    last_error = exc
+                    continue
+
+            if not space_name:
+                detail = ""
+                if isinstance(last_error, httpx.HTTPStatusError):
+                    detail = (
+                        f" ({last_error.response.status_code} "
+                        f"{(last_error.response.text or '').strip()[:500]})"
+                    )
+                elif last_error is not None:
+                    detail = f" ({last_error})"
+                logger.warning(
+                    "Could not resolve Meet space for accessType=%s lookups=%s%s",
+                    access_type,
+                    lookup_ids,
+                    detail,
+                )
+                return None
+
+            _patch_meet_access_type(
+                client,
+                token=token,
+                space_name=space_name,
+                access_type=access_type,
+            )
+            logger.info(
+                "Set Meet space %s accessType=%s",
+                space_name,
+                access_type,
+            )
+            return space_name
+    except httpx.HTTPStatusError as exc:
+        body = (exc.response.text or "").strip()[:1000]
+        logger.warning(
+            "Meet API accessType=%s failed: %s %s "
+            "(enable Google Meet API, re-consent OAuth with meetings.space.* "
+            "scopes, or check Workspace Meet access policies)",
+            access_type,
+            exc.response.status_code,
+            body,
+        )
+        return None
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "Meet API unavailable while setting accessType=%s: %s",
+            access_type,
+            exc,
+        )
+        return None
 
 
 def _calendar_events_url(calendar_id: str) -> str:
@@ -294,18 +466,28 @@ def _create_live_calendar_event(
 
     event_id = data.get("id") if isinstance(data.get("id"), str) else None
     html_link = data.get("htmlLink") if isinstance(data.get("htmlLink"), str) else None
+    meeting_code = _extract_meeting_code(meet_link)
+    conference_id = _extract_conference_id(data)
+
+    # Soft-fail: scheduling still succeeds if Workspace policy / scopes block OPEN.
+    meet_space_name = _apply_meet_access_type(
+        token=token,
+        meeting_code=meeting_code,
+        conference_id=conference_id,
+    )
 
     logger.info(
-        "Created Google Calendar screening event id=%s meet=%s attendees=%s",
+        "Created Google Calendar screening event id=%s meet=%s space=%s attendees=%s",
         event_id,
         meet_link,
+        meet_space_name,
         guest_emails,
     )
 
     return {
         "gmeet_link": meet_link,
-        "meet_space_name": event_id,
-        "meeting_code": _extract_meeting_code(meet_link),
+        "meet_space_name": meet_space_name,
+        "meeting_code": meeting_code,
         "duration_minutes": duration_minutes,
         "time_zone": tz_name,
         "scheduled_at": scheduled_at.isoformat(),
@@ -329,7 +511,8 @@ def create_screening_meet(
     Schedule screening via Google Calendar (live) or placeholder link (mock).
 
     mock → placeholder meet.google.com URL (local/dev)
-    live → Calendar event with auto-generated Meet link + attendee invites
+    live → Calendar event with auto-generated Meet link + attendee invites,
+           then optional Meet API patch for GOOGLE_MEET_ACCESS_TYPE (default OPEN)
     """
     mode = _meet_mode()
     if mode not in {"mock", "live"}:

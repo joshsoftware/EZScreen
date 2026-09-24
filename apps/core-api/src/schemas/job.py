@@ -276,3 +276,30 @@ class ScreeningQuestionItem(BaseModel):
 
 class ScreeningQuestionsUpdate(BaseModel):
     questions: list[ScreeningQuestionItem] = Field(default_factory=list)
+
+
+class JdNeedsReviewItem(BaseModel):
+    label: str = "Other"
+    content: str = ""
+
+
+class JdFormPrefill(BaseModel):
+    title: str | None = None
+    location: str | None = None
+    job_type: str | None = None
+    work_type: str | None = None
+    experience_min: float | None = None
+    experience_max: float | None = None
+    role_summary: str | None = None
+    about_company: str | None = None
+    responsibilities: str | None = None
+    must_have_skills_text: str | None = None
+    good_to_have_skills_text: str | None = None
+    qualifications: str | None = None
+    domain_experience: str | None = None
+    tools_stack: str | None = None
+    needs_review: list[JdNeedsReviewItem] = Field(default_factory=list)
+
+
+class JdImportResponse(BaseModel):
+    form: JdFormPrefill
