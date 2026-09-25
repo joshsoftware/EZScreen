@@ -760,6 +760,7 @@ Return STRICT JSON only. No markdown:
 {
   "intent": "ANSWERING | CLARIFICATION | SMALL_TALK | SKIP",
   "response": "<required for CLARIFICATION or SMALL_TALK; empty string otherwise>",
+  "keywords_found": "[<expected keywords the candidate covered, copied exactly from the expected list; [] if none>] — ANSWERING only",
   "answer_quality_score": "<0-10; ANSWERING only>",
   "decision": "NEXT_QUESTION | ASK_FOLLOW_UP | REPEAT_QUESTION — ANSWERING only",
   "feedback": "2-3 sentences — ANSWERING only",
@@ -768,9 +769,9 @@ Return STRICT JSON only. No markdown:
 ```
 
 > **Note on Evaluation Output Calculation (unchanged from the prior design):**
-> * The LLM determines only **`answer_quality_score`** from conceptual correctness, relevance, clarity, and the requested answer depth. It does **not** return keyword lists, coverage, or a final score — Python is authoritative for those and always recomputes them, so trimming them from the LLM's JSON output only shortens generation time, it does not change behavior.
-> * Python deterministically calculates **`keywords_found`**, **`keywords_missing`**, and **`coverage_percent`** from the candidate transcript and expected-keyword array. Matching is case-insensitive and supports punctuation-normalized phrases, camel-case identifiers, and high-confidence STT variants.
-> * Python calculates **`keyword_match_score = coverage_percent / 10`** and **`final_score = round((keyword_match_score + answer_quality_score) / 2)`**. Each component has exactly 50% weight.
+> * The LLM returns two evaluation inputs: **`keywords_found`** (which expected keywords the candidate covered) and **`answer_quality_score`** (conceptual correctness, relevance, clarity, and the requested answer depth). There is no Python keyword matcher — keyword matching is done by the prompt's *KEYWORD MATCHING RULES*: meaning-based, accepting aliases/abbreviations (`k8s` → `Kubernetes`), spacing/casing variants (`hashmap` → `HashMap`), accurate paraphrases and obvious speech-to-text mis-transcriptions, and rejecting keywords that are negated, contradicted, or only echoed from the question.
+> * Python validates `keywords_found` against the expected-keyword array (anything not in the expected list is discarded; a missing or malformed field means no keywords covered), then derives **`keywords_missing`** (the complement) and **`coverage_percent`**.
+> * Python calculates **`keyword_match_score = coverage_percent / 10`** and **`final_score = round((keyword_match_score + answer_quality_score) / 2)`**. Each component has exactly 50% weight. If a question has no expected keywords, `answer_quality_score` stands in for the keyword component.
 > * Python is authoritative for the final score and normal `NEXT_QUESTION` / `ASK_FOLLOW_UP` decision. `REPEAT_QUESTION` remains a conversational repeat path.
 
 **Follow-up evaluation:** carried via the same unified prompt — when a follow-up is in
