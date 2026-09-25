@@ -246,7 +246,6 @@ These are compatibility boundaries and should remain unchanged unless a failing 
 - `services/ai-core-services/src/screening_pipeline/persistence.py`
 - `services/ai-core-services/src/screening_pipeline/session_api.py`
 - `services/ai-core-services/src/screening_pipeline/evaluation_builders.py`
-- `services/ai-core-services/src/screening_pipeline/keyword_matcher.py`
 - `services/ai-core-services/src/screening_pipeline/prompt_builder.py`
 - `services/ai-core-services/src/screening_pipeline/prompts.py`
 - `services/ai-core-services/src/screening_pipeline/speech_filter.py`

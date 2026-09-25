@@ -1,3 +1,5 @@
+> **Update:** the Python keyword matcher (`keyword_matcher.py`, `calculate_keyword_coverage`) described below has since been removed. The LLM now returns `keyword_match_score` and the found/missing lists; Python only bounds and blends them. See `AI_PROCESSING.md` §5.3.
+
 # Screening Bot Latency Optimization Plan
 
 > **Status**: Phases 1–4 implemented and validated (see §4.8, §5.5, §6.6, §7.5).
