@@ -16,7 +16,7 @@ from src.screening_pipeline.evaluation_builders import (
     build_skip_evaluation,
 )
 from src.screening_pipeline.prompt_builder import screening_prompt_builder
-from src.screening_pipeline.prompts import UNIFIED_SCREENING_SYSTEM
+from src.screening_pipeline.prompts import FOLLOW_UP_SCORE_THRESHOLD, UNIFIED_SCREENING_SYSTEM
 
 _EVAL_FAILURE_FALLBACK = {
     "score": 0,
@@ -136,23 +136,28 @@ class AnswerEvaluator:
     def _apply_scores(
         eval_data: Dict[str, Any], expected_keywords: str
     ) -> Dict[str, Any]:
-        """Turn the LLM's keywords_found + answer_quality_score into the 50/50 final score.
+        """Combine the LLM's keyword_match_score and answer_quality_score into the 50/50 final score.
 
-        The LLM judges which expected keywords were covered; the application only
-        validates that list against the expected keywords and does the arithmetic
-        (coverage, final score, decision), so the score itself is never LLM-typed.
+        The LLM judges keyword coverage and returns its score directly. The
+        application only bounds it, cleans the keyword lists against the expected
+        keywords, and does the final blend and decision.
         """
         expected = _split_expected_keywords(expected_keywords)
         keywords_found = _resolve_keywords_found(eval_data.get("keywords_found"), expected)
         keywords_missing = [keyword for keyword in expected if keyword not in keywords_found]
-        coverage_percent = round(len(keywords_found) / len(expected) * 100) if expected else 100
 
         answer_quality_score = _coerce_score(
             eval_data.get("answer_quality_score", eval_data.get("score"))
         )
-        # With no expected keywords there is nothing to match, so the quality
-        # score stands in for the keyword component.
-        keyword_match_score = coverage_percent / 10 if expected else answer_quality_score
+        if not expected:
+            # Nothing to match, so the quality score stands in for the keyword component.
+            keyword_match_score = answer_quality_score
+        elif eval_data.get("keyword_match_score") is not None:
+            keyword_match_score = _coerce_score(eval_data["keyword_match_score"])
+        else:
+            # LLM omitted the score: fall back to its own keyword list.
+            keyword_match_score = round(len(keywords_found) / len(expected) * 10, 1)
+        coverage_percent = round(keyword_match_score * 10)
         final_score = round((keyword_match_score + answer_quality_score) / 2)
 
         eval_data["keywords_found"] = keywords_found
@@ -169,7 +174,9 @@ class AnswerEvaluator:
             )
             eval_data["is_sufficient"] = False
         else:
-            decision = "NEXT_QUESTION" if final_score >= 6 else "ASK_FOLLOW_UP"
+            decision = (
+                "NEXT_QUESTION" if final_score >= FOLLOW_UP_SCORE_THRESHOLD else "ASK_FOLLOW_UP"
+            )
             eval_data["decision"] = decision
             eval_data["is_sufficient"] = decision == "NEXT_QUESTION"
 
