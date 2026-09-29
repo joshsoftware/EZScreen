@@ -14,11 +14,22 @@ UNIFIED_SCREENING_SYSTEM = (
     "first classify intent, then \u2014 only if the candidate is answering \u2014 evaluate the answer.\n\n"
     "STEP 1 \u2014 INTENT (always classify exactly one):\n"
     "- ANSWERING: The candidate is attempting to answer the technical question. (Even if their answer is completely wrong, confusing, or poorly transcribed, if they are using technical terms or trying to answer, choose this!).\n"
-    "- CLARIFICATION: The candidate is asking you to repeat, clarify, or rephrase the question.\n"
-    "- SMALL_TALK: The candidate is ONLY asking for a moment to think (e.g. 'give me a second'), apologizing for a delay, confirming they are present (e.g. 'Yes I am here'), or responding to a greeting/closing. DO NOT use this for rambling. If classified as SMALL_TALK, provide a polite conversational response that encourages them or repeats the question to get them back on track.\n"
-    "- SKIP: The candidate explicitly states they do not know the answer and want to move on.\n\n"
+    "- CLARIFICATION: The candidate is asking you to repeat, clarify, or rephrase the question "
+    "(e.g. \"can you repeat that\", \"what was the question\", \"I didn't hear you\").\n"
+    "- SMALL_TALK: The candidate is ONLY asking for a moment to think (e.g. \"give me a second\", \"hold on\"), "
+    "apologizing for a delay, confirming they are present (e.g. \"Yes I am here\"), or responding to a greeting/closing. "
+    "DO NOT use this for rambling or for skip/next requests. "
+    "If classified as SMALL_TALK, provide a VERY short acknowledgement only "
+    "(e.g. \"Sure, take your time.\" / \"Okay.\"). "
+    "NEVER re-ask or restate the screening question in the response.\n"
+    "- SKIP: The candidate wants to leave this question and move on. Treat as SKIP when they say they do not know, "
+    "or explicitly ask to skip / pass / move on / go to the next question "
+    "(e.g. \"skip this question\", \"next question\", \"pass\", \"I don't know\", \"move on\").\n\n"
     "STEP 2 \u2014 RESPONSE (conditional):\n"
-    "- If intent is CLARIFICATION or SMALL_TALK: set \"response\" to a polite, brief conversational reply (per the STEP 1 guidance above).\n"
+    "- If intent is CLARIFICATION: set \"response\" to a brief confirmation that you will repeat "
+    "(e.g. \"Of course.\"). Do NOT include the question text here — the application repeats it.\n"
+    "- If intent is SMALL_TALK: set \"response\" to a polite, brief acknowledgement only "
+    "(one short sentence). Do NOT repeat or rephrase the interview question.\n"
     "- Otherwise: set \"response\" to \"\".\n\n"
     "STEP 3 \u2014 EVALUATION (only if intent is ANSWERING; omit all evaluation fields for every other intent):\n\n"
     "STRICTNESS DEFINITIONS:\n"
@@ -51,7 +62,9 @@ UNIFIED_SCREENING_SYSTEM = (
     "DECISION:\n"
     f"- \"NEXT_QUESTION\" if the balanced final score >= {FOLLOW_UP_SCORE_THRESHOLD} (candidate understood it well enough for screening).\n"
     f"- \"ASK_FOLLOW_UP\" if the balanced final score < {FOLLOW_UP_SCORE_THRESHOLD} (answer was too shallow or missed key concepts).\n"
-    "- \"REPEAT_QUESTION\" if the candidate asked you to repeat the question, or if their response was completely unrelated to the interview (e.g. \"I can't hear you\", \"Hold on a second\").\n\n"
+    "- \"REPEAT_QUESTION\" if the candidate asked you to repeat the question, or if their response was completely unrelated "
+    "to the interview content (e.g. \"I can't hear you\", audio issues). "
+    "Do NOT use REPEAT_QUESTION for thinking pauses like \"hold on\" / \"give me a second\" — those are SMALL_TALK.\n\n"
     "Return STRICT JSON only. No markdown:\n"
     "{\n"
     "  \"intent\": \"ANSWERING | CLARIFICATION | SMALL_TALK | SKIP\",\n"
@@ -110,20 +123,11 @@ FILLER_TEXTS = [
     "Just a moment, please.",
     "Okay, give me a second.",
 ]
-# Absolute seconds after the candidate stopped talking at which each
-# successive filler should fire — not gaps between them (see
-# PipecatInterviewPolicy._run_filler_schedule, which measures from
-# handle_candidate_speech_stopped, not from when the LLM call happens to
-# start, and can fire *during* the ANSWER_SETTLE_SECONDS wait, not only after
-# it — a candidate resuming speech mid-settle already gets the same
-# InterruptionFrame barge-in as any other bot utterance, so there's no
-# safety reason to hold the first filler back until settle ends). Loosens up
-# over time so a quick early reassurance doesn't turn into a repetitive,
-# noticeable beat on a genuinely long wait. The task is cancelled (see
-# _cancel_filler_schedule) the instant classify_and_evaluate resolves, so a
-# filler never overlaps the real response that follows; once this list is
-# exhausted with no result yet, the policy just keeps waiting silently.
-FILLER_SCHEDULE_SECONDS = [1.5, 4.5, 8.0]
+# Absolute seconds after evaluate/LLM wait *starts* (not VAD-stop, not settle)
+# at which each successive filler may fire. Prefer a single late offset so
+# settle never gets a filler, and at most one reassurance plays per turn.
+# The schedule task is cancelled when classify_and_evaluate resolves.
+FILLER_SCHEDULE_SECONDS = [1.0]
 
 # How often _end_after_inactivity rechecks whether the candidate has stopped
 # talking, while they're still mid-answer past SILENCE_PROMPT_SECONDS. A

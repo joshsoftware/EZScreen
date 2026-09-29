@@ -4,7 +4,11 @@ from src.screening_pipeline.evaluation_builders import (
     build_skip_evaluation,
 )
 from src.screening_pipeline.prompt_builder import screening_prompt_builder
-from src.screening_pipeline.prompts import FOLLOW_UP_SCORE_THRESHOLD, UNIFIED_SCREENING_SYSTEM
+from src.screening_pipeline.prompts import (
+    FILLER_SCHEDULE_SECONDS,
+    FOLLOW_UP_SCORE_THRESHOLD,
+    UNIFIED_SCREENING_SYSTEM,
+)
 from src.screening_pipeline.speech_filter import is_probable_hallucination
 
 
@@ -132,12 +136,25 @@ def test_unified_system_classifies_intent_before_gating_evaluation():
     assert "CLARIFICATION" in UNIFIED_SCREENING_SYSTEM
     assert "SMALL_TALK" in UNIFIED_SCREENING_SYSTEM
     assert "SKIP" in UNIFIED_SCREENING_SYSTEM
+    assert "skip this question" in UNIFIED_SCREENING_SYSTEM
+    assert "next question" in UNIFIED_SCREENING_SYSTEM
+    assert "NEVER re-ask or restate the screening question" in UNIFIED_SCREENING_SYSTEM
     assert "only if intent is ANSWERING" in UNIFIED_SCREENING_SYSTEM
     assert '"intent": "ANSWERING | CLARIFICATION | SMALL_TALK | SKIP"' in UNIFIED_SCREENING_SYSTEM
+
+
+def test_filler_schedule_is_single_post_settle_offset():
+    assert FILLER_SCHEDULE_SECONDS == [1.0]
 
 
 def test_is_probable_hallucination_filters_noise():
     assert is_probable_hallucination("thank you") is True
     assert is_probable_hallucination("Thanks for watching!") is True
     assert is_probable_hallucination("a") is True
+    assert is_probable_hallucination("okay") is True
+    assert is_probable_hallucination("Okay.") is True
+    assert is_probable_hallucination("OK") is True
+    assert is_probable_hallucination("hmm") is True
+    assert is_probable_hallucination("um") is True
     assert is_probable_hallucination("Docker isolates processes in containers") is False
+    assert is_probable_hallucination("skip this question") is False

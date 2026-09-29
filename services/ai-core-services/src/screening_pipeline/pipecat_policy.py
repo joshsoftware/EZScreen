@@ -90,13 +90,11 @@ class PipecatInterviewPolicy:
         # _end_after_inactivity / handle_candidate_speech_stopped).
         self._candidate_speaking = False
         self._last_filler_text: Optional[str] = None
-        # Set by handle_candidate_speech_stopped (or, as a fallback,
-        # _process_after_answer_settles) to the moment the candidate's speech
-        # was received; read (and cleared) by _start_filler_schedule to
-        # back-date the filler schedule. None outside a turn in progress.
-        self._turn_started_at: Optional[float] = None
-        # Runs for the settle-wait + classify_and_evaluate span of a turn;
-        # see _start_filler_schedule / _cancel_filler_schedule / _run_filler_schedule.
+        # True while a filler TTS utterance is in flight — used to ignore
+        # VAD echo spikes that would otherwise cancel evaluation.
+        self._filler_playing = False
+        # Runs for the classify_and_evaluate wait only (not during settle).
+        # See _start_filler_schedule / _cancel_filler_schedule / _run_filler_schedule.
         self._filler_task: Optional[asyncio.Task] = None
 
 
@@ -324,6 +322,11 @@ class PipecatInterviewPolicy:
         if self.current_interaction_state == "closing":
             self._cancel_closing_reply_timeout(reason="closing reply detected by VAD")
             return
+        # Bot filler audio often echoes into the mic. Treat that as noise:
+        # keep evaluation running, just stop further fillers.
+        if self._filler_playing:
+            self._cancel_filler_schedule()
+            return
         if self.current_interaction_state == "evaluating":
             self._cancel_processing()
             self.current_interaction_state = "collecting_answer"
@@ -338,6 +341,9 @@ class PipecatInterviewPolicy:
         reset handle_candidate_activity does on speech start, so a candidate
         who just finished a long answer isn't immediately treated as having
         gone silent 30 seconds ago.
+
+        Also restarts settle when barge-in cancelled it but buffered answer
+        text remains (so mid-answer pauses don't strand the turn).
         """
         if not self.is_active:
             return
@@ -345,14 +351,17 @@ class PipecatInterviewPolicy:
         now = asyncio.get_running_loop().time()
         self._last_candidate_activity_at = now
         self._inactivity_cycle_started_at = now
-        # Earliest available proxy for "the candidate stopped talking" — well
-        # before STT finalizes a transcript and handle_candidate_speech even
-        # runs. _start_filler_schedule measures FILLER_SCHEDULE_SECONDS from
-        # here, so STT latency counts against that schedule instead of the
-        # first filler landing STT + FILLER_SCHEDULE_SECONDS[0] after the
-        # candidate actually stopped. Overwritten by every VAD stop, so only
-        # the final one before real processing starts is ever used.
-        self._turn_started_at = now
+        settle_done = (
+            self._answer_settle_task is None or self._answer_settle_task.done()
+        )
+        if (
+            self.current_interaction_state == "collecting_answer"
+            and self._answer_buffer
+            and settle_done
+        ):
+            self._answer_settle_task = asyncio.create_task(
+                self._process_after_answer_settles()
+            )
 
     def _begin_listening(self):
         """Enter an eligible listening turn and start its hard inactivity deadline."""
@@ -453,28 +462,14 @@ class PipecatInterviewPolicy:
             return
 
     async def _process_after_answer_settles(self):
-        # Normally already set by handle_candidate_speech_stopped (VAD
-        # confirming the candidate stopped talking, before STT even finalizes
-        # a transcript) — this is only a fallback for callers that push a
-        # transcript without a preceding VAD-stop event (e.g. direct
-        # handle_candidate_speech calls in tests). _start_filler_schedule
-        # reads it so FILLER_SCHEDULE_SECONDS is measured from here, already
-        # accounting for STT latency and (per _run_filler_schedule) able to
-        # fire during the settle wait itself, not just after it.
-        if self._turn_started_at is None:
-            self._turn_started_at = asyncio.get_running_loop().time()
-        # Started now, before the settle sleep below, so a filler can land
-        # during settle if the schedule calls for it — safe because a
-        # candidate resuming speech mid-settle already triggers the same
-        # InterruptionFrame barge-in handling any other bot utterance gets
-        # (see handle_candidate_activity), regardless of current_interaction_state.
-        # Cancelled in the finally below for every path that doesn't reach
-        # classify_and_evaluate (see _process_speech), and again there right
-        # after that call resolves — a filler must never overlap real speech.
-        self._start_filler_schedule()
+        # Fillers are NOT armed here — they start only once evaluate begins
+        # (see _process_speech) so settle never gets stacked "one moment" audio.
         try:
             await asyncio.sleep(ANSWER_SETTLE_SECONDS)
             if not self.is_active or self.current_interaction_state != "collecting_answer":
+                return
+            # Candidate resumed speaking during settle; wait for the next stop.
+            if self._candidate_speaking:
                 return
             transcript = " ".join(part for part in self._answer_buffer if part).strip()
             if not transcript:
@@ -485,8 +480,6 @@ class PipecatInterviewPolicy:
             await self._processing_task
         except asyncio.CancelledError:
             return
-        finally:
-            self._cancel_filler_schedule()
 
     # ──────────────────────────── MAIN PROCESSING ────────────────────────────
 
@@ -530,6 +523,8 @@ class PipecatInterviewPolicy:
         if self.transcript_log and self.transcript_log[-1].get("follow_ups"):
             follow_up_context = self.transcript_log[-1]["follow_ups"]
 
+        # Arm fillers only for the LLM wait (after settle), not during settle.
+        self._start_filler_schedule()
         try:
             result = await self.evaluator.classify_and_evaluate(
                 current_question=current_q,
@@ -545,7 +540,11 @@ class PipecatInterviewPolicy:
         intent = result.get("intent", "ANSWERING")
 
         if intent in ["CLARIFICATION", "SMALL_TALK"]:
-            await self._handle_conversational(transcript, result.get("response", ""))
+            await self._handle_conversational(
+                transcript,
+                result.get("response", ""),
+                intent=intent,
+            )
             return
 
         if intent == "SKIP":
@@ -556,10 +555,20 @@ class PipecatInterviewPolicy:
 
     # ──────────────────────────── INTENT HANDLERS ────────────────────────────
 
-    async def _handle_conversational(self, transcript: str, ai_response: str):
+    async def _handle_conversational(
+        self,
+        transcript: str,
+        ai_response: str,
+        *,
+        intent: str = "SMALL_TALK",
+    ):
         """Handles CLARIFICATION and SMALL_TALK intents."""
         if not ai_response or not str(ai_response).strip():
-            ai_response = "Okay, sounds good."
+            ai_response = (
+                "Of course."
+                if intent == "CLARIFICATION"
+                else "Sure, take your time."
+            )
 
         if self.transcript_log:
             self.transcript_log[-1].setdefault("conversational_turns", []).append(
@@ -570,6 +579,21 @@ class PipecatInterviewPolicy:
             )
 
         await self.speak(ai_response)
+        if intent == "CLARIFICATION":
+            question_obj = getattr(self, "current_question_obj", {}) or {}
+            question_text = question_obj.get("question", "")
+            if question_text:
+                interaction = self.transcript_log[-1] if self.transcript_log else None
+                repeat_count = (
+                    interaction.get("question_repeat_count", 0) if interaction else 0
+                )
+                if repeat_count < 1:
+                    if interaction:
+                        interaction["question_repeat_count"] = repeat_count + 1
+                    await self.speak(REPEAT_QUESTION_PREFIX_TEXT)
+                    await self.speak(question_text)
+                else:
+                    await self.speak(REPEAT_QUESTION_LIMIT_TEXT)
         # A request for time is still a response turn. Never leave a session
         # indefinitely waiting after conversational speech.
         self._begin_listening()
@@ -856,19 +880,23 @@ class PipecatInterviewPolicy:
         """Speak a short filler phrase without changing current_interaction_state.
 
         Unlike speak(), this deliberately leaves current_interaction_state
-        untouched: fillers can play during "collecting_answer" (settle) or
-        "evaluating" (see _run_filler_schedule), and handle_candidate_activity
-        relies on that state to cancel the in-flight LLM call on barge-in
-        during "evaluating". If a filler flipped the state to "speaking", a
-        candidate interrupting while a filler plays would be missed.
+        untouched: fillers play during "evaluating", and handle_candidate_activity
+        relies on that state to cancel the in-flight LLM call on real barge-in.
+        If a filler flipped the state to "speaking", a candidate interrupting
+        while a filler plays would be missed. Echo during filler is ignored
+        via _filler_playing instead.
         """
         logger.info("AI speaking filler", extra={"text": text})
         if self.speech_output is None:
             raise RuntimeError("Pipecat speech output is not configured")
-        await self.speech_output(text)
+        self._filler_playing = True
+        try:
+            await self.speech_output(text)
+        finally:
+            self._filler_playing = False
 
     def _start_filler_schedule(self) -> None:
-        """Arm the filler schedule for this turn. See _run_filler_schedule."""
+        """Arm the filler schedule for this LLM wait. See _run_filler_schedule."""
         self._cancel_filler_schedule()
         self._filler_task = asyncio.create_task(self._run_filler_schedule())
 
@@ -880,30 +908,23 @@ class PipecatInterviewPolicy:
         if task and not task.done() and task is not asyncio.current_task():
             task.cancel()
         self._filler_task = None
+        self._filler_playing = False
 
     async def _run_filler_schedule(self) -> None:
-        """Speak a short random filler ("Alright, one moment.", ...) at each
-        offset in FILLER_SCHEDULE_SECONDS, measured from when the candidate
-        stopped talking — not from whatever moment this task happened to
-        start — so it doesn't drift later just because a filler itself took a
-        moment to speak. Runs independently of settle/classify_and_evaluate;
-        the caller cancels it (see _cancel_filler_schedule) the instant a real
-        response is known, whether that's immediately (closing/greeting
-        replies never need a filler at all) or after the LLM call resolves.
-        Deliberately allowed to fire *during* the settle wait, not only after
-        it: a candidate resuming speech mid-settle already triggers the same
-        InterruptionFrame barge-in handling as any other bot utterance (see
-        handle_candidate_activity), so there's no dead-air-vs-safety tradeoff
-        in starting the clock this early.
+        """Speak at most one short filler after FILLER_SCHEDULE_SECONDS[0]
+        into the classify_and_evaluate wait.
+
+        Measured from schedule start (evaluate begin), never from VAD-stop,
+        so settle never gets filler audio. Cancelled when the LLM returns.
         """
         loop = asyncio.get_running_loop()
-        started_at = self._turn_started_at
-        self._turn_started_at = None
-        reference_time = started_at if started_at is not None else loop.time()
+        reference_time = loop.time()
         for offset in FILLER_SCHEDULE_SECONDS:
             timeout = max(0.0, (reference_time + offset) - loop.time())
             await asyncio.sleep(timeout)
             await self._speak_filler(self._pick_random_filler())
+            # At most one filler per turn (even if schedule has more offsets).
+            return
 
     def _pick_random_filler(self) -> str:
         """Random filler text, never repeating the one spoken immediately before."""

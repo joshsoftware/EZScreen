@@ -39,7 +39,8 @@ from src.screening_pipeline.prompts import (
 
 def test_interview_timing_and_prompt_contract_is_explicit():
     assert GREETING_TEXT == (
-        "Hi! I am your interviewer for today's interview. Let's start with some technical questions."
+        "Hi! I am your interviewer for today's interview. We’ll begin with a few "
+        "technical questions. Let me know when you’re ready."
     )
     assert CLOSING_TEXT == (
         "Thank you for your time today. Our HR team will be in touch shortly."
@@ -322,8 +323,8 @@ def test_pipecat_whisper_adapter_uses_segmented_stt():
 def test_pipecat_runtime_waits_for_the_configured_turn_end_silence_before_finalizing_an_answer():
     runtime = PipecatInterviewRuntime(MagicMock(), "session-id")
 
-    assert SCREENING_TURN_END_SILENCE_SECONDS == 1.5
-    assert runtime.vad._vad_controller._vad_analyzer.params.stop_secs == 1.5
+    assert SCREENING_TURN_END_SILENCE_SECONDS == 2.5
+    assert runtime.vad._vad_controller._vad_analyzer.params.stop_secs == 2.5
 
 
 @pytest.mark.asyncio
@@ -584,6 +585,7 @@ async def test_filler_schedule_speaks_a_filler_once_its_offset_elapses(monkeypat
 
 @pytest.mark.asyncio
 async def test_filler_schedule_stops_after_its_last_offset(monkeypatch):
+    """Even if multiple offsets are configured, policy speaks at most one filler."""
     monkeypatch.setattr(
         "src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [0.01, 0.03]
     )
@@ -595,26 +597,20 @@ async def test_filler_schedule_stops_after_its_last_offset(monkeypatch):
     policy._start_filler_schedule()
     await asyncio.sleep(0.06)  # past both scheduled offsets
 
-    assert speech_output.await_count == 2
+    assert speech_output.await_count == 1
 
-    # A genuinely hung call must not get a third filler just because more
-    # time passes — the schedule is exhausted, so it now waits silently.
     await asyncio.sleep(0.05)
-    assert speech_output.await_count == 2
+    assert speech_output.await_count == 1
 
     policy._cancel_filler_schedule()
 
 
 @pytest.mark.asyncio
-async def test_filler_schedule_uses_absolute_offsets_not_relative_gaps(monkeypatch):
-    """FILLER_SCHEDULE_SECONDS are absolute seconds since the candidate
-    stopped talking, not gaps between fillers — so time actually spent
-    speaking a filler must not push later ones back. Simulates a "slow"
-    filler (speech_output takes real time, like real TTS playback would) and
-    checks the second filler still lands close to its own absolute target
-    instead of drifting by the first filler's playback time."""
+async def test_filler_schedule_uses_absolute_offsets_from_schedule_start(monkeypatch):
+    """FILLER_SCHEDULE_SECONDS are absolute seconds since the filler schedule
+    started (evaluate/LLM wait), not from VAD-stop."""
     monkeypatch.setattr(
-        "src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [0.05, 0.25]
+        "src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [0.05]
     )
     speech_output = AsyncMock()
     loop = asyncio.get_running_loop()
@@ -622,7 +618,7 @@ async def test_filler_schedule_uses_absolute_offsets_not_relative_gaps(monkeypat
 
     async def slow_speech_output(text: str) -> None:
         call_times.append(loop.time())
-        await asyncio.sleep(0.1)  # simulate real filler playback time
+        await asyncio.sleep(0.02)
 
     speech_output.side_effect = slow_speech_output
     policy = PipecatInterviewPolicy(
@@ -631,13 +627,10 @@ async def test_filler_schedule_uses_absolute_offsets_not_relative_gaps(monkeypat
 
     started_at = loop.time()
     policy._start_filler_schedule()
-    await asyncio.sleep(0.4)
+    await asyncio.sleep(0.2)
 
-    assert len(call_times) == 2
+    assert len(call_times) == 1
     assert (call_times[0] - started_at) < 0.15
-    # Despite the first filler taking 0.1s to "speak", the second still
-    # lands close to its absolute 0.25s target — not 0.05 + 0.1 + 0.25.
-    assert (call_times[1] - started_at) < 0.35
 
     policy._cancel_filler_schedule()
 
@@ -662,14 +655,8 @@ async def test_cancel_filler_schedule_stops_it_cleanly_mid_wait(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_filler_can_fire_during_the_settle_wait_itself(monkeypatch):
-    """A filler is no longer held back until the settle wait ends — it fires
-    at its own FILLER_SCHEDULE_SECONDS offset from VAD-stop even if that
-    lands *during* settle. Safe because a candidate resuming speech mid-settle
-    already gets the same InterruptionFrame barge-in as any other bot
-    utterance (see handle_candidate_activity), regardless of
-    current_interaction_state — there's no dead-air-vs-safety tradeoff in
-    starting the clock this early."""
+async def test_filler_does_not_fire_during_the_settle_wait(monkeypatch):
+    """Fillers arm only after settle, once evaluate/LLM wait begins."""
     monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.2)
     monkeypatch.setattr(
         "src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [0.05]
@@ -690,17 +677,12 @@ async def test_filler_can_fire_during_the_settle_wait_itself(monkeypatch):
     policy.handle_candidate_speech_stopped()
     policy.handle_candidate_speech("I need a moment")
 
-    # Still well inside the 0.2s settle wait — the transcript hasn't even
-    # been finalized into a classify_and_evaluate call yet.
+    # Still inside settle — no filler should have fired yet.
     await asyncio.sleep(0.08)
-
-    assert speech_output.await_args_list
-    assert speech_output.await_args_list[0].args[0] in FILLER_TEXTS
+    speech_output.assert_not_awaited()
     assert policy.current_interaction_state == "collecting_answer"
+    assert policy._filler_task is None
 
-    # _process_after_answer_settles catches its own cancellation and returns
-    # normally (see handle_candidate_activity's use of _cancel_answer_settle),
-    # so this awaits cleanly rather than raising.
     task = policy._answer_settle_task
     policy._cancel_answer_settle()
     await task
@@ -709,9 +691,7 @@ async def test_filler_can_fire_during_the_settle_wait_itself(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fast_llm_response_after_settle_gets_no_filler(monkeypatch):
-    """A fast enough LLM response — settle plus the call together still
-    finishing before the first schedule offset elapses — must get no filler
-    at all, not even one."""
+    """A fast LLM response after settle must get no filler at all."""
     monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.05)
     monkeypatch.setattr(
         "src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [0.15]
@@ -720,7 +700,7 @@ async def test_fast_llm_response_after_settle_gets_no_filler(monkeypatch):
     evaluator = MagicMock()
 
     async def fast_classify(**kwargs):
-        await asyncio.sleep(0.03)  # settle (0.05) + this (0.03) < offset (0.15)
+        await asyncio.sleep(0.03)  # LLM wait (0.03) < offset (0.15)
         return {"intent": "SMALL_TALK", "response": "noted"}
 
     evaluator.classify_and_evaluate = fast_classify
@@ -729,9 +709,14 @@ async def test_fast_llm_response_after_settle_gets_no_filler(monkeypatch):
     )
     policy.is_active = True
     policy.current_interaction_state = "listening"
+    # Seed a question interaction so SMALL_TALK is not treated as greeting.
+    policy.transcript_log.append(
+        {"interaction_type": "question", "bot_speech": "What is Docker?", "candidate_answer": ""}
+    )
+    policy.current_question_obj = {"question": "What is Docker?", "expected_keywords": []}
 
     policy.handle_candidate_speech_stopped()
-    policy.handle_candidate_speech("Okay")
+    policy.handle_candidate_speech("hold on a second")
     await policy._answer_settle_task
 
     # Exactly the real response — proves no filler was ever spoken first.
@@ -740,10 +725,7 @@ async def test_fast_llm_response_after_settle_gets_no_filler(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_filler_schedule_is_cancelled_the_instant_classify_and_evaluate_resolves(monkeypatch):
-    """Once classify_and_evaluate resolves, no further filler must ever fire
-    — even though later FILLER_SCHEDULE_SECONDS offsets haven't elapsed yet,
-    they must never overlap the real response that follows (see the
-    try/finally around the classify_and_evaluate call in _process_speech)."""
+    """Once classify_and_evaluate resolves, no further filler must ever fire."""
     monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.01)
     monkeypatch.setattr(
         "src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [0.02, 0.05, 0.08]
@@ -762,19 +744,23 @@ async def test_filler_schedule_is_cancelled_the_instant_classify_and_evaluate_re
     )
     policy.is_active = True
     policy.current_interaction_state = "listening"
+    policy.transcript_log.append(
+        {"interaction_type": "question", "bot_speech": "What is Docker?", "candidate_answer": ""}
+    )
+    policy.current_question_obj = {"question": "What is Docker?", "expected_keywords": []}
 
     policy.handle_candidate_speech_stopped()
-    policy.handle_candidate_speech("Okay")
+    policy.handle_candidate_speech("give me a second")
 
-    await asyncio.sleep(0.03)  # let the first offset (0.02) fire
+    # Let settle finish and first filler offset fire during LLM wait.
+    await asyncio.sleep(0.05)
+    assert speech_output.await_args_list
     assert speech_output.await_args_list[0].args[0] in FILLER_TEXTS
     fillers_before_release = speech_output.await_count
 
     release.set()
     await policy._answer_settle_task
 
-    # Only the real response was added after release — no fillers snuck in
-    # past that point even though 0.05 / 0.08 were still ahead on the schedule.
     assert speech_output.await_count == fillers_before_release + 1
     assert speech_output.await_args_list[-1].args[0] == "noted"
 
@@ -923,3 +909,140 @@ async def test_silence_prompt_fires_after_candidate_actually_stops(monkeypatch):
     assert speech_output.await_args_list[0].args[0] == SILENCE_PROMPT_TEXT
 
     policy._cancel_inactivity_deadline()
+
+
+@pytest.mark.asyncio
+async def test_speech_stopped_restarts_settle_after_barge_in_cancelled_it(monkeypatch):
+    """If VAD barge-in cancels settle but answer text remains buffered, speech
+    stop must restart settle so the turn is not stranded."""
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.05)
+    evaluator = MagicMock()
+
+    async def classify(**kwargs):
+        return {"intent": "SMALL_TALK", "response": "got it"}
+
+    evaluator.classify_and_evaluate = classify
+    speech_output = AsyncMock()
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=evaluator, speech_output=speech_output
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "listening"
+    policy.transcript_log.append(
+        {"interaction_type": "question", "bot_speech": "Q?", "candidate_answer": ""}
+    )
+    policy.current_question_obj = {"question": "Q?", "expected_keywords": []}
+
+    policy.handle_candidate_speech("first part of my answer")
+    assert policy._answer_settle_task is not None
+    settle_task = policy._answer_settle_task
+
+    # Mid-settle barge-in cancels settle and leaves buffer in place.
+    policy.handle_candidate_activity()
+    with pytest.raises(asyncio.CancelledError):
+        await settle_task
+    assert policy._answer_buffer
+    assert policy.current_interaction_state == "collecting_answer"
+    assert policy._answer_settle_task is None or policy._answer_settle_task.done()
+
+    policy.handle_candidate_speech_stopped()
+    assert policy._answer_settle_task is not None
+    assert not policy._answer_settle_task.done()
+
+    await policy._answer_settle_task
+    speech_output.assert_awaited_with("got it")
+
+
+@pytest.mark.asyncio
+async def test_filler_echo_does_not_cancel_evaluation(monkeypatch):
+    """VAD activity while a filler is playing must not cancel classify_and_evaluate."""
+    monkeypatch.setattr(
+        "src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [10.0]
+    )
+    evaluator = MagicMock()
+    release = asyncio.Event()
+
+    async def classify(**kwargs):
+        await release.wait()
+        return {
+            "intent": "ANSWERING",
+            "keyword_match_score": 8,
+            "answer_quality_score": 8,
+            "decision": "NEXT_QUESTION",
+            "keywords_found": [],
+            "keywords_missing": [],
+            "feedback": "ok",
+        }
+
+    evaluator.classify_and_evaluate = classify
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=evaluator, speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "evaluating"
+    policy._processing_task = asyncio.create_task(classify())
+    policy._filler_playing = True
+
+    policy.handle_candidate_activity()
+
+    assert policy.current_interaction_state == "evaluating"
+    assert policy._processing_task is not None
+    assert not policy._processing_task.done()
+
+    release.set()
+    await policy._processing_task
+
+
+@pytest.mark.asyncio
+async def test_skip_intent_advances_to_next_question(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.01)
+    speech_output = AsyncMock()
+    evaluator = MagicMock()
+
+    async def classify(**kwargs):
+        return {"intent": "SKIP", "response": ""}
+
+    evaluator.classify_and_evaluate = classify
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=evaluator, speech_output=speech_output
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "listening"
+    policy.questions = [
+        {"question": "Q1", "expected_keywords": ["a"]},
+        {"question": "Q2", "expected_keywords": ["b"]},
+    ]
+    policy.current_question_idx = 0
+    policy.current_question_obj = policy.questions[0]
+    policy.transcript_log.append(
+        {
+            "interaction_type": "question",
+            "bot_speech": "Q1",
+            "candidate_answer": "",
+        }
+    )
+    policy.api_client = MagicMock()
+    policy._schedule_persist = MagicMock()
+    policy._ask_next_question = AsyncMock()
+
+    policy.handle_candidate_speech_stopped()
+    policy.handle_candidate_speech("skip this question")
+    await policy._answer_settle_task
+
+    assert policy.current_question_idx == 1
+    policy._ask_next_question.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_probable_hallucination_is_ignored_without_starting_settle():
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "listening"
+
+    policy.handle_candidate_speech("Okay.")
+
+    assert policy._answer_buffer == []
+    assert policy._answer_settle_task is None
+    assert policy.current_interaction_state == "listening"
