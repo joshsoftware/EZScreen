@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import audioop
+import importlib.util
 from typing import Callable
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
     InputAudioRawFrame,
     InterruptionFrame,
@@ -16,6 +19,8 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
+from pipecat.audio.filters.rnnoise_filter import RNNoiseFilter
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
@@ -42,12 +47,23 @@ from src.screening_pipeline.tts_prewarm import tts_prewarm_registry
 SCREENING_TURN_END_SILENCE_SECONDS = settings.screening_turn_end_silence_seconds
 
 
+def _build_noise_filter() -> BaseAudioFilter | None:
+    """Return the RNNoise denoiser for candidate audio, or None if unavailable."""
+    if not settings.screening_noise_suppression_enabled:
+        return None
+    if importlib.util.find_spec("pyrnnoise") is None:
+        logger.warning("pyrnnoise is not installed; candidate audio will not be denoised")
+        return None
+    return RNNoiseFilter()
+
+
 class AttendeeInputProcessor(FrameProcessor):
     """Accept decoded Attendee PCM and inject it into a Pipecat pipeline."""
 
-    def __init__(self):
+    def __init__(self, audio_filter: BaseAudioFilter | None = None):
         super().__init__(name="attendee-input")
         self.ready = asyncio.Event()
+        self._audio_filter = audio_filter
 
     async def push_audio(self, pcm_bytes: bytes, sample_rate: int) -> None:
         if not self.ready.is_set():
@@ -57,6 +73,18 @@ class AttendeeInputProcessor(FrameProcessor):
             pcm_bytes, _state = audioop.ratecv(
                 pcm_bytes, 2, 1, sample_rate, 16000, None
             )
+        if self._audio_filter is not None:
+            # Denoise ahead of VAD and STT so both see the cleaned signal. The
+            # filter works in 10ms RNNoise frames and returns b"" while buffering.
+            try:
+                pcm_bytes = await self._audio_filter.filter(pcm_bytes)
+            except Exception:
+                # A denoiser failure must not end the interview: log once, then
+                # carry on with raw audio for the rest of the session.
+                logger.exception("Noise suppression failed; continuing without it")
+                self._audio_filter = None
+            if not pcm_bytes:
+                return
         await self.push_frame(
             InputAudioRawFrame(
                 audio=pcm_bytes,
@@ -69,7 +97,11 @@ class AttendeeInputProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
+            if self._audio_filter is not None:
+                await self._audio_filter.start(16000)
             self.ready.set()
+        elif isinstance(frame, (EndFrame, CancelFrame)) and self._audio_filter is not None:
+            await self._audio_filter.stop()
         await self.push_frame(frame, direction)
 
 
@@ -127,14 +159,18 @@ class PipecatInterviewRuntime:
     def __init__(self, websocket, session_id: str):
         self.websocket = websocket
         self.session_id = session_id
-        self.input = AttendeeInputProcessor()
+        self.input = AttendeeInputProcessor(audio_filter=_build_noise_filter())
         self.policy = PipecatInterviewPolicy(
             session_id=session_id,
         )
         self.vad = VADProcessor(
             vad_analyzer=SileroVADAnalyzer(
                 sample_rate=16000,
-                params=VADParams(stop_secs=SCREENING_TURN_END_SILENCE_SECONDS),
+                params=VADParams(
+                    confidence=settings.screening_vad_confidence,
+                    stop_secs=SCREENING_TURN_END_SILENCE_SECONDS,
+                    min_volume=settings.screening_vad_min_volume,
+                ),
             )
         )
         self.stt = WhisperHttpSTTService(sample_rate=16000)

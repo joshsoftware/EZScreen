@@ -283,6 +283,45 @@ Implementation:
   shows cut-off answers or a rise in `REPEAT_QUESTION`/short-answer follow-ups, dial the
   two env vars back up first before touching code — no redeploy needed.
 
+### 5.6 Addendum — background noise and quiet-voice rejection
+
+Silero VAD fires on any human voice, so a TV or a person in the candidate's room
+extends the answer deadline, interrupts bot audio and feeds junk to Whisper. Two changes
+(`pipecat_runtime.py`):
+
+1. **RNNoise denoiser** (`pipecat-ai[rnnoise]`, `SCREENING_NOISE_SUPPRESSION_ENABLED`)
+   applied in `AttendeeInputProcessor.push_audio` after resampling to 16 kHz, so both VAD
+   and Whisper see the cleaned signal. Cost: ~10 ms fixed delay, ~10% of one CPU core per
+   active interview (runs on the event loop, ~2 ms per 20 ms chunk). Falls back to raw
+   audio if `pyrnnoise` is missing or the filter raises.
+2. **`min_volume` 0.6 → 0.65** (`SCREENING_VAD_MIN_VOLUME`). `confidence`
+   (`SCREENING_VAD_CONFIDENCE`) stays at 0.7.
+
+Measured offline with Kokoro-synthesized speech (4 utterances) mixed at fixed levels,
+RNNoise on, `start_secs=0.2`. Lag = speech onset → VAD "started speaking":
+
+| `min_volume` | lag, normal / −10 dB / −18 dB | speech detected at −18 dB* | 20 dB-quieter background voice | 28 dB-quieter background voice |
+|---|---|---|---|---|
+| 0.60 (old) | 0.49 / 0.53 / 0.74 s | 74% | 6 events | 7 events |
+| **0.65** | 0.52 / 0.67 / 0.76 s | 72% | 6 events | **0** |
+| 0.70 | 0.53 / 0.76 / 0.96 s | 39% | 3 events | 0 |
+| 0.75 | 0.67 / 0.78 / missed | 0% | 0 | 0 |
+
+\* Share of the utterance's duration that VAD reports as speaking (~77% at normal level
+for every setting). "Events" are separate speech-start events over two background clips.
+
+- **Do not raise `start_secs` to 0.3**: it delayed speech start by ~0.3 s (0.49 → 0.78 s)
+  because the 0.3 s run of speech frames resets on any dip, and did not reject more.
+  `SegmentedSTTService` only keeps a 1 s pre-speech buffer, so start lag beyond ~1 s
+  clips the first word.
+- **`confidence` 0.8 did not help** against voices (Silero is confident on any speech).
+- RNNoise alone barely changes VAD lag; it removes steady noise and mildly attenuates
+  background voices (6 vs 9 events at −20 dB).
+- A second speaker at similar volume to the candidate is not rejected by any of this;
+  that needs speaker isolation (per-participant audio or a speaker-embedding gate).
+- Same gap as §5.5: synthetic speech, not real meeting audio. Tune `SCREENING_VAD_MIN_VOLUME`
+  (0.65–0.7) against real staging sessions.
+
 ---
 
 ## 6. Phase 3 — Async Core API persistence — implemented

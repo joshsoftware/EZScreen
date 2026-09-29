@@ -72,6 +72,24 @@ class Settings(BaseSettings):
     # floor is 1.5s — do not go lower without UX sign-off.
     screening_answer_settle_seconds: float = 2.0
 
+    # Background noise / quiet-voice rejection. Pipecat's defaults are
+    # confidence=0.7, min_volume=0.6.
+    # Silero confidence needed to count a frame as speech. Raising it (0.8) did
+    # not reject background voices in testing; only useful against non-speech
+    # noise such as music.
+    screening_vad_confidence: float = 0.7
+    # Loudness gate over a 400ms window, mapped from -110..-10 LUFS to 0..1
+    # (0.6 = -50 LUFS, normal speech is ~0.85+). This is the lever that rejects
+    # quieter background voices. 0.65 drops voices ~28 dB below the candidate at
+    # no cost to quiet candidates; 0.7 mostly drops ~20 dB voices too, but halves
+    # detected speech for very quiet candidates and delays their speech start by
+    # ~0.2s; 0.75+ misses very quiet candidates entirely.
+    # A second speaker at similar volume cannot be rejected by volume alone.
+    screening_vad_min_volume: float = 0.65
+    # RNNoise denoising of candidate audio ahead of VAD and Whisper. Costs
+    # roughly 10% of one CPU core per active interview and ~10ms of delay.
+    screening_noise_suppression_enabled: bool = True
+
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),
         env_file_encoding="utf-8",

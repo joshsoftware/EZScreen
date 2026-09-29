@@ -1,13 +1,18 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import numpy as np
 import pytest
 from pipecat.frames.frames import (
+    InputAudioRawFrame,
     TTSSpeakFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from src.screening_pipeline.interview_policy import InterviewPolicy
 from src.screening_pipeline.persistence import persist_qa_and_evaluation
@@ -19,6 +24,7 @@ from src.screening_pipeline.pipecat_runtime import (
     InterviewPolicyProcessor,
     PipecatInterviewRuntime,
     SCREENING_TURN_END_SILENCE_SECONDS,
+    _build_noise_filter,
 )
 from src.screening_pipeline.pipecat_transport import SpeechCompleteFrame
 from src.screening_pipeline.prompts import (
@@ -324,6 +330,173 @@ def test_pipecat_runtime_waits_for_the_configured_turn_end_silence_before_finali
 
     assert SCREENING_TURN_END_SILENCE_SECONDS == 1.5
     assert runtime.vad._vad_controller._vad_analyzer.params.stop_secs == 1.5
+
+
+def test_pipecat_runtime_vad_gates_out_quiet_background_voices():
+    runtime = PipecatInterviewRuntime(MagicMock(), "session-id")
+
+    params = runtime.vad._vad_controller._vad_analyzer.params
+
+    # Pipecat's default min_volume is 0.6. start_secs stays at Pipecat's 0.2:
+    # raising it to 0.3 delayed speech start by ~0.3s without rejecting more.
+    assert params.min_volume == 0.65
+    assert params.confidence == 0.7
+    assert params.start_secs == 0.2
+    assert params.stop_secs == SCREENING_TURN_END_SILENCE_SECONDS
+
+
+def test_pipecat_runtime_vad_thresholds_are_configurable(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_runtime.settings.screening_vad_confidence", 0.8)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_runtime.settings.screening_vad_min_volume", 0.7)
+
+    params = PipecatInterviewRuntime(MagicMock(), "session-id").vad._vad_controller._vad_analyzer.params
+
+    assert (params.confidence, params.min_volume) == (0.8, 0.7)
+
+
+def test_noise_filter_is_built_by_default():
+    pytest.importorskip("pyrnnoise")
+
+    assert _build_noise_filter() is not None
+
+
+def test_noise_filter_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(
+        "src.screening_pipeline.pipecat_runtime.settings.screening_noise_suppression_enabled",
+        False,
+    )
+
+    assert _build_noise_filter() is None
+    assert PipecatInterviewRuntime(MagicMock(), "session-id").input._audio_filter is None
+
+
+def test_noise_filter_is_skipped_when_rnnoise_is_not_installed(monkeypatch):
+    monkeypatch.setattr(
+        "src.screening_pipeline.pipecat_runtime.importlib.util.find_spec", lambda _name: None
+    )
+
+    assert _build_noise_filter() is None
+
+
+def _fake_audio_filter(filtered: bytes = b"clean"):
+    audio_filter = MagicMock()
+    audio_filter.start = AsyncMock()
+    audio_filter.stop = AsyncMock()
+    audio_filter.filter = AsyncMock(return_value=filtered)
+    return audio_filter
+
+
+class _AudioCollector(FrameProcessor):
+    """Pipeline tail that records the audio frames the input processor emits."""
+
+    def __init__(self):
+        super().__init__(name="audio-collector")
+        self.frames: list[InputAudioRawFrame] = []
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, InputAudioRawFrame):
+            self.frames.append(frame)
+        await self.push_frame(frame, direction)
+
+
+async def _run_input_pipeline(processor, chunks=(), *, cancel=False):
+    """Run `processor` in a real Pipecat pipeline, feed it `chunks`, then shut it down."""
+    collector = _AudioCollector()
+    task = PipelineTask(
+        Pipeline([processor, collector]),
+        params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=24000),
+    )
+    runner_task = asyncio.create_task(PipelineRunner(handle_sigint=False).run(task))
+    await asyncio.wait_for(processor.ready.wait(), timeout=5)
+    for pcm_bytes, sample_rate in chunks:
+        await processor.push_audio(pcm_bytes, sample_rate)
+    await (task.cancel(reason="test") if cancel else task.stop_when_done())
+    await asyncio.wait_for(runner_task, timeout=5)
+    return collector.frames
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel", [False, True], ids=["end", "cancel"])
+async def test_pipecat_input_starts_and_stops_the_audio_filter_with_the_pipeline(cancel):
+    audio_filter = _fake_audio_filter()
+    processor = AttendeeInputProcessor(audio_filter=audio_filter)
+
+    await _run_input_pipeline(processor, cancel=cancel)
+
+    audio_filter.start.assert_awaited_once_with(16000)
+    audio_filter.stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pipecat_input_sends_denoised_audio_downstream():
+    audio_filter = _fake_audio_filter(b"clean")
+    processor = AttendeeInputProcessor(audio_filter=audio_filter)
+    processor.ready.set()
+    processor.push_frame = AsyncMock()
+
+    await processor.push_audio(b"noisy", 16000)
+
+    audio_filter.filter.assert_awaited_once_with(b"noisy")
+    frame = processor.push_frame.await_args.args[0]
+    assert isinstance(frame, InputAudioRawFrame)
+    assert frame.audio == b"clean"
+    assert (frame.sample_rate, frame.num_channels) == (16000, 1)
+
+
+@pytest.mark.asyncio
+async def test_pipecat_input_denoises_after_resampling_to_16khz():
+    audio_filter = _fake_audio_filter(b"clean")
+    processor = AttendeeInputProcessor(audio_filter=audio_filter)
+    processor.ready.set()
+    processor.push_frame = AsyncMock()
+
+    await processor.push_audio(b"\x00\x00" * 480, 24000)  # 20ms at 24kHz
+
+    assert len(audio_filter.filter.await_args.args[0]) == 640  # 20ms at 16kHz
+
+
+@pytest.mark.asyncio
+async def test_pipecat_input_drops_chunks_the_filter_is_still_buffering():
+    processor = AttendeeInputProcessor(audio_filter=_fake_audio_filter(b""))
+    processor.ready.set()
+    processor.push_frame = AsyncMock()
+
+    await processor.push_audio(b"noisy", 16000)
+
+    processor.push_frame.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pipecat_input_falls_back_to_raw_audio_when_the_filter_fails():
+    audio_filter = _fake_audio_filter()
+    audio_filter.filter = AsyncMock(side_effect=RuntimeError("rnnoise blew up"))
+    processor = AttendeeInputProcessor(audio_filter=audio_filter)
+    processor.ready.set()
+    processor.push_frame = AsyncMock()
+
+    await processor.push_audio(b"first", 16000)
+    await processor.push_audio(b"second", 16000)
+
+    frames = [call.args[0] for call in processor.push_frame.await_args_list]
+    assert [frame.audio for frame in frames] == [b"first", b"second"]
+    assert audio_filter.filter.await_count == 1  # disabled after the first failure
+
+
+@pytest.mark.asyncio
+async def test_pipecat_input_suppresses_steady_background_noise_with_rnnoise():
+    pytest.importorskip("pyrnnoise")
+    rng = np.random.default_rng(0)
+    noise = rng.normal(0, 3000, 16000 * 2).astype(np.int16)  # 2s of loud hiss
+    chunks = [(noise[i : i + 320].tobytes(), 16000) for i in range(0, len(noise), 320)]
+
+    frames = await _run_input_pipeline(
+        AttendeeInputProcessor(audio_filter=_build_noise_filter()), chunks
+    )
+
+    denoised = np.frombuffer(b"".join(frame.audio for frame in frames), dtype=np.int16)
+    tail = denoised[-16000:].astype(np.float64)  # skip the denoiser's warm-up
+    assert np.sqrt(np.mean(tail**2)) < 300  # >20dB below the 3000 RMS input
 
 
 @pytest.mark.asyncio
