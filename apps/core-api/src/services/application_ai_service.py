@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -9,6 +11,8 @@ from uuid import UUID
 import httpx
 
 from src.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "call_parse_resume",
@@ -93,17 +97,40 @@ def _http_error_detail(exc: httpx.HTTPError) -> str:
     return str(exc)
 
 
+def _is_retryable_parse_error(exc: httpx.HTTPError) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    # Timeouts, connection resets, ai-core restarting, etc.
+    return isinstance(exc, httpx.TransportError)
+
+
 def call_parse_resume(*, s3_key: str, file_name: str) -> dict:
     payload = {
         "resume_name": file_name,
         "resume_path": s3_key,
     }
-    try:
-        with httpx.Client(timeout=300.0) as client:
-            response = client.post(_ai_url("parse/resume"), json=payload)
-            response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise ValueError(f"Resume parsing service unavailable: {_http_error_detail(exc)}") from exc
+    max_attempts = max(1, settings.ai_parse_resume_max_attempts)
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            with httpx.Client(timeout=settings.ai_parse_resume_timeout_seconds) as client:
+                response = client.post(_ai_url("parse/resume"), json=payload)
+                response.raise_for_status()
+            break
+        except httpx.HTTPError as exc:
+            if attempt >= max_attempts or not _is_retryable_parse_error(exc):
+                raise ValueError(
+                    f"Resume parsing service unavailable: {_http_error_detail(exc)}"
+                ) from exc
+            logger.warning(
+                "Resume parse attempt %s/%s failed for %s: %s; retrying",
+                attempt,
+                max_attempts,
+                file_name,
+                _http_error_detail(exc),
+            )
+            time.sleep(min(30, 5 * attempt))
 
     data = response.json()
     if not isinstance(data, dict):

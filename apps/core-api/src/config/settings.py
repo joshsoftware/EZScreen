@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     # Bulk resume ingest: cap parallel workers so we do not exhaust the DB pool
     # or overwhelm ai-core (OCR + LLM). Keep workers <= pool_size.
     ingest_max_workers: int = 3
+    # ai-core runs PDF extraction one file at a time, so a request's wait includes
+    # time queued behind other resumes (bulk + candidate applies). Keep this generous
+    # and retry transient failures instead of dropping the resume.
+    ai_parse_resume_timeout_seconds: float = 600.0
+    ai_parse_resume_max_attempts: int = 3
     db_pool_size: int = 10
     db_max_overflow: int = 20
 
