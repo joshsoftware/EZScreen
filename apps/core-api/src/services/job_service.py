@@ -233,6 +233,24 @@ def _sync_skills_after_reparse(
     )
 
 
+_MUST_HAVE_REQUIRED = "Add at least one must-have skill"
+
+
+def _has_must_have_skill(skills: object) -> bool:
+    if not isinstance(skills, dict):
+        return False
+    must_have = skills.get("must_have")
+    return isinstance(must_have, list) and len(must_have) > 0
+
+
+def _job_has_must_have_skill(job: JobDescription) -> bool:
+    if isinstance(job.skills, dict):
+        return _has_must_have_skill(job.skills)
+    # Older drafts may only carry skills inside parsed_jd.
+    parsed = job.parsed_jd if isinstance(job.parsed_jd, dict) else {}
+    return _has_must_have_skill(parsed.get("skills"))
+
+
 def _apply_skills(job: JobDescription, skills: JobSkills | dict | None) -> None:
     payload = _skills_dict(skills)
     job.skills = payload
@@ -296,6 +314,8 @@ def create_job(
     )
     if data.skills is not None:
         _apply_skills(job, data.skills)
+    if job.status == JobStatus.published and not _job_has_must_have_skill(job):
+        raise ValueError(f"{_MUST_HAVE_REQUIRED} before publishing")
     _apply_status_timestamps(job, job.status)
     _maybe_generate_screening_questions(
         job,
@@ -389,8 +409,17 @@ def update_job(db: Session, job: JobDescription, data: JobUpdate) -> JobDescript
     payload = data.model_dump(exclude_unset=True)
     skills = payload.pop("skills", None)
     skills_set = "skills" in data.model_fields_set
+    if skills_set and not _has_must_have_skill(_skills_dict(skills)):
+        raise ValueError(_MUST_HAVE_REQUIRED)
     previous_status = job.status
     new_status = payload.get("status")
+    if (
+        new_status == JobStatus.published
+        and previous_status != JobStatus.published
+        and not skills_set
+        and not _job_has_must_have_skill(job)
+    ):
+        raise ValueError(f"{_MUST_HAVE_REQUIRED} before publishing")
     for key, value in payload.items():
         setattr(job, key, value)
     if new_status is not None:
