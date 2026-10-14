@@ -175,13 +175,17 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
 
       const uploadData = await getResumeUploadUrlsRequest(jobId, payloadFiles)
       const uploadItems = Array.isArray(uploadData.uploads) ? uploadData.uploads : []
+      if (uploadItems.length !== files.length) {
+        throw new Error(
+          `Expected ${files.length} upload slots but received ${uploadItems.length}. Please try again.`,
+        )
+      }
 
+      // Upload slots come back in request order. Match by index, not name —
+      // two selected files can share a name (e.g. from different folders).
       const uploadedResumes = await Promise.all(
-        uploadItems.map(async (uploadItem) => {
-          const file = files.find((f) => f.name === uploadItem.file_name)
-          if (!file) {
-            throw new Error(`Missing local file for ${uploadItem.file_name}`)
-          }
+        uploadItems.map(async (uploadItem, index) => {
+          const file = files[index]
           await uploadToSignedUrl(uploadItem, file)
           return {
             s3_key: uploadItem.s3_key,

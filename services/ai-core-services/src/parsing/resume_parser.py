@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from src.common.llm_utils import parse_llm_json
 from src.core.logger import logger
@@ -19,16 +19,29 @@ from src.parsing.prompt_builder import resume_prompt_builder
 ocr_semaphore = asyncio.Semaphore(1)
 
 
+class ResumeParseCancelled(Exception):
+    """Raised when the requesting client went away before extraction started."""
+
+
 class ResumeParser:
     def __init__(self, llm_client: Optional[OllamaClient] = None):
         self.llm_client = llm_client or OllamaClient()
 
-    async def parse_s3_file(self, s3_key: str) -> dict:
+    async def parse_s3_file(
+        self,
+        s3_key: str,
+        is_cancelled: Optional[Callable[[], Awaitable[bool]]] = None,
+    ) -> dict:
         """Downloads from S3, extracts markdown, and parses using LLM."""
         tmp_path = await asyncio.to_thread(storage_client.download_to_tempfile, s3_key)
 
         try:
             async with ocr_semaphore:
+                # The caller may have timed out while we waited for the OCR slot.
+                # Skip the work so abandoned requests don't keep the queue backed up.
+                if is_cancelled is not None and await is_cancelled():
+                    raise ResumeParseCancelled(f"Client disconnected before parsing {s3_key}")
+
                 ext = os.path.splitext(tmp_path)[1].lower()
                 if ext != ".pdf":
                     raise ValueError(f"Unsupported resume format: {ext or 'unknown'}. Only PDF resumes are supported.")
