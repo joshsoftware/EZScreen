@@ -203,7 +203,15 @@ class PipecatInterviewRuntime:
     async def run(self) -> None:
         """Start the Pipecat pipeline and begin the greeting flow."""
         logger.info("Pipecat runtime starting", extra={"session_id": self.session_id})
-        await self.tts.validate_ready()
+        try:
+            await self.tts.validate_ready()
+        except Exception:
+            logger.exception(
+                "Pipecat Kokoro failed to load; bot cannot speak",
+                extra={"session_id": self.session_id},
+            )
+            await self.policy.fail_session("tts_unavailable")
+            raise
         logger.info("Pipecat Kokoro ready", extra={"session_id": self.session_id})
         self.runner = PipelineRunner()
         runner_task = asyncio.create_task(self.runner.run(self.task))
@@ -239,6 +247,7 @@ class PipecatInterviewRuntime:
                 "Pipecat runtime failed",
                 extra={"session_id": self.session_id},
             )
+            await self.policy.fail_session("pipeline_failed")
             raise
         finally:
             if not ready_task.done():

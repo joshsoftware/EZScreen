@@ -233,6 +233,41 @@ class PipecatInterviewPolicy:
             if leave_bot:
                 await self._leave_bot_after_close()
 
+    async def fail_session(self, reason: str) -> None:
+        """Mark the session failed and pull the bot out of the meeting.
+
+        Used when the runtime cannot run the interview (e.g. TTS artifacts
+        missing). Without this the bot stays in the call silently, which shows
+        as a permanently muted participant.
+        """
+        async with self._end_lock:
+            if self._ending or self.is_finalized:
+                return
+            self._ending = True
+            self.termination_reason = reason
+            self.is_active = False
+            self.current_interaction_state = "ending"
+            self._cancel_inactivity_deadline()
+            self._cancel_answer_settle()
+            self._cancel_closing_reply_timeout()
+            self._cancel_processing()
+            self._cancel_filler_schedule()
+            self._cancel_tts_warm()
+            logger.error(
+                "Interview session failed; removing bot from meeting",
+                extra={"session_id": self.session_id, "reason": reason},
+            )
+            if self.session is None:
+                self.session = await interview_session_repo.get_by_id(self.session_id)
+            if self.session is None:
+                return
+            if self.api_client is None:
+                self.api_client = SessionApiClient(session_id=str(self.session.id))
+            # Keep anything already answered before the failure.
+            await self.finalize(reason=reason)
+            await self.api_client.update_status("failed")
+            await self._leave_bot_after_close()
+
     async def cleanup(self):
         """Teardown connections, persisting the interview first if it ended early."""
         await self.end_interview("transport_disconnected")

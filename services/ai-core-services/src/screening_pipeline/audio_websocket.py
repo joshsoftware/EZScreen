@@ -30,6 +30,37 @@ def _should_forward_candidate_audio(
     )
 
 
+def _runtime_failed(runtime_task: asyncio.Task) -> bool:
+    return (
+        runtime_task.done()
+        and not runtime_task.cancelled()
+        and runtime_task.exception() is not None
+    )
+
+
+async def _receive_unless_runtime_failed(
+    websocket: WebSocket, runtime_task: asyncio.Task
+) -> dict | None:
+    """Next WebSocket message, or None once the Pipecat runtime has crashed.
+
+    A crashed runtime can never speak, so the audio stream must stop instead of
+    keeping a silent (muted) bot in the meeting.
+    """
+    if runtime_task.done():
+        return None if _runtime_failed(runtime_task) else await websocket.receive()
+    receive_task = asyncio.ensure_future(websocket.receive())
+    await asyncio.wait(
+        {receive_task, runtime_task}, return_when=asyncio.FIRST_COMPLETED
+    )
+    if receive_task.done():
+        return receive_task.result()
+    if _runtime_failed(runtime_task):
+        receive_task.cancel()
+        await asyncio.gather(receive_task, return_exceptions=True)
+        return None
+    return await receive_task
+
+
 async def _run_pipecat_session(websocket: WebSocket, session_id: str):
     """Run Pipecat behind the existing Attendee WebSocket contract."""
     from src.screening_pipeline.pipecat_runtime import PipecatInterviewRuntime
@@ -42,7 +73,17 @@ async def _run_pipecat_session(websocket: WebSocket, session_id: str):
 
     try:
         while True:
-            raw_ws_message = await websocket.receive()
+            raw_ws_message = await _receive_unless_runtime_failed(websocket, runtime_task)
+            if raw_ws_message is None:
+                logger.error(
+                    "Pipecat runtime crashed; closing Attendee audio stream",
+                    extra={"session_id": session_id},
+                )
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+                break
 
             if raw_ws_message.get("type") == "websocket.disconnect":
                 break
@@ -105,6 +146,9 @@ async def _run_pipecat_session(websocket: WebSocket, session_id: str):
         try:
             await runtime_task
         except asyncio.CancelledError:
+            pass
+        except Exception:
+            # Already logged and handled (session failed, bot removed) by the runtime.
             pass
 
 @router.websocket("/attendee-websocket/{session_id}")
