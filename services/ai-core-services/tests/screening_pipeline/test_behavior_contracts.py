@@ -1109,7 +1109,7 @@ async def test_fail_session_marks_failed_and_removes_bot_without_completing():
         api_client=api_client,
         speech_output=AsyncMock(),
     )
-    policy.session = MagicMock(id="session-id", interview_metadata={"bot_id": "bot-1"})
+    policy.session = MagicMock(id="session-id", status="in_progress", interview_metadata={"bot_id": "bot-1"})
     policy._leave_bot_after_close = AsyncMock()
 
     with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()):
@@ -1120,6 +1120,26 @@ async def test_fail_session_marks_failed_and_removes_bot_without_completing():
     assert policy.termination_reason == "tts_unavailable"
     api_client.update_status.assert_awaited_once_with("failed")
     policy._leave_bot_after_close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fail_session_skips_a_session_that_already_failed():
+    api_client = MagicMock()
+    api_client.update_status = AsyncMock(return_value=True)
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        llm_client=MagicMock(),
+        api_client=api_client,
+        speech_output=AsyncMock(),
+    )
+    policy.session = MagicMock(id="session-id", status="failed", interview_metadata={"bot_id": "bot-1"})
+    policy._leave_bot_after_close = AsyncMock()
+
+    await policy.fail_session("tts_unavailable")
+
+    api_client.update_status.assert_not_awaited()
+    policy._leave_bot_after_close.assert_not_awaited()
 
 
 @pytest.mark.asyncio

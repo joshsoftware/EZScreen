@@ -261,12 +261,17 @@ class PipecatInterviewPolicy:
                 self.session = await interview_session_repo.get_by_id(self.session_id)
             if self.session is None:
                 return
+            if getattr(self.session, "status", None) == "failed":
+                # Attendee reconnects while the bot is already being removed.
+                return
             if self.api_client is None:
                 self.api_client = SessionApiClient(session_id=str(self.session.id))
-            # Keep anything already answered before the failure.
-            await self.finalize(reason=reason)
+            # Status first, so the "left" webhook can't report it as completed;
+            # then get the silent bot out before the slower persistence.
             await self.api_client.update_status("failed")
             await self._leave_bot_after_close()
+            # Keep anything already answered before the failure.
+            await self.finalize(reason=reason)
 
     async def cleanup(self):
         """Teardown connections, persisting the interview first if it ended early."""
