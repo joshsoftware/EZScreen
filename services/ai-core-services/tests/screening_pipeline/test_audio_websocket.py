@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -117,3 +118,40 @@ async def test_pipecat_websocket_branch_preserves_attendee_audio_selection():
         ((b"binary-audio", 24000),),
     ]
     runtime.cleanup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_crashed_runtime_closes_the_stream_instead_of_idling_muted():
+    class SilentWebSocket:
+        """Attendee keeps the socket open and may send nothing for a while."""
+
+        def __init__(self):
+            self.closed = False
+
+        async def receive(self):
+            await asyncio.Event().wait()
+
+        async def close(self):
+            self.closed = True
+
+    created_runtimes = []
+
+    class CrashingRuntime:
+        def __init__(self, **_kwargs):
+            self.policy = MagicMock(current_interaction_state="listening")
+            self.push_audio = AsyncMock()
+            self.cleanup = AsyncMock()
+            created_runtimes.append(self)
+
+        async def run(self):
+            raise FileNotFoundError("Kokoro artifacts are missing")
+
+    websocket = SilentWebSocket()
+    with patch(
+        "src.screening_pipeline.pipecat_runtime.PipecatInterviewRuntime",
+        CrashingRuntime,
+    ):
+        await asyncio.wait_for(_run_pipecat_session(websocket, "session-id"), timeout=2)
+
+    assert websocket.closed
+    created_runtimes[0].cleanup.assert_awaited_once()

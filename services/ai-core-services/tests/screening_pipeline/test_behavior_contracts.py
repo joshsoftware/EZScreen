@@ -1096,3 +1096,39 @@ async def test_silence_prompt_fires_after_candidate_actually_stops(monkeypatch):
     assert speech_output.await_args_list[0].args[0] == SILENCE_PROMPT_TEXT
 
     policy._cancel_inactivity_deadline()
+
+
+@pytest.mark.asyncio
+async def test_fail_session_marks_failed_and_removes_bot_without_completing():
+    api_client = MagicMock()
+    api_client.update_status = AsyncMock(return_value=True)
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        llm_client=MagicMock(),
+        api_client=api_client,
+        speech_output=AsyncMock(),
+    )
+    policy.session = MagicMock(id="session-id", interview_metadata={"bot_id": "bot-1"})
+    policy._leave_bot_after_close = AsyncMock()
+
+    with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()):
+        await policy.fail_session("tts_unavailable")
+        # Teardown afterwards must not overwrite the failure as "completed".
+        await policy.cleanup()
+
+    assert policy.termination_reason == "tts_unavailable"
+    api_client.update_status.assert_awaited_once_with("failed")
+    policy._leave_bot_after_close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_runtime_fails_session_when_kokoro_cannot_load():
+    runtime = PipecatInterviewRuntime(MagicMock(), "session-id")
+    runtime.tts.validate_ready = AsyncMock(side_effect=FileNotFoundError("missing"))
+    runtime.policy.fail_session = AsyncMock()
+
+    with pytest.raises(FileNotFoundError):
+        await runtime.run()
+
+    runtime.policy.fail_session.assert_awaited_once_with("tts_unavailable")

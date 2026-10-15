@@ -65,6 +65,9 @@ _TERMINAL_SESSION_STATUSES = frozenset(
         InterviewStatus.completed,
         InterviewStatus.no_show,
         InterviewStatus.cancelled,
+        # A failed session's bot is removed from the meeting; the resulting
+        # "left" webhook must not report it as completed.
+        InterviewStatus.failed,
     }
 )
 
