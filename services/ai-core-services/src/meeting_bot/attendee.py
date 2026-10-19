@@ -108,7 +108,8 @@ class AttendeeApiClient:
                     data = resp.json()
                     return AttendeeBotStatusResponse(
                         id=data.get("id", bot_id),
-                        status=data.get("status", "ready"),
+                        # Attendee reports the lifecycle state as "state".
+                        status=data.get("state") or data.get("status") or "ready",
                         meeting_url=data.get("meeting_url", "https://meet.google.com/ezs-screener-demo"),
                         duration_seconds=data.get("duration_seconds", 0),
                     )

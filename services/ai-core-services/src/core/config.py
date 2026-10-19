@@ -89,6 +89,15 @@ class Settings(BaseSettings):
     # RNNoise denoising of candidate audio ahead of VAD and Whisper. Costs
     # roughly 10% of one CPU core per active interview and ~10ms of delay.
     screening_noise_suppression_enabled: bool = True
+    # Bot connection watchdog (Bug-043). If the bot has joined the meeting but
+    # Attendee never opened the audio WebSocket to ai-core (tunnel down, wrong
+    # WEBSOCKET_URL), the bot can never speak. Start checking this long after
+    # the scheduled join, keep checking for at most the max wait, and only
+    # remove the bot once it has been joined-but-unconnected for the confirm time.
+    screening_bot_connect_grace_seconds: float = 120.0
+    screening_bot_connect_max_wait_seconds: float = 1800.0
+    screening_bot_connect_poll_seconds: float = 30.0
+    screening_bot_connect_confirm_seconds: float = 60.0
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),

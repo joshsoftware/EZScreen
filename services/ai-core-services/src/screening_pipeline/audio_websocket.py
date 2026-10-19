@@ -159,5 +159,8 @@ async def attendee_audio_ws(websocket: WebSocket, session_id: str):
     """
     await websocket.accept()
     logger.info("Attendee connected to WebSocket", extra={"session_id": session_id})
+    from src.meeting_bot.connection_watchdog import bot_connection_watchdog
+
+    bot_connection_watchdog.mark_connected(session_id)
 
     await _run_pipecat_session(websocket, session_id)
