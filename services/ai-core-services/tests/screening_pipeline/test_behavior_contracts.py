@@ -523,12 +523,12 @@ async def test_pipecat_kokoro_adapter_preserves_pcm_audio_metadata():
 @pytest.mark.asyncio
 async def test_pipecat_kokoro_adapter_validates_before_pipeline_start():
     synthesizer = MagicMock()
-    synthesizer.ensure_ready = AsyncMock()
+    synthesizer.prepare = AsyncMock()
     service = KokoroTTSService(synthesizer=synthesizer)
 
     await service.validate_ready()
 
-    synthesizer.ensure_ready.assert_awaited_once()
+    synthesizer.prepare.assert_awaited_once()
 
 
 def test_pipecat_runtime_builds_without_starting_a_live_session():

@@ -17,6 +17,22 @@ from src.core.config import settings
 from src.core.logger import logger
 
 
+# PCM for bot lines that are identical in every interview (greeting, closing,
+# fillers, ...), synthesized once at service startup. Lets the bot speak its
+# greeting the moment it joins, before its own model has finished loading.
+_shared_phrase_audio: dict[str, list[bytes]] = {}
+
+
+async def warm_shared_phrases(synthesizer: "KokoroSynthesizer", texts: Iterable[str]) -> None:
+    """Synthesize fixed bot lines once and share them with every interview."""
+    for text in texts:
+        if not text or text in _shared_phrase_audio:
+            continue
+        chunks = [chunk async for chunk in synthesizer.synthesize(text)]
+        _shared_phrase_audio[text] = chunks
+    logger.info("Shared bot phrases ready", extra={"phrases": len(_shared_phrase_audio)})
+
+
 class KokoroSynthesizer:
     """Pipecat-owned local Kokoro model lifecycle and PCM synthesis."""
 
@@ -38,13 +54,49 @@ class KokoroSynthesizer:
         # Kokoro's onnxruntime session is not safe to invoke concurrently from
         # multiple threads; serialize both warm-up and live synthesis through it.
         self._synth_lock = asyncio.Lock()
+        self._load_lock = asyncio.Lock()
+        self._load_task: asyncio.Task | None = None
+
+    def _artifacts_present(self) -> bool:
+        return os.path.exists(self.model_path) and os.path.exists(self.voices_path)
+
+    async def _load_model(self) -> None:
+        # Loading the ONNX model takes ~10-25s of CPU; off the event loop so it
+        # doesn't freeze audio for every other live interview meanwhile.
+        from kokoro_onnx import Kokoro
+
+        self.kokoro = await asyncio.to_thread(Kokoro, self.model_path, self.voices_path)
+
+    async def prepare(self) -> None:
+        """Fail fast if the model can't be used; otherwise load it in the background.
+
+        Raises when the artifacts are missing and can't be downloaded, so the
+        session fails instead of leaving a silent bot in the meeting.
+        """
+        if self.kokoro is not None or self._load_task is not None:
+            return
+        if not self._artifacts_present():
+            await self.ensure_ready()
+            return
+        self._load_task = asyncio.create_task(self.ensure_ready())
+        self._load_task.add_done_callback(self._log_load_failure)
+
+    @staticmethod
+    def _log_load_failure(task: asyncio.Task) -> None:
+        if not task.cancelled() and task.exception() is not None:
+            logger.error("Kokoro model failed to load", extra={"error": str(task.exception())})
 
     async def ensure_ready(self) -> None:
-        if os.path.exists(self.model_path) and os.path.exists(self.voices_path):
-            if self.kokoro is None:
-                from kokoro_onnx import Kokoro
+        if self.kokoro is not None:
+            return
+        async with self._load_lock:
+            await self._ensure_ready_locked()
 
-                self.kokoro = Kokoro(self.model_path, self.voices_path)
+    async def _ensure_ready_locked(self) -> None:
+        if self.kokoro is not None:
+            return
+        if self._artifacts_present():
+            await self._load_model()
             return
 
         if not settings.kokoro_allow_download:
@@ -77,12 +129,12 @@ class KokoroSynthesizer:
                     with open(self.voices_path, "wb") as file:
                         file.write(voices.content)
             if self.kokoro is None:
-                from kokoro_onnx import Kokoro
-
-                self.kokoro = Kokoro(self.model_path, self.voices_path)
+                await self._load_model()
 
     async def synthesize(self, text: str) -> AsyncGenerator[bytes, None]:
         cached = self._cache.get(text)
+        if cached is None:
+            cached = _shared_phrase_audio.get(text)
         if cached is not None:
             for chunk in cached:
                 yield chunk
@@ -136,7 +188,12 @@ class KokoroSynthesizer:
         """
         seen: set[str] = set()
         for text in texts:
-            if not text or text in seen or text in self._cache:
+            if (
+                not text
+                or text in seen
+                or text in self._cache
+                or text in _shared_phrase_audio
+            ):
                 continue
             seen.add(text)
             async for _ in self.synthesize(text):
@@ -164,8 +221,9 @@ class KokoroTTSService(TTSService):
         self._output_sample_rate = sample_rate
 
     async def validate_ready(self) -> None:
-        """Load externally provisioned Kokoro artifacts before live audio starts."""
-        await self.synthesizer.ensure_ready()
+        """Check Kokoro is usable before live audio starts; the model itself
+        finishes loading in the background (fixed lines don't need it)."""
+        await self.synthesizer.prepare()
 
     async def warm_cache(self, texts: Iterable[str]) -> None:
         """Pre-synthesize known bot text for this session. See KokoroSynthesizer.warm."""

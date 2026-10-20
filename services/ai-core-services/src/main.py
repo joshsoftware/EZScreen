@@ -8,17 +8,28 @@ from src.api.v1.meeting_bot import router as meeting_bot_router
 from src.screening_pipeline.webhook_handler import router as webhook_router
 from src.screening_pipeline.audio_websocket import router as websocket_router
 
+import asyncio
 from contextlib import asynccontextmanager
-from src.screening_pipeline.pipecat_tts import KokoroTTSService
+from src.screening_pipeline.pipecat_tts import KokoroSynthesizer, warm_shared_phrases
+from src.screening_pipeline.tts_prewarm import known_bot_texts
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Pre-download models on startup if they don't exist in the volume
+    # Pre-download models on startup if they don't exist in the volume, then
+    # synthesize the fixed bot lines (greeting, closing, fillers) once in the
+    # background so every interview can speak its greeting the moment it joins.
+    warm_task = None
     try:
-        await KokoroTTSService().validate_ready()
+        synthesizer = KokoroSynthesizer()
+        await synthesizer.ensure_ready()
+        warm_task = asyncio.create_task(
+            warm_shared_phrases(synthesizer, known_bot_texts([]))
+        )
     except Exception as e:
         print(f"Failed to pre-download Kokoro models: {e}")
     yield
+    if warm_task is not None and not warm_task.done():
+        warm_task.cancel()
 
 app = FastAPI(
     title="EZScreen Service",
