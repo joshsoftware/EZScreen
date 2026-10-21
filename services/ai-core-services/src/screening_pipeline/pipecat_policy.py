@@ -335,7 +335,19 @@ class PipecatInterviewPolicy:
             and bool(self.transcript_log)
             and self.transcript_log[-1].get("interaction_type") == "closing"
         )
-        if is_probable_hallucination(transcript) and not is_closing_reply:
+        # The greeting only asks the candidate to say when they're ready, so a
+        # short "Thank you." / "Yeah." there is a real reply, not noise.
+        # Dropping it left the bot waiting and the questions never started.
+        is_greeting_reply = (
+            bool(self.transcript_log)
+            and self.transcript_log[-1].get("interaction_type") == "greeting"
+            and bool(transcript.strip())
+        )
+        if (
+            is_probable_hallucination(transcript)
+            and not is_closing_reply
+            and not is_greeting_reply
+        ):
             logger.info(
                 "Ignored probable Whisper hallucination or noise",
                 extra={"transcript": transcript},

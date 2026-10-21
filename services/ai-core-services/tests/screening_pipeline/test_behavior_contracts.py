@@ -1215,3 +1215,27 @@ def test_a_slow_reply_gets_at_most_one_filler():
     assert len(FILLER_SCHEDULE_SECONDS) == 1
     # Later than the answer-settle wait, so an ordinary reply needs no filler.
     assert FILLER_SCHEDULE_SECONDS[0] > ANSWER_SETTLE_SECONDS
+
+
+@pytest.mark.parametrize(
+    "last_interaction, accepted",
+    [("greeting", True), ("question", False)],
+)
+@pytest.mark.asyncio
+async def test_short_thanks_counts_as_a_reply_to_the_greeting_only(last_interaction, accepted):
+    """A candidate answering the greeting with "Thank you." must start the
+    interview; the noise filter dropped it, so the bot never asked a question.
+    Mid-question, the same phrase is still treated as a likely STT hallucination."""
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "listening"
+    policy.transcript_log = [{"interaction_type": last_interaction, "candidate_answer": ""}]
+    policy._process_after_answer_settles = AsyncMock()
+
+    policy.handle_candidate_speech("Thank you.")
+    await asyncio.sleep(0)
+
+    assert (policy._answer_buffer == ["Thank you."]) is accepted
+    assert (policy.current_interaction_state == "collecting_answer") is accepted
