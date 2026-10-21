@@ -90,6 +90,9 @@ class PipecatInterviewPolicy:
         # _end_after_inactivity / handle_candidate_speech_stopped).
         self._candidate_speaking = False
         self._last_filler_text: Optional[str] = None
+        # Whether a filler already played for the current answer; suppresses
+        # the acknowledgement right after it (Bug-041).
+        self._filler_spoken_this_turn = False
         # Set by handle_candidate_speech_stopped (or, as a fallback,
         # _process_after_answer_settles) to the moment the candidate's speech
         # was received; read (and cleared) by _start_filler_schedule to
@@ -649,7 +652,9 @@ class PipecatInterviewPolicy:
         decision = eval_data.get("decision", "NEXT_QUESTION")
         is_complete = decision == "NEXT_QUESTION"
         follow_up_question = eval_data.get("suggested_follow_up", "")
-        if decision != "REPEAT_QUESTION":
+        # Acknowledge only a finished answer, and not on top of a filler the
+        # candidate just heard ("One moment... Thank you for answering...").
+        if decision == "NEXT_QUESTION" and not self._filler_spoken_this_turn:
             await self.speak(ANSWER_ACKNOWLEDGEMENT_TEXT)
 
         if decision == "REPEAT_QUESTION":
@@ -905,11 +910,13 @@ class PipecatInterviewPolicy:
         logger.info("AI speaking filler", extra={"text": text})
         if self.speech_output is None:
             raise RuntimeError("Pipecat speech output is not configured")
+        self._filler_spoken_this_turn = True
         await self.speech_output(text)
 
     def _start_filler_schedule(self) -> None:
         """Arm the filler schedule for this turn. See _run_filler_schedule."""
         self._cancel_filler_schedule()
+        self._filler_spoken_this_turn = False
         self._filler_task = asyncio.create_task(self._run_filler_schedule())
 
     def _cancel_filler_schedule(self) -> None:

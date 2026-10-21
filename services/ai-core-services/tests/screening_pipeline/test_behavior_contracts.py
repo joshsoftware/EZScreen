@@ -1152,3 +1152,66 @@ async def test_runtime_fails_session_when_kokoro_cannot_load():
         await runtime.run()
 
     runtime.policy.fail_session.assert_awaited_once_with("tts_unavailable")
+
+
+def _answer_policy():
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        api_client=MagicMock(),
+        speech_output=AsyncMock(),
+    )
+    policy.is_active = True
+    policy._complete_question = AsyncMock()
+    policy._ask_follow_up = AsyncMock()
+    policy.transcript_log = [
+        {"interaction_type": "question", "candidate_answer": "", "follow_ups": [], "question_repeat_count": 0}
+    ]
+    return policy
+
+
+def _spoken(policy):
+    return [call.args[0] for call in policy.speech_output.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_finished_answer_is_acknowledged_once():
+    policy = _answer_policy()
+
+    await policy._handle_answer(
+        {"id": 1, "question": "Q?"}, "Q?", "answer", {"decision": "NEXT_QUESTION", "score": 8}, None
+    )
+
+    assert _spoken(policy) == [ANSWER_ACKNOWLEDGEMENT_TEXT]
+
+
+@pytest.mark.asyncio
+async def test_no_acknowledgement_after_a_filler_or_before_a_follow_up():
+    """Bug-041: "Alright, one moment. ... Thank you for answering the
+    question." — never stack the acknowledgement on a filler, and don't thank
+    the candidate for an answer that's getting a follow-up."""
+    policy = _answer_policy()
+    policy._filler_spoken_this_turn = True
+    await policy._handle_answer(
+        {"id": 1, "question": "Q?"}, "Q?", "answer", {"decision": "NEXT_QUESTION", "score": 8}, None
+    )
+
+    follow_up = _answer_policy()
+    await follow_up._handle_answer(
+        {"id": 1, "question": "Q?"},
+        "Q?",
+        "answer",
+        {"decision": "ASK_FOLLOW_UP", "score": 4, "suggested_follow_up": "Why?"},
+        None,
+    )
+
+    assert ANSWER_ACKNOWLEDGEMENT_TEXT not in _spoken(policy)
+    assert ANSWER_ACKNOWLEDGEMENT_TEXT not in _spoken(follow_up)
+
+
+def test_a_slow_reply_gets_at_most_one_filler():
+    from src.screening_pipeline.prompts import FILLER_SCHEDULE_SECONDS
+
+    assert len(FILLER_SCHEDULE_SECONDS) == 1
+    # Later than the answer-settle wait, so an ordinary reply needs no filler.
+    assert FILLER_SCHEDULE_SECONDS[0] > ANSWER_SETTLE_SECONDS
