@@ -220,26 +220,22 @@ async def test_warm_shared_phrases_synthesizes_each_fixed_line_once(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_prepare_loads_the_model_in_the_background(tmp_path, monkeypatch):
-    model = tmp_path / "kokoro.onnx"
-    voices = tmp_path / "voices.bin"
-    model.write_bytes(b"m")
-    voices.write_bytes(b"v")
-    release = asyncio.Event()
-    synthesizer = KokoroSynthesizer(model_path=str(model), voices_path=str(voices))
+async def test_sessions_share_one_model_and_one_lock(tmp_path, monkeypatch):
+    """Each session must reuse the startup model; loading a model per session
+    froze ai-core long enough to time out Pipecat's pipeline setup."""
+    from src.screening_pipeline import pipecat_tts
 
-    async def slow_load():
-        await release.wait()
-        synthesizer.kokoro = object()
+    shared = object()
+    monkeypatch.setattr(pipecat_tts, "_shared_model", shared)
+    monkeypatch.setattr(pipecat_tts, "_shared_model_lock", None)
+    first = KokoroSynthesizer(model_path=str(tmp_path / "gone.onnx"), voices_path=str(tmp_path / "gone.bin"))
+    second = KokoroSynthesizer(model_path=str(tmp_path / "gone.onnx"), voices_path=str(tmp_path / "gone.bin"))
 
-    synthesizer._load_model = slow_load  # type: ignore[method-assign]
+    await asyncio.wait_for(first.prepare(), timeout=1)
+    await asyncio.wait_for(second.prepare(), timeout=1)
 
-    await asyncio.wait_for(synthesizer.prepare(), timeout=1)  # returns before loading
-    assert synthesizer.kokoro is None
-
-    release.set()
-    await asyncio.wait_for(synthesizer.ensure_ready(), timeout=1)
-    assert synthesizer.kokoro is not None
+    assert first.kokoro is shared and second.kokoro is shared
+    assert first._synth_lock is second._synth_lock
 
 
 @pytest.mark.asyncio
