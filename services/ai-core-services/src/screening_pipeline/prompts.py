@@ -123,7 +123,10 @@ FILLER_TEXTS = [
 # _cancel_filler_schedule) the instant classify_and_evaluate resolves, so a
 # filler never overlaps the real response that follows; once this list is
 # exhausted with no result yet, the policy just keeps waiting silently.
-FILLER_SCHEDULE_SECONDS = [1.5, 4.5, 8.0]
+# A single filler, and only once the reply is genuinely slow (2s settle + ~2s
+# LLM): three back-to-back fillers ("Alright, one moment. Just a moment,
+# please. Okay, give me a second.") made the bot sound stuck (Bug-041).
+FILLER_SCHEDULE_SECONDS = [4.0]
 
 # How often _end_after_inactivity rechecks whether the candidate has stopped
 # talking, while they're still mid-answer past SILENCE_PROMPT_SECONDS. A

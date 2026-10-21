@@ -184,3 +184,66 @@ async def test_synthesize_holds_synth_lock_for_the_full_stream_not_just_first_ch
 
     assert started == ["First", "Second"]
     assert results[0] and results[1]
+
+
+@pytest.mark.asyncio
+async def test_shared_phrases_play_without_the_session_model(monkeypatch):
+    """The greeting must be speakable the moment the bot joins, before this
+    session's own Kokoro model has loaded."""
+    from src.screening_pipeline import pipecat_tts
+
+    monkeypatch.setattr(pipecat_tts, "_shared_phrase_audio", {"Hi!": [b"warm-greeting"]})
+    synthesizer = KokoroSynthesizer(model_path="unused", voices_path="unused")
+    synthesizer.ensure_ready = None  # would blow up if called
+
+    assert [chunk async for chunk in synthesizer.synthesize("Hi!")] == [b"warm-greeting"]
+
+
+@pytest.mark.asyncio
+async def test_warm_shared_phrases_synthesizes_each_fixed_line_once(monkeypatch):
+    from src.screening_pipeline import pipecat_tts
+
+    monkeypatch.setattr(pipecat_tts, "_shared_phrase_audio", {})
+    create_calls: list[str] = []
+    synthesizer = _make_synthesizer_with_fake_model(create_calls)
+
+    await pipecat_tts.warm_shared_phrases(synthesizer, ["Hi!", "Bye.", "Hi!"])
+
+    assert create_calls == ["Hi!", "Bye."]
+    assert set(pipecat_tts._shared_phrase_audio) == {"Hi!", "Bye."}
+
+    # A session warm-up then skips the shared lines entirely.
+    other_calls: list[str] = []
+    session = _make_synthesizer_with_fake_model(other_calls)
+    await session.warm(["Hi!", "Question 1"])
+    assert other_calls == ["Question 1"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_share_one_model_and_one_lock(tmp_path, monkeypatch):
+    """Each session must reuse the startup model; loading a model per session
+    froze ai-core long enough to time out Pipecat's pipeline setup."""
+    from src.screening_pipeline import pipecat_tts
+
+    shared = object()
+    monkeypatch.setattr(pipecat_tts, "_shared_model", shared)
+    monkeypatch.setattr(pipecat_tts, "_shared_model_lock", None)
+    first = KokoroSynthesizer(model_path=str(tmp_path / "gone.onnx"), voices_path=str(tmp_path / "gone.bin"))
+    second = KokoroSynthesizer(model_path=str(tmp_path / "gone.onnx"), voices_path=str(tmp_path / "gone.bin"))
+
+    await asyncio.wait_for(first.prepare(), timeout=1)
+    await asyncio.wait_for(second.prepare(), timeout=1)
+
+    assert first.kokoro is shared and second.kokoro is shared
+    assert first._synth_lock is second._synth_lock
+
+
+@pytest.mark.asyncio
+async def test_prepare_fails_fast_when_artifacts_are_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_tts.settings.kokoro_allow_download", False)
+    synthesizer = KokoroSynthesizer(
+        model_path=str(tmp_path / "missing.onnx"), voices_path=str(tmp_path / "missing.bin")
+    )
+
+    with pytest.raises(FileNotFoundError, match="Kokoro artifacts are missing"):
+        await synthesizer.prepare()

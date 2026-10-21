@@ -3,6 +3,7 @@ from src.core.logger import logger
 from src.core.config import settings
 from src.meeting_bot.repository import interview_session_repo
 from src.meeting_bot.attendee import attendee_client
+from src.meeting_bot.connection_watchdog import bot_connection_watchdog
 from src.screening_pipeline.tts_prewarm import coerce_questions_list, tts_prewarm_registry
 from src.meeting_bot.schemas import (
     AttendeeAudioSettings,
@@ -71,6 +72,9 @@ class AttendeeBotClient:
 
         attendee_res = await attendee_client.schedule_bot(attendee_req)
         dispatched_at = datetime.now(timezone.utc).isoformat()
+        bot_connection_watchdog.watch(
+            request.interview_session_id, attendee_res.id, scheduled_at_dt
+        )
 
         if session_detail:
             # Fire-and-forget: warms this session's TTS cache ahead of the

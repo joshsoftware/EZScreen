@@ -84,6 +84,26 @@ const BRANCH_LABELS = {
   screening_failed: 'Screening failed',
 }
 
+// Once any of these follows the latest (re)schedule, that meeting is over and
+// its Meet link must not be offered as joinable.
+const MEETING_ENDED_EVENTS = new Set([
+  'screening_completed',
+  'analysis_ready',
+  'screening_no_show',
+  'screening_cancelled',
+  'screening_failed',
+  'shortlisted_for_l1',
+  'rejected',
+])
+
+function meetingEndedAfter(allEvents, scheduleEvent) {
+  const list = allEvents || []
+  const from = list.indexOf(scheduleEvent)
+  return list
+    .slice(from + 1)
+    .some((event) => MEETING_ENDED_EVENTS.has(event.event_type))
+}
+
 function eventsForStep(events, step) {
   const types = new Set(step.eventTypes)
   return events.filter((event) => types.has(event.event_type))
@@ -121,8 +141,10 @@ function stepExtra(step, matchingEvents, allEvents) {
       typeof last.metadata.duration_minutes === 'number'
         ? last.metadata.duration_minutes
         : null
+    const joinable =
+      typeof meet === 'string' && meet && !meetingEndedAfter(allEvents, last)
     return {
-      gmeetLink: typeof meet === 'string' && meet ? meet : null,
+      gmeetLink: joinable ? meet : null,
       attendees,
       scheduledAt:
         typeof last.metadata.scheduled_at === 'string'

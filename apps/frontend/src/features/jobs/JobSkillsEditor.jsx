@@ -203,12 +203,21 @@ export function JobSkillsEditor({
   error = null,
   submitLabel = 'Save skills',
 }) {
+  const [localError, setLocalError] = useState(null)
+
   function handleSubmit() {
     const next = {
       must_have: normalizeSkillList(skills.must_have),
       good_to_have: normalizeSkillList(skills.good_to_have),
     }
     onChange(next)
+    if (next.must_have.length === 0) {
+      setLocalError(
+        'Add at least one must-have skill. Candidates are matched against these skills.',
+      )
+      return
+    }
+    setLocalError(null)
     void onSubmit(next)
   }
 
@@ -221,14 +230,17 @@ export function JobSkillsEditor({
       <SkillGroup
         title={`Must-have (${skills.must_have.length})`}
         items={skills.must_have}
-        onChange={(must_have) => onChange({ ...skills, must_have })}
+        onChange={(must_have) => {
+          if (must_have.length > 0) setLocalError(null)
+          onChange({ ...skills, must_have })
+        }}
       />
       <SkillGroup
         title={`Nice-to-have (${skills.good_to_have.length})`}
         items={skills.good_to_have}
         onChange={(good_to_have) => onChange({ ...skills, good_to_have })}
       />
-      {error ? <Alert>{error}</Alert> : null}
+      {localError || error ? <Alert>{localError || error}</Alert> : null}
       <div className="flex gap-sm pt-sm">
         {onBack ? (
           <Button variant="secondary" onClick={onBack} disabled={submitting}>

@@ -99,6 +99,9 @@ services:
       # The host model directory is mounted below; use the container path here.
       KOKORO_MODEL_PATH: /app/.models/kokoro-v1.0.onnx
       KOKORO_VOICES_PATH: /app/.models/voices-v1.0.bin
+      # Fetch the Kokoro files into the mounted model dir on first startup if
+      # they are missing; without them the screening bot cannot speak (Bug-043).
+      KOKORO_ALLOW_DOWNLOAD: "true"
       # Keep HF downloads on the host bind mount (not ephemeral container FS).
       HF_HOME: /root/.cache/huggingface
       TRANSFORMERS_CACHE: /root/.cache/huggingface

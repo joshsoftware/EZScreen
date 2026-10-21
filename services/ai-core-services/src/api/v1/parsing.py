@@ -2,11 +2,11 @@ import json
 import os
 import tempfile
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Request, UploadFile
 
 from src.core.logger import logger
 from src.parsing.jd_parser import jd_parser
-from src.parsing.resume_parser import resume_parser
+from src.parsing.resume_parser import ResumeParseCancelled, resume_parser
 from src.parsing.schemas import (
     JDFormPrefillResponse,
     ParseResumeRequest,
@@ -29,16 +29,26 @@ _ALLOWED_JD_CONTENT_TYPES = {
 
 
 @router.post("/resume", response_model=ParsedResumeResponse)
-async def parse_resume_endpoint(request: ParseResumeRequest):
+async def parse_resume_endpoint(request: ParseResumeRequest, http_request: Request):
     """Parses a single resume."""
     logger.info(f"Received parse request for resume: {request.resume_name}")
 
     try:
-        parsed_json = await resume_parser.parse_s3_file(s3_key=request.resume_path)
+        parsed_json = await resume_parser.parse_s3_file(
+            s3_key=request.resume_path,
+            is_cancelled=http_request.is_disconnected,
+        )
         return {
             "resume_name": request.resume_name,
             "status": "success",
             "parsed_resume": parsed_json,
+        }
+    except ResumeParseCancelled as e:
+        logger.warning(f"Skipped resume parse, caller gone: {e}")
+        return {
+            "resume_name": request.resume_name,
+            "status": "error",
+            "error_message": str(e),
         }
     except Exception as e:
         logger.error(f"Error parsing resume {request.resume_path}: {e}")

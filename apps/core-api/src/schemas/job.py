@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import re
 from datetime import datetime
 from uuid import UUID
 
@@ -41,6 +43,32 @@ def _normalize_experience_years(value: object) -> float | None:
             "Experience years must have at most one decimal place (e.g. 2, 2.5, 5.7)"
         )
     return round(years * 10) / 10
+
+
+_HEADING_RE = re.compile(r"<h[1-6][^>]*>.*?</h[1-6]>", re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _description_has_meaningful_text(value: str) -> bool:
+    """True when the JD body (ignoring HTML tags and section headings) has a letter or digit.
+
+    Section headings like "Role overview" are template text added by the form,
+    so they must not count — otherwise a symbols-only JD would always pass.
+    """
+    text = _HEADING_RE.sub(" ", value)
+    text = html.unescape(_TAG_RE.sub(" ", text))
+    return any(ch.isalnum() for ch in text)
+
+
+def _validate_description(value: str | None) -> str | None:
+    if value is None or value == "":
+        return value
+    if not _description_has_meaningful_text(value):
+        raise ValueError(
+            "Job description must include letters or numbers — "
+            "special characters alone are not allowed"
+        )
+    return value
 
 
 class SkillItem(BaseModel):
@@ -119,6 +147,11 @@ class JobCreate(BaseModel):
             )
         return value
 
+    @field_validator("description")
+    @classmethod
+    def description_must_be_meaningful(cls, value: str | None) -> str | None:
+        return _validate_description(value)
+
     @field_validator("location")
     @classmethod
     def location_must_be_meaningful(cls, value: str | None) -> str | None:
@@ -176,6 +209,11 @@ class JobUpdate(BaseModel):
                 "special characters alone are not allowed"
             )
         return value
+
+    @field_validator("description")
+    @classmethod
+    def description_must_be_meaningful(cls, value: str | None) -> str | None:
+        return _validate_description(value)
 
     @field_validator("location")
     @classmethod

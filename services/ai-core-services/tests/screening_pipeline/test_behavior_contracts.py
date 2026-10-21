@@ -523,12 +523,12 @@ async def test_pipecat_kokoro_adapter_preserves_pcm_audio_metadata():
 @pytest.mark.asyncio
 async def test_pipecat_kokoro_adapter_validates_before_pipeline_start():
     synthesizer = MagicMock()
-    synthesizer.ensure_ready = AsyncMock()
+    synthesizer.prepare = AsyncMock()
     service = KokoroTTSService(synthesizer=synthesizer)
 
     await service.validate_ready()
 
-    synthesizer.ensure_ready.assert_awaited_once()
+    synthesizer.prepare.assert_awaited_once()
 
 
 def test_pipecat_runtime_builds_without_starting_a_live_session():
@@ -1096,3 +1096,146 @@ async def test_silence_prompt_fires_after_candidate_actually_stops(monkeypatch):
     assert speech_output.await_args_list[0].args[0] == SILENCE_PROMPT_TEXT
 
     policy._cancel_inactivity_deadline()
+
+
+@pytest.mark.asyncio
+async def test_fail_session_marks_failed_and_removes_bot_without_completing():
+    api_client = MagicMock()
+    api_client.update_status = AsyncMock(return_value=True)
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        llm_client=MagicMock(),
+        api_client=api_client,
+        speech_output=AsyncMock(),
+    )
+    policy.session = MagicMock(id="session-id", status="in_progress", interview_metadata={"bot_id": "bot-1"})
+    policy._leave_bot_after_close = AsyncMock()
+
+    with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()):
+        await policy.fail_session("tts_unavailable")
+        # Teardown afterwards must not overwrite the failure as "completed".
+        await policy.cleanup()
+
+    assert policy.termination_reason == "tts_unavailable"
+    api_client.update_status.assert_awaited_once_with("failed")
+    policy._leave_bot_after_close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fail_session_skips_a_session_that_already_failed():
+    api_client = MagicMock()
+    api_client.update_status = AsyncMock(return_value=True)
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        llm_client=MagicMock(),
+        api_client=api_client,
+        speech_output=AsyncMock(),
+    )
+    policy.session = MagicMock(id="session-id", status="failed", interview_metadata={"bot_id": "bot-1"})
+    policy._leave_bot_after_close = AsyncMock()
+
+    await policy.fail_session("tts_unavailable")
+
+    api_client.update_status.assert_not_awaited()
+    policy._leave_bot_after_close.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_fails_session_when_kokoro_cannot_load():
+    runtime = PipecatInterviewRuntime(MagicMock(), "session-id")
+    runtime.tts.validate_ready = AsyncMock(side_effect=FileNotFoundError("missing"))
+    runtime.policy.fail_session = AsyncMock()
+
+    with pytest.raises(FileNotFoundError):
+        await runtime.run()
+
+    runtime.policy.fail_session.assert_awaited_once_with("tts_unavailable")
+
+
+def _answer_policy():
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        api_client=MagicMock(),
+        speech_output=AsyncMock(),
+    )
+    policy.is_active = True
+    policy._complete_question = AsyncMock()
+    policy._ask_follow_up = AsyncMock()
+    policy.transcript_log = [
+        {"interaction_type": "question", "candidate_answer": "", "follow_ups": [], "question_repeat_count": 0}
+    ]
+    return policy
+
+
+def _spoken(policy):
+    return [call.args[0] for call in policy.speech_output.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_finished_answer_is_acknowledged_once():
+    policy = _answer_policy()
+
+    await policy._handle_answer(
+        {"id": 1, "question": "Q?"}, "Q?", "answer", {"decision": "NEXT_QUESTION", "score": 8}, None
+    )
+
+    assert _spoken(policy) == [ANSWER_ACKNOWLEDGEMENT_TEXT]
+
+
+@pytest.mark.asyncio
+async def test_no_acknowledgement_after_a_filler_or_before_a_follow_up():
+    """Bug-041: "Alright, one moment. ... Thank you for answering the
+    question." — never stack the acknowledgement on a filler, and don't thank
+    the candidate for an answer that's getting a follow-up."""
+    policy = _answer_policy()
+    policy._filler_spoken_this_turn = True
+    await policy._handle_answer(
+        {"id": 1, "question": "Q?"}, "Q?", "answer", {"decision": "NEXT_QUESTION", "score": 8}, None
+    )
+
+    follow_up = _answer_policy()
+    await follow_up._handle_answer(
+        {"id": 1, "question": "Q?"},
+        "Q?",
+        "answer",
+        {"decision": "ASK_FOLLOW_UP", "score": 4, "suggested_follow_up": "Why?"},
+        None,
+    )
+
+    assert ANSWER_ACKNOWLEDGEMENT_TEXT not in _spoken(policy)
+    assert ANSWER_ACKNOWLEDGEMENT_TEXT not in _spoken(follow_up)
+
+
+def test_a_slow_reply_gets_at_most_one_filler():
+    from src.screening_pipeline.prompts import FILLER_SCHEDULE_SECONDS
+
+    assert len(FILLER_SCHEDULE_SECONDS) == 1
+    # Later than the answer-settle wait, so an ordinary reply needs no filler.
+    assert FILLER_SCHEDULE_SECONDS[0] > ANSWER_SETTLE_SECONDS
+
+
+@pytest.mark.parametrize(
+    "last_interaction, accepted",
+    [("greeting", True), ("question", False)],
+)
+@pytest.mark.asyncio
+async def test_short_thanks_counts_as_a_reply_to_the_greeting_only(last_interaction, accepted):
+    """A candidate answering the greeting with "Thank you." must start the
+    interview; the noise filter dropped it, so the bot never asked a question.
+    Mid-question, the same phrase is still treated as a likely STT hallucination."""
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "listening"
+    policy.transcript_log = [{"interaction_type": last_interaction, "candidate_answer": ""}]
+    policy._process_after_answer_settles = AsyncMock()
+
+    policy.handle_candidate_speech("Thank you.")
+    await asyncio.sleep(0)
+
+    assert (policy._answer_buffer == ["Thank you."]) is accepted
+    assert (policy.current_interaction_state == "collecting_answer") is accepted

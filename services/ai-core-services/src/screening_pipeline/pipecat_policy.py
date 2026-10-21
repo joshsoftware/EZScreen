@@ -90,6 +90,9 @@ class PipecatInterviewPolicy:
         # _end_after_inactivity / handle_candidate_speech_stopped).
         self._candidate_speaking = False
         self._last_filler_text: Optional[str] = None
+        # Whether a filler already played for the current answer; suppresses
+        # the acknowledgement right after it (Bug-041).
+        self._filler_spoken_this_turn = False
         # Set by handle_candidate_speech_stopped (or, as a fallback,
         # _process_after_answer_settles) to the moment the candidate's speech
         # was received; read (and cleared) by _start_filler_schedule to
@@ -233,6 +236,46 @@ class PipecatInterviewPolicy:
             if leave_bot:
                 await self._leave_bot_after_close()
 
+    async def fail_session(self, reason: str) -> None:
+        """Mark the session failed and pull the bot out of the meeting.
+
+        Used when the runtime cannot run the interview (e.g. TTS artifacts
+        missing). Without this the bot stays in the call silently, which shows
+        as a permanently muted participant.
+        """
+        async with self._end_lock:
+            if self._ending or self.is_finalized:
+                return
+            self._ending = True
+            self.termination_reason = reason
+            self.is_active = False
+            self.current_interaction_state = "ending"
+            self._cancel_inactivity_deadline()
+            self._cancel_answer_settle()
+            self._cancel_closing_reply_timeout()
+            self._cancel_processing()
+            self._cancel_filler_schedule()
+            self._cancel_tts_warm()
+            logger.error(
+                "Interview session failed; removing bot from meeting",
+                extra={"session_id": self.session_id, "reason": reason},
+            )
+            if self.session is None:
+                self.session = await interview_session_repo.get_by_id(self.session_id)
+            if self.session is None:
+                return
+            if getattr(self.session, "status", None) == "failed":
+                # Attendee reconnects while the bot is already being removed.
+                return
+            if self.api_client is None:
+                self.api_client = SessionApiClient(session_id=str(self.session.id))
+            # Status first, so the "left" webhook can't report it as completed;
+            # then get the silent bot out before the slower persistence.
+            await self.api_client.update_status("failed")
+            await self._leave_bot_after_close()
+            # Keep anything already answered before the failure.
+            await self.finalize(reason=reason)
+
     async def cleanup(self):
         """Teardown connections, persisting the interview first if it ended early."""
         await self.end_interview("transport_disconnected")
@@ -292,7 +335,19 @@ class PipecatInterviewPolicy:
             and bool(self.transcript_log)
             and self.transcript_log[-1].get("interaction_type") == "closing"
         )
-        if is_probable_hallucination(transcript) and not is_closing_reply:
+        # The greeting only asks the candidate to say when they're ready, so a
+        # short "Thank you." / "Yeah." there is a real reply, not noise.
+        # Dropping it left the bot waiting and the questions never started.
+        is_greeting_reply = (
+            bool(self.transcript_log)
+            and self.transcript_log[-1].get("interaction_type") == "greeting"
+            and bool(transcript.strip())
+        )
+        if (
+            is_probable_hallucination(transcript)
+            and not is_closing_reply
+            and not is_greeting_reply
+        ):
             logger.info(
                 "Ignored probable Whisper hallucination or noise",
                 extra={"transcript": transcript},
@@ -609,7 +664,9 @@ class PipecatInterviewPolicy:
         decision = eval_data.get("decision", "NEXT_QUESTION")
         is_complete = decision == "NEXT_QUESTION"
         follow_up_question = eval_data.get("suggested_follow_up", "")
-        if decision != "REPEAT_QUESTION":
+        # Acknowledge only a finished answer, and not on top of a filler the
+        # candidate just heard ("One moment... Thank you for answering...").
+        if decision == "NEXT_QUESTION" and not self._filler_spoken_this_turn:
             await self.speak(ANSWER_ACKNOWLEDGEMENT_TEXT)
 
         if decision == "REPEAT_QUESTION":
@@ -865,11 +922,13 @@ class PipecatInterviewPolicy:
         logger.info("AI speaking filler", extra={"text": text})
         if self.speech_output is None:
             raise RuntimeError("Pipecat speech output is not configured")
+        self._filler_spoken_this_turn = True
         await self.speech_output(text)
 
     def _start_filler_schedule(self) -> None:
         """Arm the filler schedule for this turn. See _run_filler_schedule."""
         self._cancel_filler_schedule()
+        self._filler_spoken_this_turn = False
         self._filler_task = asyncio.create_task(self._run_filler_schedule())
 
     def _cancel_filler_schedule(self) -> None:
