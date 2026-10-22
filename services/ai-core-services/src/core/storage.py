@@ -1,6 +1,10 @@
 import boto3
+import io
 import os
 import tempfile
+from typing import Iterator
+
+from boto3.s3.transfer import TransferConfig
 from botocore.client import Config
 from src.core.config import settings
 from src.core.logger import logger
@@ -43,5 +47,46 @@ class StorageClient:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
             raise
+
+    def upload_stream(
+        self,
+        chunks: Iterator[bytes],
+        s3_key: str,
+        *,
+        bucket_name: str,
+        content_type: str,
+    ) -> None:
+        """Multipart-upload an iterator of byte chunks without buffering the
+        whole object (meeting recordings are 0.5-3 GB)."""
+        self.s3_client.upload_fileobj(
+            _ChunkReader(chunks),
+            bucket_name,
+            s3_key,
+            ExtraArgs={"ContentType": content_type},
+            Config=TransferConfig(multipart_chunksize=8 * 1024 * 1024, max_concurrency=2),
+        )
+
+
+class _ChunkReader(io.RawIOBase):
+    """Expose an iterator of byte chunks as a readable file object."""
+
+    def __init__(self, chunks: Iterator[bytes]):
+        self._chunks = chunks
+        self._buffer = b""
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, target) -> int:
+        while not self._buffer:
+            try:
+                self._buffer = next(self._chunks)
+            except StopIteration:
+                return 0
+        size = min(len(target), len(self._buffer))
+        target[:size] = self._buffer[:size]
+        self._buffer = self._buffer[size:]
+        return size
+
 
 storage_client = StorageClient()

@@ -59,7 +59,12 @@ async def process_state_change(payload: Dict[str, Any]):
         if runtime:
             await runtime.policy.end_interview("meeting_ended")
         await update_session_status(session.id, "completed")
-        
+        if new_state == "ended":
+            # Attendee's recording is only downloadable once the bot has ended.
+            from src.screening_pipeline.recording_import import schedule_recording_import
+
+            await schedule_recording_import(str(session.id), bot_id)
+
     elif new_state == "fatal_error":
         # Bot crashed or failed to join
         await update_session_status(session.id, "failed")

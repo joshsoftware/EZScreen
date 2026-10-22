@@ -431,13 +431,24 @@ function Scorecard({
 
       {recordingUrl ? (
         <div className="flex flex-col gap-xs pt-xs border-t border-outline-variant/50">
+          <p className="font-label-md text-label-md text-on-surface-variant tracking-wide">
+            Session recording
+          </p>
+          <video
+            controls
+            preload="metadata"
+            src={recordingUrl}
+            className="w-full rounded-lg bg-black"
+          >
+            Your browser cannot play this recording.
+          </video>
           <a
             href={recordingUrl}
             target="_blank"
             rel="noreferrer"
             className="text-label-md text-primary hover:underline"
           >
-            Session recording
+            Open recording in a new tab
           </a>
         </div>
       ) : null}

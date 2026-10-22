@@ -24,6 +24,7 @@ from src.services.application_timeline_service import (
     append_timeline_event,
     timeline_event_types,
 )
+from src.services.storage_service import create_presigned_recording_url
 
 __all__ = [
     "get_analysis_for_session",
@@ -129,6 +130,16 @@ def get_analysis_for_session(
     return session, session.analysis
 
 
+def _recording_playback_url(stored: str | None) -> str | None:
+    """interview_analysis.recording_url holds a MinIO key; hand the browser a
+    fresh presigned URL. Values that are already URLs are passed through."""
+    if not stored:
+        return None
+    if stored.startswith(("http://", "https://")):
+        return stored
+    return create_presigned_recording_url(stored)
+
+
 def analysis_to_response(
     session: InterviewSession,
     analysis: InterviewAnalysis,
@@ -147,7 +158,7 @@ def analysis_to_response(
         interview_session_id=analysis.interview_session_id,
         application_id=analysis.application_id,
         interview_type=interview_type,
-        recording_url=analysis.recording_url,
+        recording_url=_recording_playback_url(analysis.recording_url),
         analysis_result=analysis.analysis_result,
         question_answer=analysis.question_answer,
         conversation_transcript=_conversation_transcript(session),

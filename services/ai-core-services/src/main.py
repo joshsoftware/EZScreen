@@ -11,6 +11,7 @@ from src.screening_pipeline.audio_websocket import router as websocket_router
 import asyncio
 from contextlib import asynccontextmanager
 from src.screening_pipeline.pipecat_tts import KokoroSynthesizer, warm_shared_phrases
+from src.screening_pipeline.recording_import import run_recording_import_poller
 from src.screening_pipeline.tts_prewarm import known_bot_texts
 
 def _warm_screening_imports() -> None:
@@ -48,7 +49,10 @@ async def lifespan(app: FastAPI):
         )
     except Exception as e:
         print(f"Failed to pre-download Kokoro models: {e}")
+    # Copies finished screenings' Attendee recordings into MinIO.
+    recording_poller = asyncio.create_task(run_recording_import_poller())
     yield
+    recording_poller.cancel()
     if warm_task is not None and not warm_task.done():
         warm_task.cancel()
 

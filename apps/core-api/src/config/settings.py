@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minio_password"
     minio_secure: bool = False
     minio_bucket_resumes: str = "resumes"
+    # Screening meeting recordings copied from Attendee (MP4, 0.5-3 GB each).
+    minio_bucket_recordings: str = "attendee-recordings"
+    # A failed copy is retried after this delay, up to the max attempts.
+    recording_import_max_attempts: int = 5
+    recording_import_retry_seconds: int = 60
+    # An import claimed this long ago without a result is assumed abandoned
+    # (ai-core restarted mid-copy) and becomes claimable again.
+    recording_import_stale_seconds: int = 1800
     s3_presign_expires_seconds: int = 900
 
     # AI core host. Change this once; URL is derived unless PARSING_SERVICE_URL is set.

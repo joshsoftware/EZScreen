@@ -27,6 +27,10 @@ class AttendeeScheduleBotRequest(BaseModel):
     transcription_settings: Dict[str, Any] = Field(default_factory=dict)
     websocket_settings: Optional[AttendeeWebsocketSettings] = None
     webhooks: Optional[list[AttendeeWebhookConfig]] = None
+    # Meeting recording that EZScreen copies into MinIO after the call.
+    recording_settings: Optional[Dict[str, Any]] = Field(
+        default_factory=lambda: {"format": "mp4"}
+    )
 
 
 class LeaveBotResponse(BaseModel):
