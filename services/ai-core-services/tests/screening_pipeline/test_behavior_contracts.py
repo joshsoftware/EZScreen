@@ -1239,3 +1239,68 @@ async def test_short_thanks_counts_as_a_reply_to_the_greeting_only(last_interact
 
     assert (policy._answer_buffer == ["Thank you."]) is accepted
     assert (policy.current_interaction_state == "collecting_answer") is accepted
+
+
+@pytest.mark.parametrize(
+    "transcript, unfinished",
+    [
+        # Real answers from a local interview (Bug-042).
+        ("uh contains uh methods that are abstract by default. uh the third point is", True),
+        ("Talking about how it is implemented, we make the fields private and", True),
+        ("So we can say that,", True),
+        ("Um", True),
+        ("PATCH is used to update the existing data, so these are the methods", False),
+        ("This is really nice.", False),
+        ("It belongs to the class variable.", False),
+        ("", False),
+    ],
+)
+def test_looks_unfinished(transcript, unfinished):
+    from src.screening_pipeline.speech_filter import looks_unfinished
+
+    assert looks_unfinished(transcript) is unfinished
+
+
+@pytest.mark.parametrize("answer, extra_wait", [("the third point is", True), ("That's my answer.", False)])
+@pytest.mark.asyncio
+async def test_unfinished_answers_get_extra_time_before_evaluation(monkeypatch, answer, extra_wait):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.01)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.UNFINISHED_ANSWER_EXTRA_SECONDS", 0.3)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [10.0])
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "collecting_answer"
+    policy._answer_buffer = [answer]
+    policy._process_speech = AsyncMock()
+
+    task = asyncio.create_task(policy._process_after_answer_settles())
+    await asyncio.sleep(0.15)
+    evaluated_early = policy._process_speech.await_count == 1
+    await asyncio.wait_for(task, timeout=2)
+
+    assert evaluated_early is not extra_wait
+    policy._process_speech.assert_awaited_once_with(answer)
+
+
+@pytest.mark.asyncio
+async def test_resuming_during_the_extra_wait_keeps_collecting(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.01)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.UNFINISHED_ANSWER_EXTRA_SECONDS", 0.3)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [10.0])
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "collecting_answer"
+    policy._answer_buffer = ["the third point is"]
+    policy._process_speech = AsyncMock()
+
+    policy._answer_settle_task = asyncio.create_task(policy._process_after_answer_settles())
+    await asyncio.sleep(0.1)
+    policy.handle_candidate_activity()  # candidate carries on talking
+    await asyncio.sleep(0.4)
+
+    policy._process_speech.assert_not_awaited()
+    assert policy.current_interaction_state == "collecting_answer"

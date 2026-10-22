@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     # brief pause mid-answer is merged into one answer instead of two. Hard
     # floor is 1.5s — do not go lower without UX sign-off.
     screening_answer_settle_seconds: float = 2.0
+    # Added to the settle when the answer so far ends mid-sentence (Bug-042).
+    screening_unfinished_answer_extra_seconds: float = 3.0
 
     # Background noise / quiet-voice rejection. Pipecat's defaults are
     # confidence=0.7, min_volume=0.6.

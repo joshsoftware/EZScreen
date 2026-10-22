@@ -94,6 +94,10 @@ MAX_SILENCE_PROMPTS = 2
 # docs/architecture/SCREENING_BOT_LATENCY_OPTIMIZATION.md Phase 2 for the tuning
 # rationale and hard floor (1.5s).
 ANSWER_SETTLE_SECONDS = settings.screening_answer_settle_seconds
+# Extra wait when the answer so far stops mid-sentence ("...the third point
+# is"), so a candidate pausing to think isn't interrupted (Bug-042). Finished
+# answers keep the normal settle, so this doesn't slow ordinary replies.
+UNFINISHED_ANSWER_EXTRA_SECONDS = settings.screening_unfinished_answer_extra_seconds
 # This is intentionally separate from SILENCE_PROMPT_SECONDS: the closing
 # reply window must never speak the inactivity prompt.
 CLOSING_REPLY_TIMEOUT_SECONDS = 30

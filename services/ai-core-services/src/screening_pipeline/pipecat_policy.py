@@ -32,9 +32,10 @@ from src.screening_pipeline.prompts import (
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
+    UNFINISHED_ANSWER_EXTRA_SECONDS,
 )
 from src.screening_pipeline.session_api import SessionApiClient
-from src.screening_pipeline.speech_filter import is_probable_hallucination
+from src.screening_pipeline.speech_filter import is_probable_hallucination, looks_unfinished
 from src.screening_pipeline.tts_prewarm import coerce_questions_list, known_bot_texts
 
 
@@ -534,6 +535,21 @@ class PipecatInterviewPolicy:
             transcript = " ".join(part for part in self._answer_buffer if part).strip()
             if not transcript:
                 return
+            if looks_unfinished(transcript):
+                # "...the third point is" — the candidate is mid-thought.
+                # Give them longer before answering (Bug-042), and hold any
+                # filler until the real wait for the reply starts.
+                logger.info(
+                    "Answer looks unfinished; waiting longer",
+                    extra={"session_id": self.session_id, "transcript_tail": transcript[-60:]},
+                )
+                self._cancel_filler_schedule()
+                await asyncio.sleep(UNFINISHED_ANSWER_EXTRA_SECONDS)
+                if not self.is_active or self.current_interaction_state != "collecting_answer":
+                    return
+                transcript = " ".join(part for part in self._answer_buffer if part).strip()
+                self._turn_started_at = asyncio.get_running_loop().time()
+                self._start_filler_schedule()
             self.current_interaction_state = "evaluating"
             self._cancel_inactivity_deadline()
             self._processing_task = asyncio.create_task(self._process_speech(transcript))
