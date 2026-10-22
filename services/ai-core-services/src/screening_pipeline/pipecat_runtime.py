@@ -173,7 +173,9 @@ class PipecatInterviewRuntime:
                 ),
             )
         )
-        self.stt = WhisperHttpSTTService(sample_rate=16000)
+        self.stt = WhisperHttpSTTService(
+            sample_rate=16000, prompt_provider=self.policy.stt_prompt
+        )
         # If dispatch_bot() scheduled a pre-warm job (see tts_prewarm.py) that
         # finished before the bot joined, reuse its already-warmed
         # KokoroSynthesizer instead of starting from an empty cache. A miss

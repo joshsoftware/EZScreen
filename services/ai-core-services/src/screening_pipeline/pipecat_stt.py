@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Callable
 
 import httpx
 from pipecat.frames.frames import Frame, TranscriptionFrame
@@ -13,13 +14,41 @@ from src.core.config import settings
 from src.core.logger import logger
 
 MIN_ANSWER_SECONDS = 0.25
+# Whisper only reads the last ~224 tokens of a prompt.
+MAX_PROMPT_CHARS = 800
+
+
+def _echoes_prompt(transcript: str, prompt: str) -> bool:
+    """Whisper sometimes returns (part of) its prompt for silence or noise."""
+    words = re.findall(r"[a-z0-9]+", transcript.lower())
+    if len(words) < 4:
+        return False
+    return " ".join(words) in " ".join(re.findall(r"[a-z0-9]+", prompt.lower()))
 
 
 class WhisperHttpSTTService(SegmentedSTTService):
     """Transcribe finalized audio segments using the existing Whisper endpoint."""
 
-    def __init__(self, *, sample_rate: int = 24000):
+    def __init__(
+        self,
+        *,
+        sample_rate: int = 24000,
+        prompt_provider: Callable[[], str | None] | None = None,
+    ):
         super().__init__(audio_passthrough=False, sample_rate=sample_rate)
+        # Context for the answer being transcribed (the current question and
+        # its expected keywords), so Whisper spells technical terms right:
+        # "ConcurrentHashMap" was coming back as "Concrete Hotsmap".
+        self._prompt_provider = prompt_provider
+
+    def _prompt(self) -> str | None:
+        if self._prompt_provider is None:
+            return None
+        try:
+            prompt = (self._prompt_provider() or "").strip()
+        except Exception:
+            return None
+        return prompt[-MAX_PROMPT_CHARS:] or None
 
     @property
     def wants_wav_segments(self) -> bool:
@@ -46,6 +75,9 @@ class WhisperHttpSTTService(SegmentedSTTService):
             "response_format": "json",
             "language": "en",
         }
+        prompt = self._prompt()
+        if prompt:
+            data["prompt"] = prompt
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -60,6 +92,10 @@ class WhisperHttpSTTService(SegmentedSTTService):
                 transcript = response.json().get("text", "").strip()
         except Exception as error:
             logger.error("Pipecat Whisper transcription failed", extra={"error": str(error)})
+            return
+
+        if transcript and prompt and _echoes_prompt(transcript, prompt):
+            logger.info("Ignored transcript that only repeats the STT prompt")
             return
 
         if transcript:

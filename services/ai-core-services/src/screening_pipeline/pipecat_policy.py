@@ -925,6 +925,26 @@ class PipecatInterviewPolicy:
             raise RuntimeError("Pipecat speech output is not configured")
         await self.speech_output(text)
 
+    def stt_prompt(self) -> str | None:
+        """Context for transcribing the candidate's current answer.
+
+        Whisper treats its prompt as preceding text and favours its spelling,
+        so the question and its expected keywords make technical terms come
+        out right ("ConcurrentHashMap", not "Concrete Hotsmap"). Keywords go
+        last because Whisper keeps only the end of a long prompt.
+        """
+        question_obj = getattr(self, "current_question_obj", None) or {}
+        question = str(question_obj.get("question") or "").strip()
+        if not question:
+            return None
+        parts = [question]
+        skill = str(question_obj.get("skill_focus") or "").strip()
+        keywords = [str(k).strip() for k in question_obj.get("expected_keywords") or [] if str(k).strip()]
+        terms = ([skill] if skill else []) + keywords
+        if terms:
+            parts.append("Key terms: " + ", ".join(terms) + ".")
+        return " ".join(parts)
+
     async def _speak_filler(self, text: str) -> None:
         """Speak a short filler phrase without changing current_interaction_state.
 
