@@ -106,7 +106,18 @@ sequenceDiagram
 
 `minio-init` already creates `attendee-recordings`. No database migration: the state uses the existing `interview_metadata` JSONB and `recording_url` columns.
 
-## 8. Capacity (MinIO on this host)
+## 8. Backfill after deploy
+
+Copies are scheduled when a meeting ends, so interviews completed before this feature was deployed have none. Attendee keeps recordings only briefly (a 7-day-old one already returned 403 in testing), so run this right after deploying:
+
+```bash
+docker compose exec core-api python -m scripts.backfill_recording_imports          # dry run
+docker compose exec core-api python -m scripts.backfill_recording_imports --apply  # queue copies
+```
+
+It queues every `completed` session that has a `bot_id` and no `recording_import`; ai-core's poller copies them within minutes.
+
+## 9. Capacity (MinIO on this host)
 
 Files stay until deleted or the disk fills. No retention policy is enforced yet.
 
@@ -120,14 +131,14 @@ Files stay until deleted or the disk fills. No retention policy is enforced yet.
 
 Resumes are negligible. Video dominates: plan backups and a retention policy (or a move to S3) before volume grows.
 
-## 9. Out of scope
+## 10. Out of scope
 
 - Calling Attendee `delete_data` after a successful copy
 - MinIO lifecycle / 2-year auto-delete
 - 720p or MP3 options
 - A live "importing recording…" indicator (the player appears once the copy is done; HR refreshes)
 
-## 10. How to verify
+## 11. How to verify
 
 1. Schedule a screening and let the bot record.
 2. After the bot ends, `interview_metadata.recording_import.status` is `pending`.
