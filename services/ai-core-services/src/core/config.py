@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     minio_secret_key: str
     minio_secure: bool = False
     minio_bucket_name: str
+    # Screening meeting recordings copied from Attendee after each interview.
+    minio_bucket_recordings: str = "attendee-recordings"
+    # Wait this long after the bot's `ended` webhook before copying, so
+    # Attendee has finished post-processing and uploading the MP4.
+    recording_save_delay_seconds: float = 300.0
+    # How often ai-core asks core-api for recordings that are due to copy.
+    recording_import_poll_seconds: float = 30.0
 
     # Real-time WebSocket Audio Stream Endpoint
     websocket_url: str

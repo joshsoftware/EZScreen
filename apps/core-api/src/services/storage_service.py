@@ -17,6 +17,9 @@ from src.config.settings import settings
 __all__ = [
     "ResumeObjectPayload",
     "build_resume_s3_key",
+    "build_recording_s3_key",
+    "create_presigned_recording_url",
+    "recording_key_prefix",
     "resume_key_prefix",
     "create_presigned_upload_url",
     "create_presigned_download_url",
@@ -88,6 +91,34 @@ def validate_resume_s3_key(
     remainder = s3_key[len(prefix) :]
     if not remainder or "/" in remainder:
         raise ValueError("Invalid s3_key path")
+
+
+def recording_key_prefix(organization_id: uuid.UUID, job_id: uuid.UUID) -> str:
+    return f"orgs/{organization_id}/jobs/{job_id}/recordings/"
+
+
+def build_recording_s3_key(
+    organization_id: uuid.UUID,
+    job_id: uuid.UUID,
+    session_id: uuid.UUID,
+) -> str:
+    """orgs/{org}/jobs/{job}/recordings/{session_id}.mp4"""
+    return f"{recording_key_prefix(organization_id, job_id)}{session_id}.mp4"
+
+
+def create_presigned_recording_url(s3_key: str) -> str:
+    """Short-lived GET URL so the browser can stream the MP4 straight from MinIO."""
+    client = _s3_client()
+    return client.generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": settings.minio_bucket_recordings,
+            "Key": s3_key,
+            "ResponseContentType": "video/mp4",
+            "ResponseContentDisposition": "inline",
+        },
+        ExpiresIn=settings.s3_presign_expires_seconds,
+    )
 
 
 def create_presigned_upload_url(
