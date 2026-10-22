@@ -104,6 +104,10 @@ ANSWER_SETTLE_SECONDS = settings.screening_answer_settle_seconds
 # is"), so a candidate pausing to think isn't interrupted (Bug-042). Finished
 # answers keep the normal settle, so this doesn't slow ordinary replies.
 UNFINISHED_ANSWER_EXTRA_SECONDS = settings.screening_unfinished_answer_extra_seconds
+# When speech ends without producing a usable transcript (noise, "Thank
+# you."), the answer collected so far is processed after this much extra
+# time, so a slower real transcript can still arrive and restart the wait.
+STT_RESULT_GRACE_SECONDS = 2.0
 # This is intentionally separate from SILENCE_PROMPT_SECONDS: the closing
 # reply window must never speak the inactivity prompt.
 CLOSING_REPLY_TIMEOUT_SECONDS = 30

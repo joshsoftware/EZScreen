@@ -1382,3 +1382,51 @@ async def test_bot_moves_on_after_two_non_answers_instead_of_re_asking():
 
     assert [c.args[0] for c in policy.speech_output.await_args_list] == [MOVE_ON_TEXT]
     policy._handle_skip.assert_awaited_once()
+
+
+def _collecting_policy(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.05)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.STT_RESULT_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [10.0])
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "listening"
+    policy.transcript_log = [{"interaction_type": "question", "candidate_answer": ""}]
+    policy._process_speech = AsyncMock()
+    return policy
+
+
+@pytest.mark.asyncio
+async def test_answer_is_processed_even_if_the_next_speech_is_dropped_as_noise(monkeypatch):
+    """Replays a stuck local interview: a sentence was collected, the
+    candidate spoke again (cancelling the settle), that speech came back as
+    "Thank you." and was ignored, and nothing ever processed the answer."""
+    policy = _collecting_policy(monkeypatch)
+
+    policy.handle_candidate_speech("And then, you can build the instance.")
+    policy.handle_candidate_activity()          # speaks again -> settle cancelled
+    policy.handle_candidate_speech_stopped()
+    policy.handle_candidate_speech("Thank you.")  # ignored as a hallucination
+    await asyncio.sleep(0.3)
+
+    policy._process_speech.assert_awaited_once_with("And then, you can build the instance.")
+
+
+@pytest.mark.asyncio
+async def test_bot_does_not_reply_while_the_candidate_is_still_talking(monkeypatch):
+    policy = _collecting_policy(monkeypatch)
+
+    policy.handle_candidate_speech("We can start.")
+    policy.handle_candidate_activity()
+    # Settle elapses while VAD still says the candidate is talking.
+    policy._answer_settle_task = asyncio.create_task(policy._process_after_answer_settles())
+    await asyncio.sleep(0.15)
+    policy._process_speech.assert_not_awaited()
+
+    policy.handle_candidate_speech_stopped()
+    policy.handle_candidate_speech("and then let's go.")
+    await asyncio.sleep(0.3)
+
+    policy._process_speech.assert_awaited_once_with("We can start. and then let's go.")

@@ -34,6 +34,7 @@ from src.screening_pipeline.prompts import (
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
+    STT_RESULT_GRACE_SECONDS,
     UNFINISHED_ANSWER_EXTRA_SECONDS,
 )
 from src.screening_pipeline.session_api import SessionApiClient
@@ -415,6 +416,20 @@ class PipecatInterviewPolicy:
         # candidate actually stopped. Overwritten by every VAD stop, so only
         # the final one before real processing starts is ever used.
         self._turn_started_at = now
+        # Speech starting cancelled the pending settle. If this stretch of
+        # speech then transcribes to nothing usable (noise, "Thank you."),
+        # no new transcript re-arms it and what was already collected would
+        # never be processed: the bot went silent mid-interview.
+        if (
+            self.current_interaction_state == "collecting_answer"
+            and self._answer_buffer
+            and (self._answer_settle_task is None or self._answer_settle_task.done())
+        ):
+            # Allow time for this speech's transcript first: if one arrives,
+            # handle_candidate_speech restarts the settle as usual.
+            self._answer_settle_task = asyncio.create_task(
+                self._process_after_answer_settles(stt_grace_seconds=STT_RESULT_GRACE_SECONDS)
+            )
 
     def _begin_listening(self):
         """Enter an eligible listening turn and start its hard inactivity deadline."""
@@ -514,7 +529,7 @@ class PipecatInterviewPolicy:
         except asyncio.CancelledError:
             return
 
-    async def _process_after_answer_settles(self):
+    async def _process_after_answer_settles(self, stt_grace_seconds: float = 0.0):
         # Normally already set by handle_candidate_speech_stopped (VAD
         # confirming the candidate stopped talking, before STT even finalizes
         # a transcript) — this is only a fallback for callers that push a
@@ -535,8 +550,13 @@ class PipecatInterviewPolicy:
         # after that call resolves — a filler must never overlap real speech.
         self._start_filler_schedule()
         try:
-            await asyncio.sleep(ANSWER_SETTLE_SECONDS)
+            await asyncio.sleep(stt_grace_seconds + ANSWER_SETTLE_SECONDS)
             if not self.is_active or self.current_interaction_state != "collecting_answer":
+                return
+            if self._candidate_speaking:
+                # They started talking again before the previous sentence
+                # finished transcribing; replying now talks over them.
+                # handle_candidate_speech_stopped re-arms the settle.
                 return
             transcript = " ".join(part for part in self._answer_buffer if part).strip()
             if not transcript:
@@ -552,6 +572,8 @@ class PipecatInterviewPolicy:
                 self._cancel_filler_schedule()
                 await asyncio.sleep(UNFINISHED_ANSWER_EXTRA_SECONDS)
                 if not self.is_active or self.current_interaction_state != "collecting_answer":
+                    return
+                if self._candidate_speaking:
                     return
                 transcript = " ".join(part for part in self._answer_buffer if part).strip()
                 self._turn_started_at = asyncio.get_running_loop().time()
