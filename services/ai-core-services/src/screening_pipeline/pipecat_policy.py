@@ -26,8 +26,10 @@ from src.screening_pipeline.prompts import (
     FILLER_SCHEDULE_SECONDS,
     FILLER_TEXTS,
     GREETING_TEXT,
+    MAX_CONVERSATIONAL_TURNS_PER_QUESTION,
     MAX_FOLLOW_UPS_PER_QUESTION,
     MAX_SILENCE_PROMPTS,
+    MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_SECONDS,
@@ -35,7 +37,11 @@ from src.screening_pipeline.prompts import (
     UNFINISHED_ANSWER_EXTRA_SECONDS,
 )
 from src.screening_pipeline.session_api import SessionApiClient
-from src.screening_pipeline.speech_filter import is_probable_hallucination, looks_unfinished
+from src.screening_pipeline.speech_filter import (
+    is_probable_hallucination,
+    is_skip_request,
+    looks_unfinished,
+)
 from src.screening_pipeline.tts_prewarm import coerce_questions_list, known_bot_texts
 
 
@@ -597,6 +603,16 @@ class PipecatInterviewPolicy:
             expected_keywords = ", ".join(question_obj.get("expected_keywords", []))
             answer_depth = question_obj.get("answer_depth", "partial_depth")
 
+        if is_skip_request(transcript):
+            # "Skip this question" / "next question" / "I don't know": move
+            # on without asking the LLM, which only treated a skip as such if
+            # the candidate also said they didn't know (Bug-039).
+            self._cancel_filler_schedule()
+            await self._move_on(
+                question_obj, current_q, transcript, primary_eval_data, reason="skip_request"
+            )
+            return
+
         follow_up_context = None
         if self.transcript_log and self.transcript_log[-1].get("follow_ups"):
             follow_up_context = self.transcript_log[-1]["follow_ups"]
@@ -616,11 +632,26 @@ class PipecatInterviewPolicy:
         intent = result.get("intent", "ANSWERING")
 
         if intent in ["CLARIFICATION", "SMALL_TALK"]:
+            prior_turns = (
+                len(self.transcript_log[-1].get("conversational_turns", []))
+                if self.transcript_log
+                else 0
+            )
+            if prior_turns >= MAX_CONVERSATIONAL_TURNS_PER_QUESTION:
+                # "Wonderful." / "Thank you." / "Yes." — re-asking the same
+                # question again just loops (Bug-039).
+                await self._move_on(
+                    question_obj, current_q, transcript, primary_eval_data,
+                    reason="no_answer_after_prompts",
+                )
+                return
             await self._handle_conversational(transcript, result.get("response", ""))
             return
 
         if intent == "SKIP":
-            await self._handle_skip(question_obj, current_q, transcript)
+            await self._move_on(
+                question_obj, current_q, transcript, primary_eval_data, reason="skip_intent"
+            )
             return
 
         await self._handle_answer(question_obj, current_q, transcript, result, primary_eval_data)
@@ -644,6 +675,32 @@ class PipecatInterviewPolicy:
         # A request for time is still a response turn. Never leave a session
         # indefinitely waiting after conversational speech.
         self._begin_listening()
+
+    async def _move_on(
+        self,
+        question_obj: dict,
+        current_q: str,
+        transcript: str,
+        primary_eval_data: Optional[dict],
+        *,
+        reason: str,
+    ):
+        """Tell the candidate we're moving on, then go to the next question.
+
+        During a follow-up the main answer was already evaluated, so the
+        question is completed with that evaluation instead of a zero score.
+        """
+        logger.info(
+            "Moving on to the next question",
+            extra={"session_id": self.session_id, "reason": reason},
+        )
+        await self.speak(MOVE_ON_TEXT)
+        if primary_eval_data is not None:
+            await self._complete_question(
+                question_obj, current_q, transcript, None, primary_eval_data
+            )
+        else:
+            await self._handle_skip(question_obj, current_q, transcript)
 
     async def _handle_skip(self, question_obj: dict, current_q: str, transcript: str):
         """Handles SKIP intent — saves 0-score evaluation and moves on.

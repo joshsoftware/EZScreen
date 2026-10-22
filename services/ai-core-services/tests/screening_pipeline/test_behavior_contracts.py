@@ -36,6 +36,7 @@ from src.screening_pipeline.prompts import (
     GREETING_TEXT,
     MAX_FOLLOW_UPS_PER_QUESTION,
     MAX_SILENCE_PROMPTS,
+    MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_SECONDS,
@@ -660,6 +661,7 @@ async def test_start_warms_tts_cache_with_greeting_closing_and_all_questions():
             ANSWER_ACKNOWLEDGEMENT_TEXT,
             REPEAT_QUESTION_PREFIX_TEXT,
             REPEAT_QUESTION_LIMIT_TEXT,
+            MOVE_ON_TEXT,
             *FILLER_TEXTS,
             "What is a closure?",
             "Explain event loops.",
@@ -1304,3 +1306,79 @@ async def test_resuming_during_the_extra_wait_keeps_collecting(monkeypatch):
 
     policy._process_speech.assert_not_awaited()
     assert policy.current_interaction_state == "collecting_answer"
+
+
+@pytest.mark.parametrize(
+    "transcript, skip",
+    [
+        ("Skip this question.", True),
+        ("Can we go to the next question?", True),
+        ("Let's move on.", True),
+        ("I'll pass on this one.", True),
+        ("I don't know the answer to this.", True),
+        ("Sorry, no idea.", True),
+        ("Java is pass by value.", False),
+        ("I don't know exactly, but a HashMap is not thread safe at all.", False),
+        ("A skip list keeps sorted layers of linked lists to search fast.", False),
+    ],
+)
+def test_is_skip_request(transcript, skip):
+    from src.screening_pipeline.speech_filter import is_skip_request
+
+    assert is_skip_request(transcript) is skip
+
+
+def _question_policy(**extra_log):
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_question_obj = {"id": 1, "question": "What is Docker?"}
+    policy.transcript_log = [
+        {"interaction_type": "question", "candidate_answer": "", "follow_ups": [], **extra_log}
+    ]
+    policy.evaluator.classify_and_evaluate = AsyncMock()
+    policy._handle_skip = AsyncMock()
+    policy._complete_question = AsyncMock()
+    return policy
+
+
+@pytest.mark.asyncio
+async def test_skip_request_moves_on_without_asking_the_llm():
+    policy = _question_policy()
+
+    await policy._process_speech("Skip this question, please.")
+
+    policy.evaluator.classify_and_evaluate.assert_not_awaited()
+    assert policy.speech_output.await_args_list[0].args[0] == MOVE_ON_TEXT
+    policy._handle_skip.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_skip_during_a_follow_up_keeps_the_main_answer_score():
+    primary = {"score": 7, "decision": "ASK_FOLLOW_UP"}
+    policy = _question_policy(primary_eval=primary, follow_ups=[{"ai_response": "Why?"}])
+
+    await policy._process_speech("Next question please.")
+
+    policy._handle_skip.assert_not_awaited()
+    args = policy._complete_question.await_args.args
+    assert args[3] is None and args[4] == primary
+
+
+@pytest.mark.asyncio
+async def test_bot_moves_on_after_two_non_answers_instead_of_re_asking():
+    policy = _question_policy(
+        conversational_turns=[
+            {"candidate_speech": "Wonderful.", "ai_response": "Please go ahead."},
+            {"candidate_speech": "Thank you.", "ai_response": "Whenever you're ready."},
+        ]
+    )
+    policy.evaluator.classify_and_evaluate = AsyncMock(
+        return_value={"intent": "SMALL_TALK", "response": "Please go ahead and answer."}
+    )
+
+    await policy._process_speech("Yes.")
+
+    assert [c.args[0] for c in policy.speech_output.await_args_list] == [MOVE_ON_TEXT]
+    policy._handle_skip.assert_awaited_once()

@@ -43,3 +43,21 @@ def looks_unfinished(transcript: str) -> bool:
         return True
     words = re.findall(r"[a-z']+", text.lower())
     return bool(words) and words[-1] in _CONTINUATION_WORDS
+
+
+# Short replies asking to skip the question. Only checked on short
+# transcripts, so an answer that merely contains "pass" or "don't know"
+# ("Java is pass by value", "I don't know exactly, but...") isn't a skip.
+_SKIP_PATTERNS = re.compile(
+    r"\bskip\b|\bnext question\b|\bmove on\b|\b(?:i'?ll|i will|i) pass\b"
+    r"|\bpass on (?:this|that)\b|\b(?:don'?t|do not) know\b|\bno idea\b"
+    r"|\b(?:can'?t|cannot) answer\b"
+)
+_MAX_SKIP_REQUEST_WORDS = 8
+
+
+def is_skip_request(transcript: str) -> bool:
+    """True if the candidate is asking to skip rather than answering."""
+    text = transcript.strip().lower().replace("’", "'")
+    words = re.findall(r"[a-z']+", text)
+    return 0 < len(words) <= _MAX_SKIP_REQUEST_WORDS and bool(_SKIP_PATTERNS.search(text))

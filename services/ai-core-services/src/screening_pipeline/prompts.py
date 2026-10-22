@@ -16,7 +16,7 @@ UNIFIED_SCREENING_SYSTEM = (
     "- ANSWERING: The candidate is attempting to answer the technical question. (Even if their answer is completely wrong, confusing, or poorly transcribed, if they are using technical terms or trying to answer, choose this!).\n"
     "- CLARIFICATION: The candidate is asking you to repeat, clarify, or rephrase the question.\n"
     "- SMALL_TALK: The candidate is ONLY asking for a moment to think (e.g. 'give me a second'), apologizing for a delay, confirming they are present (e.g. 'Yes I am here'), or responding to a greeting/closing. DO NOT use this for rambling. If classified as SMALL_TALK, provide a polite conversational response that encourages them or repeats the question to get them back on track.\n"
-    "- SKIP: The candidate explicitly states they do not know the answer and want to move on.\n\n"
+    "- SKIP: The candidate says they do not know the answer, or asks to skip this question / move on to the next question.\n\n"
     "STEP 2 \u2014 RESPONSE (conditional):\n"
     "- If intent is CLARIFICATION or SMALL_TALK: set \"response\" to a polite, brief conversational reply (per the STEP 1 guidance above).\n"
     "- Otherwise: set \"response\" to \"\".\n\n"
@@ -80,6 +80,12 @@ ANSWER_ACKNOWLEDGEMENT_TEXT = "Thank you for answering the question."
 # cache (it was pre-warmed as-is); "Let me repeat the question: <question>"
 # as a single string never would, since the cache is keyed on exact text.
 REPEAT_QUESTION_PREFIX_TEXT = "Let me repeat the question."
+# Spoken before moving on when the candidate asks to skip, or keeps replying
+# without answering (Bug-039: the bot re-asked the same question forever).
+MOVE_ON_TEXT = "No problem, let's move on to the next question."
+# Non-answer replies ("Thank you", "Yes", "Give me a second") allowed on one
+# question before the bot moves on instead of re-asking it.
+MAX_CONVERSATIONAL_TURNS_PER_QUESTION = 2
 REPEAT_QUESTION_LIMIT_TEXT = (
     "I have already repeated the question once. "
     "Please share your best answer when you are ready."

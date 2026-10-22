@@ -33,6 +33,7 @@ from src.screening_pipeline.prompts import (
     CLOSING_TEXT,
     FILLER_TEXTS,
     GREETING_TEXT,
+    MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_TEXT,
@@ -73,6 +74,7 @@ def known_bot_texts(questions: list[dict]) -> list[str]:
         ANSWER_ACKNOWLEDGEMENT_TEXT,
         REPEAT_QUESTION_PREFIX_TEXT,
         REPEAT_QUESTION_LIMIT_TEXT,
+        MOVE_ON_TEXT,
     ]
     texts.extend(FILLER_TEXTS)
     texts.extend(q.get("question", "") for q in questions if q.get("question"))

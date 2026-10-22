@@ -10,6 +10,7 @@ from src.screening_pipeline.prompts import (
     CLOSING_TEXT,
     FILLER_TEXTS,
     GREETING_TEXT,
+    MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_TEXT,
@@ -42,6 +43,7 @@ def test_known_bot_texts_includes_constants_and_question_text():
         ANSWER_ACKNOWLEDGEMENT_TEXT,
         REPEAT_QUESTION_PREFIX_TEXT,
         REPEAT_QUESTION_LIMIT_TEXT,
+        MOVE_ON_TEXT,
         *FILLER_TEXTS,
         "What is Docker?",
     ]
@@ -92,6 +94,7 @@ async def test_schedule_warms_and_claim_returns_the_finished_synthesizer():
             ANSWER_ACKNOWLEDGEMENT_TEXT,
             REPEAT_QUESTION_PREFIX_TEXT,
             REPEAT_QUESTION_LIMIT_TEXT,
+            MOVE_ON_TEXT,
             *FILLER_TEXTS,
             "What is Docker?",
         ]
