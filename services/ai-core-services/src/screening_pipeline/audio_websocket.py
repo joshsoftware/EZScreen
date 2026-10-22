@@ -12,21 +12,33 @@ active_sessions: Dict[str, Any] = {}
 seen_triggers = set()
 
 
+# States in which the bot is waiting for, or working on, the candidate's reply.
+_CANDIDATE_TURN_STATES = frozenset(
+    {"listening", "collecting_answer", "evaluating", "closing"}
+)
+
+
 def _should_forward_candidate_audio(
     trigger: str | None,
     interaction_state: str,
     has_user_audio_stream: bool,
+    bot_audible: bool = False,
 ) -> bool:
     """Select user audio, with mixed audio as Attendee-version fallback."""
     if trigger == "realtime_audio.user":
         return True
-    # Some Attendee sessions provide only realtime_audio.mixed.  Accept it
-    # only after the bot has finished speaking, so its own TTS is not sent to
-    # STT/VAD. Once a user stream is observed it is always preferred.
+    # Some Attendee sessions provide only realtime_audio.mixed, which also
+    # carries the bot's own voice. Drop it only while that voice is playing.
+    # It used to be dropped in every state but "listening"/"closing", so once
+    # a candidate paused and their first sentence was transcribed
+    # ("collecting_answer"), the rest of a long answer was never heard: the
+    # bot evaluated a truncated answer and talked over them (Bug-042).
+    # Once a user stream is observed it is always preferred.
     return (
         trigger == "realtime_audio.mixed"
         and not has_user_audio_stream
-        and interaction_state in {"listening", "closing"}
+        and not bot_audible
+        and interaction_state in _CANDIDATE_TURN_STATES
     )
 
 
@@ -121,10 +133,13 @@ async def _run_pipecat_session(websocket: WebSocket, session_id: str):
                 has_user_audio_stream = True
 
             interaction_state = runtime.policy.current_interaction_state
+            output = getattr(runtime, "output", None)
+            bot_audible = bool(output is not None and output.is_bot_audible())
             if not _should_forward_candidate_audio(
                 trigger,
                 interaction_state,
                 has_user_audio_stream,
+                bot_audible,
             ):
                 continue
 

@@ -15,10 +15,22 @@ from src.screening_pipeline.pipecat_transport import (
 )
 
 
-def test_mixed_audio_is_used_as_fallback_only_while_listening_or_closing():
-    assert _should_forward_candidate_audio("realtime_audio.mixed", "listening", False)
-    assert _should_forward_candidate_audio("realtime_audio.mixed", "closing", False)
+def test_mixed_audio_is_forwarded_for_the_whole_candidate_turn():
+    # Bug-042: a candidate continuing after a pause ("collecting_answer") or
+    # while their answer is being evaluated must still be heard.
+    for state in ("listening", "collecting_answer", "evaluating", "closing"):
+        assert _should_forward_candidate_audio("realtime_audio.mixed", state, False)
     assert not _should_forward_candidate_audio("realtime_audio.mixed", "speaking", False)
+
+
+def test_mixed_audio_is_dropped_while_the_bot_voice_is_playing():
+    # e.g. a filler during evaluation: the mixed audio contains the bot itself.
+    assert not _should_forward_candidate_audio(
+        "realtime_audio.mixed", "evaluating", False, bot_audible=True
+    )
+    assert _should_forward_candidate_audio(
+        "realtime_audio.user", "evaluating", False, bot_audible=True
+    )
 
 
 def test_user_audio_is_preferred_over_mixed_audio():
@@ -155,3 +167,28 @@ async def test_crashed_runtime_closes_the_stream_instead_of_idling_muted():
 
     assert websocket.closed
     created_runtimes[0].cleanup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_output_tracks_how_long_the_bot_voice_plays(monkeypatch):
+    from pipecat.frames.frames import OutputAudioRawFrame
+    from pipecat.processors.frame_processor import FrameDirection
+    from src.screening_pipeline import pipecat_transport
+    from src.screening_pipeline.pipecat_transport import AttendeeOutputProcessor
+
+    clock = {"now": 100.0}
+    monkeypatch.setattr(pipecat_transport.time, "monotonic", lambda: clock["now"])
+    output = AttendeeOutputProcessor(MagicMock(send_json=AsyncMock()))
+    output.push_frame = AsyncMock()
+    assert not output.is_bot_audible()
+
+    one_second = bytes(2 * 24000)
+    await output.process_frame(
+        OutputAudioRawFrame(audio=one_second, sample_rate=24000, num_channels=1),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    clock["now"] = 100.9
+    assert output.is_bot_audible()
+    clock["now"] = 101.0 + AttendeeOutputProcessor.ECHO_TAIL_SECONDS + 0.01
+    assert not output.is_bot_audible()
