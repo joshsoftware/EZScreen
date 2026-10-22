@@ -60,6 +60,14 @@ _ACTIVE_SESSION_STATUSES = frozenset(
     }
 )
 
+# Ended without an interview; HR can book the same session again.
+_RETRYABLE_SESSION_STATUSES = frozenset(
+    {
+        InterviewStatus.failed,
+        InterviewStatus.no_show,
+    }
+)
+
 _TERMINAL_SESSION_STATUSES = frozenset(
     {
         InterviewStatus.completed,
@@ -246,7 +254,11 @@ def _assert_reschedulable(
     types = timeline_event_types(db, application.id)
     assert_not_terminal(application, types)
 
-    if session.status not in _ACTIVE_SESSION_STATUSES:
+    # A screening whose bot failed or whose candidate didn't show up is
+    # exactly the one HR needs to book again; without this it was stuck
+    # (no reschedule, and a new booking is refused as "already scheduled").
+    retry = session.status in _RETRYABLE_SESSION_STATUSES
+    if session.status not in _ACTIVE_SESSION_STATUSES and not retry:
         raise ValueError("Only active screening sessions can be rescheduled")
 
     if application.status != ApplicationStatus.interview_scheduled:
@@ -257,10 +269,12 @@ def _assert_reschedulable(
 
     blocked = {
         "screening_completed",
-        "screening_in_progress",
         "rejected",
         "shortlisted_for_l1",
     }
+    if not retry:
+        # The failed / no-show attempt may have started before it broke.
+        blocked.add("screening_in_progress")
     if blocked.intersection(types):
         raise ValueError("Screening can no longer be rescheduled")
 
@@ -608,6 +622,8 @@ def reschedule_interview_session(
     session.comment = body.comment
     session.scheduled_by = actor_id
     session.status = InterviewStatus.rescheduled
+    # A retried failed / no-show attempt starts fresh.
+    session.completed_at = None
     session.interview_metadata = metadata
     db.add(session)
 
