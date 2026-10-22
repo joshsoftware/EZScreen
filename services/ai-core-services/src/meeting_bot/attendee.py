@@ -118,6 +118,25 @@ class AttendeeApiClient:
 
         return fallback_response
 
+    async def get_recording_url(self, bot_id: str) -> str | None:
+        """Short-lived download URL of the bot's meeting recording.
+
+        None while Attendee is still producing it (or if there is none);
+        raises on other API errors so the caller can retry.
+        """
+        if not self.api_key:
+            return None
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{self.api_url}/api/v1/bots/{bot_id}/recording",
+                headers=self._get_headers(),
+            )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        url = resp.json().get("url")
+        return url if isinstance(url, str) and url else None
+
     async def leave_bot(self, bot_id: str) -> LeaveBotResponse:
         """Instruct the bot to gracefully leave the meeting."""
         if not self.api_key:

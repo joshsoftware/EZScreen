@@ -25,11 +25,20 @@ from src.schemas.interview_session import (
     ScheduleInterviewSessionRequest,
     UpdateInterviewSessionStatusRequest,
 )
+from src.schemas.recording_import import (
+    ClaimedRecordingImport,
+    ClaimRecordingImportsRequest,
+    ClaimRecordingImportsResponse,
+    RecordingImportResultRequest,
+    RecordingImportState,
+    ScheduleRecordingImportRequest,
+)
 from src.services import (
     application_service,
     interview_analysis_service,
     job_service,
     interview_session_service,
+    recording_import_service,
 )
 
 router = APIRouter(
@@ -255,6 +264,73 @@ def save_conversation_transcript(
     session = _get_session_or_404(db, session_id)
     interview_analysis_service.save_conversation_transcript(db, session, body)
     return SuccessMessageResponse(message="Metadata saved successfully.")
+
+
+@router.post(
+    "/recording-imports/claim",
+    response_model=ClaimRecordingImportsResponse,
+    summary="Claim due meeting-recording copies (internal, ai-core poller)",
+)
+def claim_recording_imports(
+    body: ClaimRecordingImportsRequest,
+    db: DbSession,
+    _internal: InternalService,
+) -> ClaimRecordingImportsResponse:
+    claimed = recording_import_service.claim_due_imports(db, limit=body.limit)
+    return ClaimRecordingImportsResponse(
+        imports=[ClaimedRecordingImport(**item) for item in claimed]
+    )
+
+
+@router.post(
+    "/{session_id}/recording-import",
+    response_model=RecordingImportState | None,
+    summary="Schedule copying the meeting recording into MinIO (internal)",
+)
+def schedule_recording_import(
+    session_id: UUID,
+    body: ScheduleRecordingImportRequest,
+    db: DbSession,
+    _internal: InternalService,
+) -> RecordingImportState | None:
+    session = _get_session_or_404(db, session_id)
+    state = recording_import_service.schedule_import(
+        db, session, bot_id=body.bot_id, import_after=body.import_after
+    )
+    return RecordingImportState(**state) if state else None
+
+
+@router.post(
+    "/{session_id}/recording-import/result",
+    response_model=RecordingImportState,
+    summary="Report the outcome of a meeting-recording copy (internal)",
+)
+def report_recording_import_result(
+    session_id: UUID,
+    body: RecordingImportResultRequest,
+    db: DbSession,
+    _internal: InternalService,
+) -> RecordingImportState:
+    session = recording_import_service.get_session_for_import(db, session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Interview session not found",
+        )
+    try:
+        state = recording_import_service.report_result(
+            db,
+            session,
+            success=body.success,
+            s3_key=body.s3_key,
+            error=body.error,
+            retryable=body.retryable,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return RecordingImportState(**state)
 
 
 @router.get(

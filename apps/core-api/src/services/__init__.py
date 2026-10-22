@@ -18,6 +18,7 @@ from src.services import (
     organization_service,
     platform_service,
     public_job_service,
+    recording_import_service,
     user_service,
 )
 
@@ -39,5 +40,6 @@ __all__ = [
     "organization_service",
     "platform_service",
     "public_job_service",
+    "recording_import_service",
     "user_service",
 ]
