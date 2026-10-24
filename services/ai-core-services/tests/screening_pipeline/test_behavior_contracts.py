@@ -1485,3 +1485,32 @@ async def test_no_filler_is_armed_before_a_skip(monkeypatch):
 
     policy._start_filler_schedule.assert_not_called()
     policy._process_speech.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "prior_intent, new_intent, moves_on",
+    [
+        # Live test: "Yes. Yes. Yes." twice -> the question was asked 3 times.
+        ("SMALL_TALK", "SMALL_TALK", True),
+        # Asking to rephrase is a real attempt to answer: allow a second one.
+        ("CLARIFICATION", "CLARIFICATION", False),
+        ("CLARIFICATION", "SMALL_TALK", False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_non_answers_get_one_re_ask_clarifications_two(prior_intent, new_intent, moves_on):
+    policy = _question_policy(
+        conversational_turns=[
+            {"candidate_speech": "Yes. Yes. Yes.", "ai_response": "Could you explain?", "intent": prior_intent}
+        ]
+    )
+    policy.evaluator.classify_and_evaluate = AsyncMock(
+        return_value={"intent": new_intent, "response": "Could you explain how it works?"}
+    )
+    policy._begin_listening = MagicMock()
+
+    await policy._process_speech("Yes. Yes. Yes.")
+
+    spoken = [c.args[0] for c in policy.speech_output.await_args_list]
+    assert (spoken == [MOVE_ON_TEXT]) is moves_on
+    assert policy._handle_skip.await_count == (1 if moves_on else 0)

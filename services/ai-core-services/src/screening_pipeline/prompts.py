@@ -83,8 +83,10 @@ REPEAT_QUESTION_PREFIX_TEXT = "Let me repeat the question."
 # Spoken before moving on when the candidate asks to skip, or keeps replying
 # without answering (Bug-039: the bot re-asked the same question forever).
 MOVE_ON_TEXT = "No problem, let's move on to the next question."
-# Non-answer replies ("Thank you", "Yes", "Give me a second") allowed on one
-# question before the bot moves on instead of re-asking it.
+# How often the bot re-asks one question before moving on (Bug-039: it asked
+# the same question 2-3 times). A non-answer ("Yes.", "Thank you.") gets one
+# re-ask; asking to rephrase or clarify (a real attempt to answer) gets two.
+MAX_NON_ANSWER_REASKS_PER_QUESTION = 1
 MAX_CONVERSATIONAL_TURNS_PER_QUESTION = 2
 REPEAT_QUESTION_LIMIT_TEXT = (
     "I have already repeated the question once. "

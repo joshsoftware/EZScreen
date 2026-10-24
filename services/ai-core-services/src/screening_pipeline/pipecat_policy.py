@@ -28,6 +28,7 @@ from src.screening_pipeline.prompts import (
     GREETING_TEXT,
     MAX_CONVERSATIONAL_TURNS_PER_QUESTION,
     MAX_FOLLOW_UPS_PER_QUESTION,
+    MAX_NON_ANSWER_REASKS_PER_QUESTION,
     MAX_SILENCE_PROMPTS,
     MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
@@ -670,12 +671,16 @@ class PipecatInterviewPolicy:
         intent = result.get("intent", "ANSWERING")
 
         if intent in ["CLARIFICATION", "SMALL_TALK"]:
-            prior_turns = (
-                len(self.transcript_log[-1].get("conversational_turns", []))
+            prior = (
+                self.transcript_log[-1].get("conversational_turns", [])
                 if self.transcript_log
-                else 0
+                else []
             )
-            if prior_turns >= MAX_CONVERSATIONAL_TURNS_PER_QUESTION:
+            prior_non_answers = sum(1 for turn in prior if turn.get("intent") == "SMALL_TALK")
+            if len(prior) >= MAX_CONVERSATIONAL_TURNS_PER_QUESTION or (
+                intent == "SMALL_TALK"
+                and prior_non_answers >= MAX_NON_ANSWER_REASKS_PER_QUESTION
+            ):
                 # "Wonderful." / "Thank you." / "Yes." — re-asking the same
                 # question again just loops (Bug-039).
                 await self._move_on(
@@ -683,7 +688,9 @@ class PipecatInterviewPolicy:
                     reason="no_answer_after_prompts",
                 )
                 return
-            await self._handle_conversational(transcript, result.get("response", ""))
+            await self._handle_conversational(
+                transcript, result.get("response", ""), intent=intent
+            )
             return
 
         if intent == "SKIP":
@@ -696,7 +703,9 @@ class PipecatInterviewPolicy:
 
     # ──────────────────────────── INTENT HANDLERS ────────────────────────────
 
-    async def _handle_conversational(self, transcript: str, ai_response: str):
+    async def _handle_conversational(
+        self, transcript: str, ai_response: str, *, intent: str = "SMALL_TALK"
+    ):
         """Handles CLARIFICATION and SMALL_TALK intents."""
         if not ai_response or not str(ai_response).strip():
             ai_response = "Okay, sounds good."
@@ -706,6 +715,7 @@ class PipecatInterviewPolicy:
                 {
                     "candidate_speech": transcript,
                     "ai_response": ai_response,
+                    "intent": intent,
                 }
             )
 
