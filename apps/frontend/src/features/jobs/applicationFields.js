@@ -219,34 +219,49 @@ export function canScheduleScreening(detail, timeline) {
   return types.has('under_hr_review')
 }
 
+/**
+ * Event types since the latest screening booking (scheduled or rescheduled).
+ * A reschedule starts a fresh attempt, so an earlier failure or no-show must
+ * not count against it.
+ */
+function screeningAttemptEventTypes(timeline) {
+  const list = Array.isArray(timeline) ? timeline : []
+  let start = -1
+  list.forEach((event, index) => {
+    if (
+      event.event_type === 'screening_scheduled' ||
+      event.event_type === 'screening_rescheduled'
+    ) {
+      start = index
+    }
+  })
+  return new Set(start < 0 ? [] : list.slice(start).map((event) => event.event_type))
+}
+
 export function canRescheduleScreening(detail, timeline) {
   if (!detail || detail.status !== 'interview_scheduled') return false
   const types = timelineEventTypes(timeline)
   if (!types.has('screening_scheduled')) return false
-  if (
-    types.has('screening_completed') ||
-    types.has('screening_in_progress') ||
-    types.has('rejected') ||
-    types.has('shortlisted_for_l1')
-  ) {
-    return false
-  }
+  if (types.has('rejected') || types.has('shortlisted_for_l1')) return false
+  const attempt = screeningAttemptEventTypes(timeline)
+  if (attempt.has('screening_completed')) return false
+  // A failed or no-show attempt can be booked again even if it had started.
+  const retry = attempt.has('screening_failed') || attempt.has('screening_no_show')
+  if (attempt.has('screening_in_progress') && !retry) return false
   return Boolean(screeningSlotFromTimeline(timeline)?.sessionId)
 }
 
 /** Screening is booked but has no outcome yet, so the bot can still change its status. */
 export function isScreeningLive(timeline) {
   const types = timelineEventTypes(timeline)
-  if (!types.has('screening_scheduled') && !types.has('screening_rescheduled')) {
-    return false
-  }
+  if (types.has('rejected') || types.has('shortlisted_for_l1')) return false
+  const attempt = screeningAttemptEventTypes(timeline)
+  if (attempt.size === 0) return false
   return !(
-    types.has('screening_completed') ||
-    types.has('screening_no_show') ||
-    types.has('screening_cancelled') ||
-    types.has('screening_failed') ||
-    types.has('rejected') ||
-    types.has('shortlisted_for_l1')
+    attempt.has('screening_completed') ||
+    attempt.has('screening_no_show') ||
+    attempt.has('screening_cancelled') ||
+    attempt.has('screening_failed')
   )
 }
 

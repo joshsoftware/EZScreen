@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Iterable
 
 import httpx
@@ -27,14 +28,53 @@ _shared_phrase_audio: dict[str, list[bytes]] = {}
 # interview (and timed out Pipecat's pipeline setup) when each session or
 # pre-warm loaded its own copy. The ONNX session is not safe to call
 # concurrently, so every synthesizer using it shares one lock.
+class _SynthesisLock:
+    """One ONNX session at a time, with live speech ahead of background warming.
+
+    A pre-warm synthesizing a session's ~25 lines took minutes; a question the
+    candidate was waiting to hear queued behind it (~30s in a live test).
+    Background holders give way whenever a live request is waiting; a line
+    already being synthesized still finishes first.
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._live_waiting = 0
+        self._no_live_waiting = asyncio.Event()
+        self._no_live_waiting.set()
+
+    @asynccontextmanager
+    async def hold(self, *, live: bool):
+        if live:
+            self._live_waiting += 1
+            self._no_live_waiting.clear()
+            try:
+                await self._lock.acquire()
+            finally:
+                self._live_waiting -= 1
+                if self._live_waiting == 0:
+                    self._no_live_waiting.set()
+        else:
+            while True:
+                await self._no_live_waiting.wait()
+                await self._lock.acquire()
+                if self._live_waiting == 0:
+                    break
+                self._lock.release()  # a live request arrived meanwhile
+        try:
+            yield
+        finally:
+            self._lock.release()
+
+
 _shared_model = None
-_shared_model_lock: asyncio.Lock | None = None
+_shared_model_lock: _SynthesisLock | None = None
 
 
-def _shared_synth_lock() -> asyncio.Lock:
+def _shared_synth_lock() -> _SynthesisLock:
     global _shared_model_lock
     if _shared_model_lock is None:
-        _shared_model_lock = asyncio.Lock()
+        _shared_model_lock = _SynthesisLock()
     return _shared_model_lock
 
 
@@ -43,7 +83,7 @@ async def warm_shared_phrases(synthesizer: "KokoroSynthesizer", texts: Iterable[
     for text in texts:
         if not text or text in _shared_phrase_audio:
             continue
-        chunks = [chunk async for chunk in synthesizer.synthesize(text)]
+        chunks = [chunk async for chunk in synthesizer.synthesize(text, background=True)]
         _shared_phrase_audio[text] = chunks
     logger.info("Shared bot phrases ready", extra={"phrases": len(_shared_phrase_audio)})
 
@@ -68,7 +108,7 @@ class KokoroSynthesizer:
         self._cache: dict[str, list[bytes]] = {}
         # Kokoro's onnxruntime session is not safe to invoke concurrently from
         # multiple threads; serialize both warm-up and live synthesis through it.
-        self._synth_lock = asyncio.Lock()
+        self._synth_lock = _SynthesisLock()
         self._load_lock = asyncio.Lock()
 
     def _artifacts_present(self) -> bool:
@@ -138,7 +178,9 @@ class KokoroSynthesizer:
             if self.kokoro is None:
                 await self._load_model()
 
-    async def synthesize(self, text: str) -> AsyncGenerator[bytes, None]:
+    async def synthesize(
+        self, text: str, *, background: bool = False
+    ) -> AsyncGenerator[bytes, None]:
         cached = self._cache.get(text)
         if cached is None:
             cached = _shared_phrase_audio.get(text)
@@ -153,7 +195,7 @@ class KokoroSynthesizer:
         # generator is being consumed, so a second concurrent call sharing
         # this Kokoro instance could still race the onnx session even if we
         # only re-acquired the lock between individual chunk yields.
-        async with self._synth_lock:
+        async with self._synth_lock.hold(live=not background):
             # Another caller (e.g. a warm-up pass) may have populated the
             # cache while this one waited for the lock.
             cached = self._cache.get(text)
@@ -203,7 +245,7 @@ class KokoroSynthesizer:
             ):
                 continue
             seen.add(text)
-            async for _ in self.synthesize(text):
+            async for _ in self.synthesize(text, background=True):
                 pass
 
 

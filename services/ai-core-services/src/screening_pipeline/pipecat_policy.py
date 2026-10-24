@@ -25,17 +25,32 @@ from src.screening_pipeline.prompts import (
     CLOSING_TEXT,
     FILLER_SCHEDULE_SECONDS,
     FILLER_TEXTS,
+    GREETING_REPLY_TIMEOUT_SECONDS,
     GREETING_TEXT,
+    MAX_CONVERSATIONAL_TURNS_PER_QUESTION,
     MAX_FOLLOW_UPS_PER_QUESTION,
+    MAX_NON_ANSWER_REASKS_PER_QUESTION,
     MAX_SILENCE_PROMPTS,
+    MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
+    START_WITHOUT_REPLY_TEXT,
+    STT_RESULT_GRACE_SECONDS,
+    UNFINISHED_ANSWER_EXTRA_SECONDS,
 )
 from src.screening_pipeline.session_api import SessionApiClient
-from src.screening_pipeline.speech_filter import is_probable_hallucination
+from src.screening_pipeline.speech_filter import (
+    is_probable_hallucination,
+    is_skip_request,
+    looks_unfinished,
+)
 from src.screening_pipeline.tts_prewarm import coerce_questions_list, known_bot_texts
+
+
+# A session in one of these states has ended; never run its interview again.
+_FINISHED_SESSION_STATUSES = frozenset({"completed", "failed", "cancelled", "no_show"})
 
 
 class PipecatInterviewPolicy:
@@ -116,6 +131,16 @@ class PipecatInterviewPolicy:
             logger.error(
                 "No session found for bot. Cannot start interview.",
                 extra={"session_id": self.session_id},
+            )
+            return
+
+        if getattr(self.session, "status", None) in _FINISHED_SESSION_STATUSES:
+            # Attendee reconnects the audio stream while the bot is leaving.
+            # Starting again greeted a meeting that was ending, and on
+            # disconnect saved a greeting-only transcript over the real one.
+            logger.info(
+                "Session already finished; not starting the interview again",
+                extra={"session_id": self.session_id, "status": self.session.status},
             )
             return
 
@@ -408,6 +433,20 @@ class PipecatInterviewPolicy:
         # candidate actually stopped. Overwritten by every VAD stop, so only
         # the final one before real processing starts is ever used.
         self._turn_started_at = now
+        # Speech starting cancelled the pending settle. If this stretch of
+        # speech then transcribes to nothing usable (noise, "Thank you."),
+        # no new transcript re-arms it and what was already collected would
+        # never be processed: the bot went silent mid-interview.
+        if (
+            self.current_interaction_state == "collecting_answer"
+            and self._answer_buffer
+            and (self._answer_settle_task is None or self._answer_settle_task.done())
+        ):
+            # Allow time for this speech's transcript first: if one arrives,
+            # handle_candidate_speech restarts the settle as usual.
+            self._answer_settle_task = asyncio.create_task(
+                self._process_after_answer_settles(stt_grace_seconds=STT_RESULT_GRACE_SECONDS)
+            )
 
     def _begin_listening(self):
         """Enter an eligible listening turn and start its hard inactivity deadline."""
@@ -456,6 +495,16 @@ class PipecatInterviewPolicy:
             )
         self._closing_reply_timeout_task = None
 
+    def _awaiting_greeting_reply(self) -> bool:
+        """The greeting was said and the candidate hasn't replied at all yet."""
+        return (
+            self.current_interaction_state == "listening"
+            and bool(self.transcript_log)
+            and self.transcript_log[-1].get("interaction_type") == "greeting"
+            and not self.transcript_log[-1].get("candidate_answer")
+            and not self._answer_buffer
+        )
+
     async def _end_after_inactivity(self):
         """Prompt twice, then end after a third unanswered 30-second window."""
         try:
@@ -463,7 +512,13 @@ class PipecatInterviewPolicy:
                 cycle_started_at = self._inactivity_cycle_started_at
                 if cycle_started_at is None:
                     return
-                remaining = SILENCE_PROMPT_SECONDS - (
+                awaiting_greeting_reply = self._awaiting_greeting_reply()
+                window = (
+                    GREETING_REPLY_TIMEOUT_SECONDS
+                    if awaiting_greeting_reply
+                    else SILENCE_PROMPT_SECONDS
+                )
+                remaining = window - (
                     asyncio.get_running_loop().time() - cycle_started_at
                 )
                 if remaining > 0:
@@ -477,6 +532,16 @@ class PipecatInterviewPolicy:
                     # deadline once VAD confirms they actually finished.
                     await asyncio.sleep(CANDIDATE_SPEAKING_POLL_SECONDS)
                     continue
+                if awaiting_greeting_reply:
+                    # Bug-029: start the interview rather than waiting on a
+                    # candidate who hasn't said they're ready.
+                    logger.info(
+                        "No reply to the greeting; starting the questions",
+                        extra={"session_id": self.session_id},
+                    )
+                    await self.speak(START_WITHOUT_REPLY_TEXT)
+                    await self._ask_next_question()
+                    return
                 if self.current_interaction_state in {"listening", "collecting_answer"}:
                     if self._silence_prompt_count < MAX_SILENCE_PROMPTS:
                         self._silence_prompt_count += 1
@@ -507,7 +572,7 @@ class PipecatInterviewPolicy:
         except asyncio.CancelledError:
             return
 
-    async def _process_after_answer_settles(self):
+    async def _process_after_answer_settles(self, stt_grace_seconds: float = 0.0):
         # Normally already set by handle_candidate_speech_stopped (VAD
         # confirming the candidate stopped talking, before STT even finalizes
         # a transcript) — this is only a fallback for callers that push a
@@ -526,14 +591,38 @@ class PipecatInterviewPolicy:
         # Cancelled in the finally below for every path that doesn't reach
         # classify_and_evaluate (see _process_speech), and again there right
         # after that call resolves — a filler must never overlap real speech.
-        self._start_filler_schedule()
+        # A skip request moves on at once; "one moment" before it is noise.
+        if not is_skip_request(" ".join(part for part in self._answer_buffer if part)):
+            self._start_filler_schedule()
         try:
-            await asyncio.sleep(ANSWER_SETTLE_SECONDS)
+            await asyncio.sleep(stt_grace_seconds + ANSWER_SETTLE_SECONDS)
             if not self.is_active or self.current_interaction_state != "collecting_answer":
+                return
+            if self._candidate_speaking:
+                # They started talking again before the previous sentence
+                # finished transcribing; replying now talks over them.
+                # handle_candidate_speech_stopped re-arms the settle.
                 return
             transcript = " ".join(part for part in self._answer_buffer if part).strip()
             if not transcript:
                 return
+            if looks_unfinished(transcript):
+                # "...the third point is" — the candidate is mid-thought.
+                # Give them longer before answering (Bug-042), and hold any
+                # filler until the real wait for the reply starts.
+                logger.info(
+                    "Answer looks unfinished; waiting longer",
+                    extra={"session_id": self.session_id, "transcript_tail": transcript[-60:]},
+                )
+                self._cancel_filler_schedule()
+                await asyncio.sleep(UNFINISHED_ANSWER_EXTRA_SECONDS)
+                if not self.is_active or self.current_interaction_state != "collecting_answer":
+                    return
+                if self._candidate_speaking:
+                    return
+                transcript = " ".join(part for part in self._answer_buffer if part).strip()
+                self._turn_started_at = asyncio.get_running_loop().time()
+                self._start_filler_schedule()
             self.current_interaction_state = "evaluating"
             self._cancel_inactivity_deadline()
             self._processing_task = asyncio.create_task(self._process_speech(transcript))
@@ -581,6 +670,16 @@ class PipecatInterviewPolicy:
             expected_keywords = ", ".join(question_obj.get("expected_keywords", []))
             answer_depth = question_obj.get("answer_depth", "partial_depth")
 
+        if is_skip_request(transcript):
+            # "Skip this question" / "next question" / "I don't know": move
+            # on without asking the LLM, which only treated a skip as such if
+            # the candidate also said they didn't know (Bug-039).
+            self._cancel_filler_schedule()
+            await self._move_on(
+                question_obj, current_q, transcript, primary_eval_data, reason="skip_request"
+            )
+            return
+
         follow_up_context = None
         if self.transcript_log and self.transcript_log[-1].get("follow_ups"):
             follow_up_context = self.transcript_log[-1]["follow_ups"]
@@ -600,18 +699,41 @@ class PipecatInterviewPolicy:
         intent = result.get("intent", "ANSWERING")
 
         if intent in ["CLARIFICATION", "SMALL_TALK"]:
-            await self._handle_conversational(transcript, result.get("response", ""))
+            prior = (
+                self.transcript_log[-1].get("conversational_turns", [])
+                if self.transcript_log
+                else []
+            )
+            prior_non_answers = sum(1 for turn in prior if turn.get("intent") == "SMALL_TALK")
+            if len(prior) >= MAX_CONVERSATIONAL_TURNS_PER_QUESTION or (
+                intent == "SMALL_TALK"
+                and prior_non_answers >= MAX_NON_ANSWER_REASKS_PER_QUESTION
+            ):
+                # "Wonderful." / "Thank you." / "Yes." — re-asking the same
+                # question again just loops (Bug-039).
+                await self._move_on(
+                    question_obj, current_q, transcript, primary_eval_data,
+                    reason="no_answer_after_prompts",
+                )
+                return
+            await self._handle_conversational(
+                transcript, result.get("response", ""), intent=intent
+            )
             return
 
         if intent == "SKIP":
-            await self._handle_skip(question_obj, current_q, transcript)
+            await self._move_on(
+                question_obj, current_q, transcript, primary_eval_data, reason="skip_intent"
+            )
             return
 
         await self._handle_answer(question_obj, current_q, transcript, result, primary_eval_data)
 
     # ──────────────────────────── INTENT HANDLERS ────────────────────────────
 
-    async def _handle_conversational(self, transcript: str, ai_response: str):
+    async def _handle_conversational(
+        self, transcript: str, ai_response: str, *, intent: str = "SMALL_TALK"
+    ):
         """Handles CLARIFICATION and SMALL_TALK intents."""
         if not ai_response or not str(ai_response).strip():
             ai_response = "Okay, sounds good."
@@ -621,6 +743,7 @@ class PipecatInterviewPolicy:
                 {
                     "candidate_speech": transcript,
                     "ai_response": ai_response,
+                    "intent": intent,
                 }
             )
 
@@ -628,6 +751,39 @@ class PipecatInterviewPolicy:
         # A request for time is still a response turn. Never leave a session
         # indefinitely waiting after conversational speech.
         self._begin_listening()
+
+    async def _move_on(
+        self,
+        question_obj: dict,
+        current_q: str,
+        transcript: str,
+        primary_eval_data: Optional[dict],
+        *,
+        reason: str,
+    ):
+        """Tell the candidate we're moving on, then go to the next question.
+
+        During a follow-up the main answer was already evaluated, so the
+        question is completed with that evaluation instead of a zero score.
+        """
+        logger.info(
+            "Moving on to the next question",
+            extra={"session_id": self.session_id, "reason": reason},
+        )
+        await self.speak(MOVE_ON_TEXT)
+        if primary_eval_data is not None:
+            # The follow-up went unanswered; core-api rejects (422) a
+            # follow-up with an empty answer, losing the whole question.
+            if self.transcript_log:
+                follow_ups = self.transcript_log[-1].get("follow_ups") or []
+                self.transcript_log[-1]["follow_ups"] = [
+                    f for f in follow_ups if str(f.get("candidate_speech") or "").strip()
+                ]
+            await self._complete_question(
+                question_obj, current_q, transcript, None, primary_eval_data
+            )
+        else:
+            await self._handle_skip(question_obj, current_q, transcript)
 
     async def _handle_skip(self, question_obj: dict, current_q: str, transcript: str):
         """Handles SKIP intent — saves 0-score evaluation and moves on.
@@ -908,6 +1064,26 @@ class PipecatInterviewPolicy:
         if self.speech_output is None:
             raise RuntimeError("Pipecat speech output is not configured")
         await self.speech_output(text)
+
+    def stt_prompt(self) -> str | None:
+        """Context for transcribing the candidate's current answer.
+
+        Whisper treats its prompt as preceding text and favours its spelling,
+        so the question and its expected keywords make technical terms come
+        out right ("ConcurrentHashMap", not "Concrete Hotsmap"). Keywords go
+        last because Whisper keeps only the end of a long prompt.
+        """
+        question_obj = getattr(self, "current_question_obj", None) or {}
+        question = str(question_obj.get("question") or "").strip()
+        if not question:
+            return None
+        parts = [question]
+        skill = str(question_obj.get("skill_focus") or "").strip()
+        keywords = [str(k).strip() for k in question_obj.get("expected_keywords") or [] if str(k).strip()]
+        terms = ([skill] if skill else []) + keywords
+        if terms:
+            parts.append("Key terms: " + ", ".join(terms) + ".")
+        return " ".join(parts)
 
     async def _speak_filler(self, text: str) -> None:
         """Speak a short filler phrase without changing current_interaction_state.

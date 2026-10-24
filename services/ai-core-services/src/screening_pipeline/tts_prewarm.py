@@ -33,9 +33,11 @@ from src.screening_pipeline.prompts import (
     CLOSING_TEXT,
     FILLER_TEXTS,
     GREETING_TEXT,
+    MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_TEXT,
+    START_WITHOUT_REPLY_TEXT,
 )
 
 # Finish warming this long before the bot is scheduled to join.
@@ -73,6 +75,8 @@ def known_bot_texts(questions: list[dict]) -> list[str]:
         ANSWER_ACKNOWLEDGEMENT_TEXT,
         REPEAT_QUESTION_PREFIX_TEXT,
         REPEAT_QUESTION_LIMIT_TEXT,
+        MOVE_ON_TEXT,
+        START_WITHOUT_REPLY_TEXT,
     ]
     texts.extend(FILLER_TEXTS)
     texts.extend(q.get("question", "") for q in questions if q.get("question"))
@@ -163,16 +167,23 @@ class TtsPrewarmRegistry:
             )
             started_at = time.monotonic()
             synthesizer = KokoroSynthesizer()
+            # Hand over right away rather than when every line is done: an
+            # interview starting mid-warm then shares this synthesizer and
+            # everything warmed so far, instead of synthesizing from scratch
+            # while competing with this job for the model.
+            self._evict_expired()
+            entry = _PrewarmEntry(synthesizer)
+            self._entries[session_id] = entry
             try:
                 await synthesizer.warm(texts)
             except Exception as err:
+                if self._entries.get(session_id) is entry:
+                    self._entries.pop(session_id, None)
                 logger.error(
                     "TTS pre-warm failed; live session will warm on demand instead",
                     extra={"session_id": session_id, "error": str(err)},
                 )
                 return
-        self._evict_expired()
-        self._entries[session_id] = _PrewarmEntry(synthesizer)
         logger.info(
             "TTS pre-warm finished ahead of bot join",
             extra={
