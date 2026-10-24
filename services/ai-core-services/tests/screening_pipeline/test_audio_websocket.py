@@ -192,3 +192,32 @@ async def test_output_tracks_how_long_the_bot_voice_plays(monkeypatch):
     assert output.is_bot_audible()
     clock["now"] = 101.0 + AttendeeOutputProcessor.ECHO_TAIL_SECONDS + 0.01
     assert not output.is_bot_audible()
+
+
+@pytest.mark.asyncio
+async def test_wait_until_played_waits_for_playback_and_stops_on_barge_in():
+    from pipecat.frames.frames import InterruptionFrame, OutputAudioRawFrame
+    from pipecat.processors.frame_processor import FrameDirection
+    from src.screening_pipeline.pipecat_transport import AttendeeOutputProcessor
+
+    output = AttendeeOutputProcessor(MagicMock(send_json=AsyncMock()))
+    output.push_frame = AsyncMock()
+    tenth_of_a_second = bytes(2 * 2400)  # 0.1s at 24 kHz
+    await output.process_frame(
+        OutputAudioRawFrame(audio=tenth_of_a_second * 3, sample_rate=24000, num_channels=1),
+        FrameDirection.DOWNSTREAM,
+    )
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    await asyncio.wait_for(output.wait_until_played(), timeout=2)
+    assert loop.time() - started >= 0.25  # ~0.3s of speech
+
+    await output.process_frame(
+        OutputAudioRawFrame(audio=tenth_of_a_second * 50, sample_rate=24000, num_channels=1),
+        FrameDirection.DOWNSTREAM,
+    )
+    waiter = asyncio.create_task(output.wait_until_played())
+    await asyncio.sleep(0.05)
+    await output.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+    await asyncio.wait_for(waiter, timeout=1)  # did not wait out 5s of speech

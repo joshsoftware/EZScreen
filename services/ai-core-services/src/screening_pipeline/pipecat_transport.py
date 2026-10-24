@@ -79,10 +79,26 @@ class AttendeeOutputProcessor(FrameProcessor):
         self._pending_events: set[asyncio.Event] = set()
         # Monotonic time until which the bot's sent audio is still playing.
         self._playing_until = 0.0
+        # Bumped on every barge-in, so waits for playback can stop early.
+        self._interruptions = 0
 
     def is_bot_audible(self) -> bool:
         """True while the bot's own voice may be in the mixed meeting audio."""
         return time.monotonic() < self._playing_until + self.ECHO_TAIL_SECONDS
+
+    async def wait_until_played(self) -> None:
+        """Return once the audio sent so far has finished playing, or on barge-in.
+
+        Sending audio to Attendee is near-instant; playing it takes as long as
+        the speech. Silence timers started on send ran during the bot's own
+        speech (the 15s after a 7s greeting felt like 8s).
+        """
+        interruptions = self._interruptions
+        while self._interruptions == interruptions:
+            remaining = self._playing_until - time.monotonic()
+            if remaining <= 0:
+                return
+            await asyncio.sleep(min(remaining, 0.25))
 
     def _track_playback(self, num_bytes: int, sample_rate: int, num_channels: int) -> None:
         if sample_rate <= 0:
@@ -107,6 +123,7 @@ class AttendeeOutputProcessor(FrameProcessor):
             self._pending_events.discard(frame.event)
             frame.event.set()
         elif isinstance(frame, InterruptionFrame):
+            self._interruptions += 1
             for event in self._pending_events:
                 event.set()
             self._pending_events.clear()

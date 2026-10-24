@@ -247,3 +247,37 @@ async def test_prepare_fails_fast_when_artifacts_are_missing(tmp_path, monkeypat
 
     with pytest.raises(FileNotFoundError, match="Kokoro artifacts are missing"):
         await synthesizer.prepare()
+
+
+@pytest.mark.asyncio
+async def test_live_speech_jumps_ahead_of_background_warming():
+    """A question the candidate is waiting for must not queue behind the
+    pre-warm's remaining lines (~30s in a live test)."""
+    synthesizer = KokoroSynthesizer(model_path="unused", voices_path="unused")
+    order: list[str] = []
+    release_first = asyncio.Event()
+
+    async def _ensure_ready() -> None:
+        return None
+
+    async def _create_stream(text: str, voice: str, speed: float, lang: str):
+        order.append(text)
+        if text == "warm-1":
+            await release_first.wait()
+        yield _BATCH, 24000
+
+    synthesizer.ensure_ready = _ensure_ready  # type: ignore[method-assign]
+    synthesizer.kokoro = type("FakeKokoro", (), {"create_stream": staticmethod(_create_stream)})()
+
+    warming = asyncio.create_task(synthesizer.warm(["warm-1", "warm-2", "warm-3"]))
+    await asyncio.sleep(0.05)  # warm-1 in progress
+    live = asyncio.create_task(_drain(synthesizer, "Question 1?"))
+    await asyncio.sleep(0.05)
+    release_first.set()
+    await asyncio.wait_for(asyncio.gather(warming, live), timeout=2)
+
+    assert order == ["warm-1", "Question 1?", "warm-2", "warm-3"]
+
+
+async def _drain(synthesizer, text):
+    return [chunk async for chunk in synthesizer.synthesize(text)]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import audioop
 import importlib.util
-from typing import Callable
+from typing import Awaitable, Callable
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -112,15 +112,20 @@ class InterviewPolicyProcessor(FrameProcessor):
         self,
         policy: InterviewPolicy,
         register_speech_event: Callable[[asyncio.Event], None] | None = None,
+        wait_for_playback: Callable[[], Awaitable[None]] | None = None,
     ):
         super().__init__(name="interview-policy")
         self.policy = policy
         self.register_speech_event = register_speech_event
+        # speak() returns when the speech has been heard, not just sent.
+        self.wait_for_playback = wait_for_playback
+        self._speech_interrupted = False
         self._current_speech_event: asyncio.Event | None = None
 
     async def speak(self, text: str) -> None:
         done_event = asyncio.Event()
         self._current_speech_event = done_event
+        self._speech_interrupted = False
         # Register before the utterance enters TTS, so an interruption that
         # arrives before the completion marker can unblock the policy.
         if self.register_speech_event is not None:
@@ -129,6 +134,8 @@ class InterviewPolicyProcessor(FrameProcessor):
         await self.push_frame(SpeechCompleteFrame(done_event), FrameDirection.DOWNSTREAM)
         try:
             await done_event.wait()
+            if self.wait_for_playback is not None and not self._speech_interrupted:
+                await self.wait_for_playback()
         finally:
             if self._current_speech_event is done_event:
                 self._current_speech_event = None
@@ -136,9 +143,11 @@ class InterviewPolicyProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, InterruptionFrame):
+            self._speech_interrupted = True
             if self._current_speech_event is not None and not self._current_speech_event.is_set():
                 self._current_speech_event.set()
         elif isinstance(frame, VADUserStartedSpeakingFrame):
+            self._speech_interrupted = True
             self.policy.handle_candidate_activity()
             # Candidate speech is authoritative in a screening interview.
             # Interrupt bot audio so the entire response can be captured rather
@@ -187,6 +196,7 @@ class PipecatInterviewRuntime:
         self.policy_processor = InterviewPolicyProcessor(
             self.policy,
             register_speech_event=self.output.register_speech_event,
+            wait_for_playback=self.output.wait_until_played,
         )
         self.policy.speech_output = self.policy_processor.speak
         self.policy.tts_cache_warmer = self.tts.warm_cache
