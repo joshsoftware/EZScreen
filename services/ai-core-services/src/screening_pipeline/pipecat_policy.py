@@ -46,6 +46,10 @@ from src.screening_pipeline.speech_filter import (
 from src.screening_pipeline.tts_prewarm import coerce_questions_list, known_bot_texts
 
 
+# A session in one of these states has ended; never run its interview again.
+_FINISHED_SESSION_STATUSES = frozenset({"completed", "failed", "cancelled", "no_show"})
+
+
 class PipecatInterviewPolicy:
     """
     Manages the state machine for the AI interview.
@@ -124,6 +128,16 @@ class PipecatInterviewPolicy:
             logger.error(
                 "No session found for bot. Cannot start interview.",
                 extra={"session_id": self.session_id},
+            )
+            return
+
+        if getattr(self.session, "status", None) in _FINISHED_SESSION_STATUSES:
+            # Attendee reconnects the audio stream while the bot is leaving.
+            # Starting again greeted a meeting that was ending, and on
+            # disconnect saved a greeting-only transcript over the real one.
+            logger.info(
+                "Session already finished; not starting the interview again",
+                extra={"session_id": self.session_id, "status": self.session.status},
             )
             return
 
@@ -718,6 +732,13 @@ class PipecatInterviewPolicy:
         )
         await self.speak(MOVE_ON_TEXT)
         if primary_eval_data is not None:
+            # The follow-up went unanswered; core-api rejects (422) a
+            # follow-up with an empty answer, losing the whole question.
+            if self.transcript_log:
+                follow_ups = self.transcript_log[-1].get("follow_ups") or []
+                self.transcript_log[-1]["follow_ups"] = [
+                    f for f in follow_ups if str(f.get("candidate_speech") or "").strip()
+                ]
             await self._complete_question(
                 question_obj, current_q, transcript, None, primary_eval_data
             )

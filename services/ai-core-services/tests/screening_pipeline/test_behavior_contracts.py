@@ -1430,3 +1430,40 @@ async def test_bot_does_not_reply_while_the_candidate_is_still_talking(monkeypat
     await asyncio.sleep(0.3)
 
     policy._process_speech.assert_awaited_once_with("We can start. and then let's go.")
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled", "no_show"])
+@pytest.mark.asyncio
+async def test_a_finished_session_is_not_started_again_on_reconnect(status):
+    """Attendee reconnects the audio stream while the bot is leaving. A new
+    run greeted the ending meeting and then saved a greeting-only transcript
+    over the real one."""
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), llm_client=MagicMock(), speech_output=AsyncMock()
+    )
+    session = MagicMock(id="session-id", status=status, generated_questions=[])
+    with patch(
+        "src.screening_pipeline.pipecat_policy.interview_session_repo.get_by_id",
+        AsyncMock(return_value=session),
+    ), patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()) as close:
+        await policy.start()
+        await policy.cleanup()
+
+    policy.speech_output.assert_not_awaited()
+    assert policy.is_active is False
+    close.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_moving_on_from_an_unanswered_follow_up_saves_without_it():
+    primary = {"score": 6, "decision": "ASK_FOLLOW_UP"}
+    policy = _question_policy(
+        primary_eval=primary,
+        candidate_answer="My main answer.",
+        follow_ups=[{"candidate_speech": "", "ai_response": "Could you explain more?"}],
+    )
+
+    await policy._move_on({"id": 1, "question": "Q?"}, "Q?", "Hello", primary, reason="test")
+
+    assert policy.transcript_log[-1]["follow_ups"] == []
+    policy._complete_question.assert_awaited_once()
