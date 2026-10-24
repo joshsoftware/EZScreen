@@ -25,6 +25,7 @@ from src.screening_pipeline.prompts import (
     CLOSING_TEXT,
     FILLER_SCHEDULE_SECONDS,
     FILLER_TEXTS,
+    GREETING_REPLY_TIMEOUT_SECONDS,
     GREETING_TEXT,
     MAX_CONVERSATIONAL_TURNS_PER_QUESTION,
     MAX_FOLLOW_UPS_PER_QUESTION,
@@ -35,6 +36,7 @@ from src.screening_pipeline.prompts import (
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
+    START_WITHOUT_REPLY_TEXT,
     STT_RESULT_GRACE_SECONDS,
     UNFINISHED_ANSWER_EXTRA_SECONDS,
 )
@@ -493,6 +495,16 @@ class PipecatInterviewPolicy:
             )
         self._closing_reply_timeout_task = None
 
+    def _awaiting_greeting_reply(self) -> bool:
+        """The greeting was said and the candidate hasn't replied at all yet."""
+        return (
+            self.current_interaction_state == "listening"
+            and bool(self.transcript_log)
+            and self.transcript_log[-1].get("interaction_type") == "greeting"
+            and not self.transcript_log[-1].get("candidate_answer")
+            and not self._answer_buffer
+        )
+
     async def _end_after_inactivity(self):
         """Prompt twice, then end after a third unanswered 30-second window."""
         try:
@@ -500,7 +512,13 @@ class PipecatInterviewPolicy:
                 cycle_started_at = self._inactivity_cycle_started_at
                 if cycle_started_at is None:
                     return
-                remaining = SILENCE_PROMPT_SECONDS - (
+                awaiting_greeting_reply = self._awaiting_greeting_reply()
+                window = (
+                    GREETING_REPLY_TIMEOUT_SECONDS
+                    if awaiting_greeting_reply
+                    else SILENCE_PROMPT_SECONDS
+                )
+                remaining = window - (
                     asyncio.get_running_loop().time() - cycle_started_at
                 )
                 if remaining > 0:
@@ -514,6 +532,16 @@ class PipecatInterviewPolicy:
                     # deadline once VAD confirms they actually finished.
                     await asyncio.sleep(CANDIDATE_SPEAKING_POLL_SECONDS)
                     continue
+                if awaiting_greeting_reply:
+                    # Bug-029: start the interview rather than waiting on a
+                    # candidate who hasn't said they're ready.
+                    logger.info(
+                        "No reply to the greeting; starting the questions",
+                        extra={"session_id": self.session_id},
+                    )
+                    await self.speak(START_WITHOUT_REPLY_TEXT)
+                    await self._ask_next_question()
+                    return
                 if self.current_interaction_state in {"listening", "collecting_answer"}:
                     if self._silence_prompt_count < MAX_SILENCE_PROMPTS:
                         self._silence_prompt_count += 1

@@ -37,6 +37,7 @@ from src.screening_pipeline.prompts import (
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_TEXT,
+    START_WITHOUT_REPLY_TEXT,
 )
 
 # Finish warming this long before the bot is scheduled to join.
@@ -75,6 +76,7 @@ def known_bot_texts(questions: list[dict]) -> list[str]:
         REPEAT_QUESTION_PREFIX_TEXT,
         REPEAT_QUESTION_LIMIT_TEXT,
         MOVE_ON_TEXT,
+        START_WITHOUT_REPLY_TEXT,
     ]
     texts.extend(FILLER_TEXTS)
     texts.extend(q.get("question", "") for q in questions if q.get("question"))

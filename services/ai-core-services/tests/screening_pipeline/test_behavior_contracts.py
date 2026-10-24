@@ -41,6 +41,7 @@ from src.screening_pipeline.prompts import (
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
+    START_WITHOUT_REPLY_TEXT,
 )
 
 
@@ -662,6 +663,7 @@ async def test_start_warms_tts_cache_with_greeting_closing_and_all_questions():
             REPEAT_QUESTION_PREFIX_TEXT,
             REPEAT_QUESTION_LIMIT_TEXT,
             MOVE_ON_TEXT,
+            START_WITHOUT_REPLY_TEXT,
             *FILLER_TEXTS,
             "What is a closure?",
             "Explain event loops.",
@@ -1514,3 +1516,42 @@ async def test_non_answers_get_one_re_ask_clarifications_two(prior_intent, new_i
     spoken = [c.args[0] for c in policy.speech_output.await_args_list]
     assert (spoken == [MOVE_ON_TEXT]) is moves_on
     assert policy._handle_skip.await_count == (1 if moves_on else 0)
+
+
+def _greeted_policy(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.GREETING_REPLY_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.SILENCE_PROMPT_SECONDS", 10)
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.transcript_log = [{"interaction_type": "greeting", "bot_speech": GREETING_TEXT, "candidate_answer": ""}]
+    policy._ask_next_question = AsyncMock()
+    return policy
+
+
+@pytest.mark.asyncio
+async def test_silent_candidate_still_gets_the_first_question(monkeypatch):
+    """Bug-029: silence after the greeting ended the interview without a
+    single question; now the bot starts the questions itself."""
+    policy = _greeted_policy(monkeypatch)
+    policy._begin_listening()
+
+    await asyncio.sleep(0.3)
+
+    assert [c.args[0] for c in policy.speech_output.await_args_list] == [START_WITHOUT_REPLY_TEXT]
+    policy._ask_next_question.assert_awaited_once()
+    policy._cancel_inactivity_deadline()
+
+
+@pytest.mark.asyncio
+async def test_candidate_replying_to_the_greeting_is_not_rushed(monkeypatch):
+    policy = _greeted_policy(monkeypatch)
+    policy._begin_listening()
+    policy._answer_buffer.append("Yes, I'm ready.")  # reply being processed
+
+    await asyncio.sleep(0.3)
+
+    policy._ask_next_question.assert_not_awaited()
+    assert START_WITHOUT_REPLY_TEXT not in [c.args[0] for c in policy.speech_output.await_args_list]
+    policy._cancel_inactivity_deadline()

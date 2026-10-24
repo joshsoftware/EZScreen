@@ -93,6 +93,11 @@ REPEAT_QUESTION_LIMIT_TEXT = (
     "Please share your best answer when you are ready."
 )
 SILENCE_PROMPT_SECONDS = 30
+# Bug-029: a candidate who never replies to the greeting got "Are you there?"
+# twice and the bot left without asking a single question. After this much
+# silence following the greeting, start the questions instead.
+GREETING_REPLY_TIMEOUT_SECONDS = 15
+START_WITHOUT_REPLY_TEXT = "Let's get started with the first question."
 # Prompt twice at 30-second intervals, then close after the final 30-second
 # unanswered interval (90 seconds total).
 MAX_SILENCE_PROMPTS = 2
