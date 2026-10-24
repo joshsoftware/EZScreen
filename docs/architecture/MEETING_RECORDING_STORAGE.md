@@ -77,7 +77,7 @@ sequenceDiagram
 
 - **Schedule** is idempotent: a redelivered `ended` webhook doesn't restart an import that is `in_progress` or `complete`.
 - **Claim** returns imports that are `pending` and due, plus `in_progress` ones older than `RECORDING_IMPORT_STALE_SECONDS` (ai-core restarted mid-copy). Rows are locked with `FOR UPDATE SKIP LOCKED`, so the same recording is never handed out twice.
-- **Result**: success saves the key on `interview_analysis.recording_url` (creating the analysis row if needed); the key must match the claimed one. A retryable failure goes back to `pending` after `RECORDING_IMPORT_RETRY_SECONDS`, until `RECORDING_IMPORT_MAX_ATTEMPTS`; then `failed`.
+- **Result**: success saves the key on `interview_analysis.recording_url` (creating the analysis row if needed); the key must match the claimed one. A retryable failure goes back to `pending` with exponential backoff (`RECORDING_IMPORT_RETRY_SECONDS`, doubling, capped at `RECORDING_IMPORT_RETRY_MAX_SECONDS`), until `RECORDING_IMPORT_MAX_ATTEMPTS`; then `failed`. The defaults keep retrying for ~2 hours, so a network outage doesn't lose a recording.
 
 ## 6. Code
 
@@ -100,8 +100,9 @@ sequenceDiagram
 | `RECORDING_SAVE_DELAY_SECONDS` | `300` | ai-core |
 | `RECORDING_IMPORT_POLL_SECONDS` | `30` | ai-core |
 | `MINIO_BUCKET_RECORDINGS` | `attendee-recordings` | ai-core + core-api |
-| `RECORDING_IMPORT_MAX_ATTEMPTS` | `5` | core-api |
-| `RECORDING_IMPORT_RETRY_SECONDS` | `60` | core-api |
+| `RECORDING_IMPORT_MAX_ATTEMPTS` | `8` | core-api |
+| `RECORDING_IMPORT_RETRY_SECONDS` | `60` (first retry; doubles) | core-api |
+| `RECORDING_IMPORT_RETRY_MAX_SECONDS` | `3600` | core-api |
 | `RECORDING_IMPORT_STALE_SECONDS` | `1800` | core-api |
 
 `minio-init` already creates `attendee-recordings`. No database migration: the state uses the existing `interview_metadata` JSONB and `recording_url` columns.

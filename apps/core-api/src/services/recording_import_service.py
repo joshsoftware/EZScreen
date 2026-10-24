@@ -10,7 +10,7 @@ interview_session.interview_metadata["recording_import"]:
 
 Flow: schedule (bot ended) -> claim (due, marks in_progress) -> report result
 (complete saves the key on interview_analysis.recording_url; failure retries
-until recording_import_max_attempts).
+until recording_import_max_attempts, with exponential backoff).
 """
 
 from __future__ import annotations
@@ -166,6 +166,12 @@ def claim_due_imports(db: Session, *, limit: int) -> list[dict[str, Any]]:
     return claimed
 
 
+def retry_delay_seconds(attempts: int) -> int:
+    """Backoff before the next try: 1 min, 2, 4, 8, ... capped at 1 hour."""
+    delay = settings.recording_import_retry_seconds * 2 ** max(attempts - 1, 0)
+    return min(delay, settings.recording_import_retry_max_seconds)
+
+
 def report_result(
     db: Session,
     session: InterviewSession,
@@ -198,7 +204,7 @@ def report_result(
         if exhausted or not retryable:
             new_state = {**state, "status": "failed", "last_error": error}
         else:
-            retry_at = _now() + timedelta(seconds=settings.recording_import_retry_seconds)
+            retry_at = _now() + timedelta(seconds=retry_delay_seconds(attempts))
             new_state = {
                 **state,
                 "status": "pending",
