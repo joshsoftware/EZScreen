@@ -74,12 +74,30 @@ async def test_persist_interview_close_calls_summary_and_metadata():
 
 
 @pytest.mark.asyncio
-async def test_persist_interview_close_saves_metadata_when_no_answer_was_scored():
+async def test_interview_with_no_scored_answer_still_gets_a_final_result():
+    """Bug-038: no summary meant "Analysis is not available yet" forever."""
     api_client = MagicMock()
     api_client.save_final_summary = AsyncMock()
     api_client.save_interview_metadata = AsyncMock()
 
-    await persist_interview_close(api_client, MagicMock(), [], [{"bot_speech": "hi"}])
+    await persist_interview_close(
+        api_client, MagicMock(), [], [{"bot_speech": "hi"}], termination_reason="candidate_silence"
+    )
+
+    summary = api_client.save_final_summary.await_args.args[0]
+    assert summary["overall_score"] == 0.0 and summary["max_possible_score"] == 100.0
+    assert "stopped responding" in summary["final_recommendation"]
+    api_client.save_interview_metadata.assert_awaited_once()
+
+
+@pytest.mark.parametrize("reason", ["tts_unavailable", "pipeline_failed"])
+@pytest.mark.asyncio
+async def test_our_own_failure_is_not_recorded_as_the_candidates_result(reason):
+    api_client = MagicMock()
+    api_client.save_final_summary = AsyncMock()
+    api_client.save_interview_metadata = AsyncMock()
+
+    await persist_interview_close(api_client, MagicMock(), [], [{"bot_speech": "hi"}], termination_reason=reason)
 
     api_client.save_final_summary.assert_not_awaited()
     api_client.save_interview_metadata.assert_awaited_once()
