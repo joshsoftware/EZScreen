@@ -562,7 +562,9 @@ class PipecatInterviewPolicy:
         # Cancelled in the finally below for every path that doesn't reach
         # classify_and_evaluate (see _process_speech), and again there right
         # after that call resolves — a filler must never overlap real speech.
-        self._start_filler_schedule()
+        # A skip request moves on at once; "one moment" before it is noise.
+        if not is_skip_request(" ".join(part for part in self._answer_buffer if part)):
+            self._start_filler_schedule()
         try:
             await asyncio.sleep(stt_grace_seconds + ANSWER_SETTLE_SECONDS)
             if not self.is_active or self.current_interaction_state != "collecting_answer":

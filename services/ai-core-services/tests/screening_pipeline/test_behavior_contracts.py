@@ -1467,3 +1467,21 @@ async def test_moving_on_from_an_unanswered_follow_up_saves_without_it():
 
     assert policy.transcript_log[-1]["follow_ups"] == []
     policy._complete_question.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_no_filler_is_armed_before_a_skip(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.01)
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "collecting_answer"
+    policy._answer_buffer = ["Please skip this question."]
+    policy._process_speech = AsyncMock()
+    policy._start_filler_schedule = MagicMock()
+
+    await policy._process_after_answer_settles()
+
+    policy._start_filler_schedule.assert_not_called()
+    policy._process_speech.assert_awaited_once()

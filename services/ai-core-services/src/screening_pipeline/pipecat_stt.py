@@ -18,6 +18,43 @@ MIN_ANSWER_SECONDS = 0.25
 MAX_PROMPT_CHARS = 800
 
 
+WHISPER_TIMEOUT_SECONDS = 10.0
+WHISPER_ATTEMPTS = 2
+# Whisper's own signals that a segment is not real speech (the thresholds
+# OpenAI's reference decoder uses). Dropping these removes invented text
+# like "See you on the next slide." from noise or near-silence.
+NO_SPEECH_PROB_MAX = 0.6
+AVG_LOGPROB_MIN = -1.0
+COMPRESSION_RATIO_MAX = 2.4
+
+
+def _confident_text(body: dict) -> str:
+    """Transcript text without the segments Whisper itself doubts."""
+    segments = body.get("segments")
+    if not isinstance(segments, list) or not segments:
+        return str(body.get("text") or "").strip()
+    kept = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        if (
+            float(segment.get("no_speech_prob") or 0.0) > NO_SPEECH_PROB_MAX
+            or float(segment.get("avg_logprob") or 0.0) < AVG_LOGPROB_MIN
+            or float(segment.get("compression_ratio") or 0.0) > COMPRESSION_RATIO_MAX
+        ):
+            logger.info(
+                "Dropped low-confidence STT segment",
+                extra={
+                    "text": str(segment.get("text") or "")[:80],
+                    "no_speech_prob": segment.get("no_speech_prob"),
+                    "avg_logprob": segment.get("avg_logprob"),
+                },
+            )
+            continue
+        kept.append(str(segment.get("text") or "").strip())
+    return " ".join(part for part in kept if part).strip()
+
+
 def _echoes_prompt(transcript: str, prompt: str) -> bool:
     """Whisper sometimes returns (part of) its prompt for silence or noise."""
     words = re.findall(r"[a-z0-9]+", transcript.lower())
@@ -72,27 +109,40 @@ class WhisperHttpSTTService(SegmentedSTTService):
         files = {"file": ("audio.wav", audio, "audio/wav")}
         data = {
             "model": "whisper-large-v3",
-            "response_format": "json",
+            # Per-segment confidence, used to drop text Whisper made up.
+            "response_format": "verbose_json",
             "language": "en",
         }
         prompt = self._prompt()
         if prompt:
             data["prompt"] = prompt
 
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    settings.whisper_api_url
-                    or "https://api.groq.com/openai/v1/audio/transcriptions",
-                    files=files,
-                    data=data,
-                    headers=headers,
+        body = None
+        for attempt in range(1, WHISPER_ATTEMPTS + 1):
+            try:
+                async with httpx.AsyncClient(timeout=WHISPER_TIMEOUT_SECONDS) as client:
+                    response = await client.post(
+                        settings.whisper_api_url
+                        or "https://api.groq.com/openai/v1/audio/transcriptions",
+                        files=files,
+                        data=data,
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    body = response.json()
+                break
+            except Exception as error:
+                # Timeouts carry no message, so log the type as well.
+                retryable = isinstance(error, (httpx.TimeoutException, httpx.TransportError)) or (
+                    isinstance(error, httpx.HTTPStatusError) and error.response.status_code >= 500
                 )
-                response.raise_for_status()
-                transcript = response.json().get("text", "").strip()
-        except Exception as error:
-            logger.error("Pipecat Whisper transcription failed", extra={"error": str(error)})
-            return
+                logger.error(
+                    "Pipecat Whisper transcription failed",
+                    extra={"error": repr(error), "attempt": attempt, "will_retry": retryable},
+                )
+                if not retryable or attempt == WHISPER_ATTEMPTS:
+                    return
+        transcript = _confident_text(body or {})
 
         if transcript and prompt and _echoes_prompt(transcript, prompt):
             logger.info("Ignored transcript that only repeats the STT prompt")

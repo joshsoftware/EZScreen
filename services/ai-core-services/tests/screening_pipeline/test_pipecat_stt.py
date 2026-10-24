@@ -64,3 +64,38 @@ async def test_whisper_request_includes_the_prompt_and_drops_echoes():
     echo = _whisper_response("explain the difference between a HashMap and a ConcurrentHashMap")
     with patch("src.screening_pipeline.pipecat_stt.httpx.AsyncClient", return_value=echo):
         assert [frame async for frame in service.run_stt(audio)] == []
+
+
+def test_low_confidence_segments_are_dropped():
+    from src.screening_pipeline.pipecat_stt import _confident_text
+
+    body = {
+        "text": "A HashMap is not thread safe. See you on the next slide.",
+        "segments": [
+            {"text": " A HashMap is not thread safe.", "no_speech_prob": 0.01, "avg_logprob": -0.25, "compression_ratio": 1.1},
+            {"text": " See you on the next slide.", "no_speech_prob": 0.85, "avg_logprob": -0.8, "compression_ratio": 1.0},
+            {"text": " slide slide slide slide", "no_speech_prob": 0.1, "avg_logprob": -0.3, "compression_ratio": 3.1},
+            {"text": " mumble", "no_speech_prob": 0.2, "avg_logprob": -1.4, "compression_ratio": 1.0},
+        ],
+    }
+
+    assert _confident_text(body) == "A HashMap is not thread safe."
+    assert _confident_text({"text": " plain json "}) == "plain json"
+
+
+@pytest.mark.asyncio
+async def test_whisper_timeout_is_retried_once():
+    import httpx
+
+    service = WhisperHttpSTTService(sample_rate=16000)
+    ok = _whisper_response("A ConcurrentHashMap is thread safe.")
+    failing = MagicMock()
+    failing.__aenter__ = AsyncMock(return_value=failing)
+    failing.__aexit__ = AsyncMock(return_value=False)
+    failing.post = AsyncMock(side_effect=httpx.ReadTimeout(""))
+    with patch(
+        "src.screening_pipeline.pipecat_stt.httpx.AsyncClient", side_effect=[failing, ok]
+    ):
+        frames = [frame async for frame in service.run_stt(bytes(16000 * 2))]
+
+    assert [f.text for f in frames] == ["A ConcurrentHashMap is thread safe."]
