@@ -40,18 +40,19 @@ async def test_pdf_path_uses_docling_and_ocr_merge():
 
 
 @pytest.mark.asyncio
-async def test_non_pdf_resume_rejected():
+async def test_unsupported_resume_format_rejected():
+    """PDF and DOCX are supported (Bug-025); anything else is refused."""
     parser = ResumeParser(llm_client=MagicMock())
 
     with (
-        patch("src.parsing.resume_parser.storage_client.download_to_tempfile", return_value="/tmp/resume.docx"),
+        patch("src.parsing.resume_parser.storage_client.download_to_tempfile", return_value="/tmp/resume.txt"),
         patch("src.parsing.resume_parser.os.path.exists", return_value=True),
         patch("src.parsing.resume_parser.os.remove"),
         patch("src.parsing.resume_parser.docling_wrapper.extract_markdown") as mock_docling,
         patch("src.parsing.resume_parser.extract_all_pages_ocr") as mock_ocr,
     ):
-        with pytest.raises(ValueError, match="Only PDF resumes are supported"):
-            await parser.parse_s3_file("resumes/test.docx")
+        with pytest.raises(ValueError, match="Only PDF and DOCX resumes are supported"):
+            await parser.parse_s3_file("resumes/test.txt")
 
     mock_docling.assert_not_called()
     mock_ocr.assert_not_called()

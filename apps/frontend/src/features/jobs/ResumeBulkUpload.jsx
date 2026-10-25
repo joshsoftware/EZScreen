@@ -7,7 +7,9 @@ import {
   getResumeUploadUrlsRequest,
 } from './api'
 
-const ALLOWED_TYPES = new Set(['application/pdf'])
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+// PDF and DOCX: the resume parser handles both (Bug-025).
+const ALLOWED_TYPES = new Set(['application/pdf', DOCX_MIME])
 const MAX_FILES_PER_UPLOAD = 10
 
 function isGoogleDriveConfigured() {
@@ -29,7 +31,7 @@ function normalizeContentType(file) {
 
 function isAllowedResumeFile(file) {
   const lower = file.name.toLowerCase()
-  if (lower.endsWith('.pdf')) return true
+  if (lower.endsWith('.pdf') || lower.endsWith('.docx')) return true
   return ALLOWED_TYPES.has(normalizeContentType(file))
 }
 
@@ -46,8 +48,8 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
   const busy = uploading || pickingDrive
   const fileLabel = !hasFiles
     ? driveConfigured
-      ? 'Drop PDF files here, or pick from device / Drive.'
-      : 'Drop PDF files here, or browse to select.'
+      ? 'Drop PDF or DOCX files here, or pick from device / Drive.'
+      : 'Drop PDF or DOCX files here, or browse to select.'
     : `${files.length} file${files.length === 1 ? '' : 's'} ready to upload`
 
   function addFiles(selected) {
@@ -76,7 +78,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
     if (rejected.length) {
       const sample = rejected.slice(0, 3).join(', ')
       const more = rejected.length > 3 ? ` (+${rejected.length - 3} more)` : ''
-      setError(`Only PDF resumes are supported. Skipped: ${sample}${more}`)
+      setError(`Only PDF and DOCX resumes are supported. Skipped: ${sample}${more}`)
       return
     }
     if (files.length + allowed.length > MAX_FILES_PER_UPLOAD) {
@@ -115,7 +117,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
       if (allowed.length) addFiles(allowed)
       if (skipped > 0) {
         toast.message(
-          `${skipped} Drive file${skipped === 1 ? '' : 's'} skipped (PDF only)`,
+          `${skipped} Drive file${skipped === 1 ? '' : 's'} skipped (PDF/DOCX only)`,
         )
       }
       if (allowed.length) {
@@ -163,7 +165,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
     const invalid = files.find((file) => !isAllowedResumeFile(file))
     if (invalid) {
       setUploading(false)
-      setError(`Unsupported file type: ${invalid.name}. Use PDF only.`)
+      setError(`Unsupported file type: ${invalid.name}. Use PDF or DOCX.`)
       return
     }
 
@@ -244,7 +246,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
           <span className="material-symbols-outlined text-[32px] text-secondary">upload_file</span>
           <p className="text-body-sm text-on-surface">{fileLabel}</p>
           <p className="text-label-md text-on-surface-variant">
-            Supports PDF only
+            Supports PDF and DOCX
             {driveConfigured ? ' · device or Google Drive' : ''} · up to{' '}
             {MAX_FILES_PER_UPLOAD} files
           </p>
@@ -281,7 +283,7 @@ export function ResumeBulkUpload({ jobId, onQueued }) {
             ref={inputRef}
             type="file"
             multiple
-            accept=".pdf,application/pdf"
+            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             onChange={onFileChange}
             className="hidden"
             disabled={busy}

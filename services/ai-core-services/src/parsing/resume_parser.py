@@ -23,6 +23,10 @@ class ResumeParseCancelled(Exception):
     """Raised when the requesting client went away before extraction started."""
 
 
+# Resume formats accepted by the upload UIs and core-api (Bug-025).
+SUPPORTED_RESUME_EXTENSIONS = frozenset({".pdf", ".docx"})
+
+
 class ResumeParser:
     def __init__(self, llm_client: Optional[OllamaClient] = None):
         self.llm_client = llm_client or OllamaClient()
@@ -43,21 +47,30 @@ class ResumeParser:
                     raise ResumeParseCancelled(f"Client disconnected before parsing {s3_key}")
 
                 ext = os.path.splitext(tmp_path)[1].lower()
-                if ext != ".pdf":
-                    raise ValueError(f"Unsupported resume format: {ext or 'unknown'}. Only PDF resumes are supported.")
+                if ext not in SUPPORTED_RESUME_EXTENSIONS:
+                    raise ValueError(
+                        f"Unsupported resume format: {ext or 'unknown'}. "
+                        "Only PDF and DOCX resumes are supported."
+                    )
 
                 docling_md, page_count = await asyncio.to_thread(
                     docling_wrapper.extract_markdown, tmp_path
                 )
-                ocr_pages = await asyncio.to_thread(extract_all_pages_ocr, tmp_path)
-                markdown_text = merge_pdf_extractions(docling_md, ocr_pages)
-                logger.info(
-                    "PDF hybrid extraction complete",
-                    extra={"page_count": page_count, "ocr_pages": len(ocr_pages)},
-                )
+                if ext == ".pdf":
+                    ocr_pages = await asyncio.to_thread(extract_all_pages_ocr, tmp_path)
+                    markdown_text = merge_pdf_extractions(docling_md, ocr_pages)
+                    logger.info(
+                        "PDF hybrid extraction complete",
+                        extra={"page_count": page_count, "ocr_pages": len(ocr_pages)},
+                    )
+                else:
+                    # Word files carry a real text layer (with headings and
+                    # bullets), so there's nothing for OCR to recover (Bug-025).
+                    markdown_text = docling_md
+                    logger.info("DOCX extraction complete", extra={"chars": len(markdown_text)})
 
                 if not markdown_text.strip():
-                    raise ValueError("No text extracted from PDF resume")
+                    raise ValueError(f"No text extracted from {ext.lstrip('.').upper()} resume")
 
             current_date = datetime.now().strftime("%Y-%m-%d")
             prompt = resume_prompt_builder.build(markdown_text, current_date)
