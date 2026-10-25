@@ -18,14 +18,24 @@ export function useJobQuery(jobId, options = {}) {
   })
 }
 
-export function useJobApplicantsQuery(jobId, params = {}, options = {}) {
-  const page = params.page ?? 1
-  const limit = params.limit ?? 50
+// The API returns at most 50 applicants per page.
+const APPLICANTS_PAGE_SIZE = 50
+const MAX_APPLICANT_PAGES = 100
+
+/** All of a job's applicants. The list is sorted by score, so a new low-scoring
+ * candidate on a job with 50+ applicants was beyond page 1 and never shown (Bug-026). */
+export function useJobApplicantsQuery(jobId, options = {}) {
   return useQuery({
-    queryKey: queryKeys.jobApplicants(jobId, { page, limit }),
+    queryKey: queryKeys.jobApplicants(jobId),
     queryFn: async () => {
-      const data = await getJobApplicantsRequest(jobId, { page, limit })
-      return Array.isArray(data) ? data : []
+      const all = []
+      for (let page = 1; page <= MAX_APPLICANT_PAGES; page += 1) {
+        const data = await getJobApplicantsRequest(jobId, { page, limit: APPLICANTS_PAGE_SIZE })
+        const rows = Array.isArray(data) ? data : []
+        all.push(...rows)
+        if (rows.length < APPLICANTS_PAGE_SIZE) break
+      }
+      return all
     },
     enabled: Boolean(jobId),
     ...options,

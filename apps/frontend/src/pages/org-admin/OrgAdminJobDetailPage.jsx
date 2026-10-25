@@ -110,7 +110,7 @@ export function OrgAdminJobDetailPage() {
     isFetching: applicantsFetching,
     error: applicantsQueryError,
     refetch: refetchApplicants,
-  } = useJobApplicantsQuery(jobId, {})
+  } = useJobApplicantsQuery(jobId)
 
   applicantsRef.current = applicants
 
