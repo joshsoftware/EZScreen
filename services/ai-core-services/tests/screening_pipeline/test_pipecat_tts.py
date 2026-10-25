@@ -281,3 +281,55 @@ async def test_live_speech_jumps_ahead_of_background_warming():
 
 async def _drain(synthesizer, text):
     return [chunk async for chunk in synthesizer.synthesize(text)]
+
+
+def test_llm_replies_are_split_into_short_phrases():
+    from src.screening_pipeline.pipecat_tts import split_for_streaming
+
+    text = (
+        "Sure. I am asking how you handle exceptions globally in a Spring Boot REST API, "
+        "for example using a ControllerAdvice class with ExceptionHandler methods, "
+        "and how you return consistent error responses to the client."
+    )
+
+    assert split_for_streaming(text) == [
+        "Sure.",
+        "I am asking how you handle exceptions globally in a Spring Boot REST API,",
+        "for example using a ControllerAdvice class with ExceptionHandler methods,",
+        "and how you return consistent error responses to the client.",
+    ]
+    assert split_for_streaming("Could you explain more?") == ["Could you explain more?"]
+    # Tiny trailing pieces are joined rather than synthesized on their own.
+    assert split_for_streaming("Okay. Got it.") == ["Okay. Got it."]
+
+
+@pytest.mark.asyncio
+async def test_first_phrase_plays_before_the_rest_is_synthesized():
+    """Bug-037: a one-sentence explanation was synthesized as a single block,
+    so nothing played for 25-35s."""
+    synthesizer = KokoroSynthesizer(model_path="unused", voices_path="unused")
+    started: list[str] = []
+    release = asyncio.Event()
+
+    async def _ensure_ready() -> None:
+        return None
+
+    async def _create_stream(text: str, voice: str, speed: float, lang: str):
+        started.append(text)
+        if len(started) > 1:
+            await release.wait()
+        yield _BATCH, 24000
+
+    synthesizer.ensure_ready = _ensure_ready  # type: ignore[method-assign]
+    synthesizer.kokoro = type("FakeKokoro", (), {"create_stream": staticmethod(_create_stream)})()
+
+    stream = synthesizer.synthesize(
+        "Sure. I am asking how you handle exceptions globally in a Spring Boot REST API, "
+        "and how you return consistent error responses."
+    )
+    first = await asyncio.wait_for(stream.__anext__(), timeout=1)
+    assert first and started == ["Sure."]
+
+    release.set()
+    rest = [chunk async for chunk in stream]
+    assert rest and len(started) == 3
