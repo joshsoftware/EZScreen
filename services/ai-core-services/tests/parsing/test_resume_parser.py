@@ -15,6 +15,7 @@ async def test_pdf_path_uses_docling_and_ocr_merge():
 
     with (
         patch("src.parsing.resume_parser.storage_client.download_to_tempfile", return_value="/tmp/resume.pdf"),
+        patch("src.parsing.resume_parser.detect_resume_format", return_value=".pdf"),
         patch("src.parsing.resume_parser.os.path.exists", return_value=True),
         patch("src.parsing.resume_parser.os.remove"),
         patch(
@@ -46,6 +47,7 @@ async def test_unsupported_resume_format_rejected():
 
     with (
         patch("src.parsing.resume_parser.storage_client.download_to_tempfile", return_value="/tmp/resume.txt"),
+        patch("src.parsing.resume_parser.detect_resume_format", return_value=None),
         patch("src.parsing.resume_parser.os.path.exists", return_value=True),
         patch("src.parsing.resume_parser.os.remove"),
         patch("src.parsing.resume_parser.docling_wrapper.extract_markdown") as mock_docling,

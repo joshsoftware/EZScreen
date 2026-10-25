@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import zipfile
 from datetime import datetime
 from typing import Awaitable, Callable, Optional
 
@@ -27,6 +28,43 @@ class ResumeParseCancelled(Exception):
 SUPPORTED_RESUME_EXTENSIONS = frozenset({".pdf", ".docx"})
 
 
+def detect_resume_format(path: str) -> Optional[str]:
+    """Return ".pdf", ".docx" or ".doc" from the file's own bytes, or None.
+
+    The upload page accepts a file by MIME type even when its name has no
+    (or the wrong) extension, so the stored name alone isn't reliable
+    (Bug-028).
+    """
+    with open(path, "rb") as file:
+        head = file.read(1024)
+    # The PDF spec lets a few junk bytes precede the header.
+    if b"%PDF-" in head:
+        return ".pdf"
+    if head.startswith(b"\xd0\xcf\x11\xe0"):
+        return ".doc"
+    if head.startswith(b"PK\x03\x04"):
+        try:
+            with zipfile.ZipFile(path) as archive:
+                if "word/document.xml" in archive.namelist():
+                    return ".docx"
+        except zipfile.BadZipFile:
+            return None
+    return None
+
+
+def _unsupported_format_message(detected: Optional[str], name_ext: str) -> str:
+    if detected == ".doc":
+        # Legacy binary Word; Docling can't read it.
+        return (
+            "Unsupported resume format: old Word .doc file. "
+            "Save it as DOCX or PDF and upload again."
+        )
+    return (
+        f"Unsupported resume format: {name_ext or 'unknown'}. "
+        "Only PDF and DOCX resumes are supported."
+    )
+
+
 class ResumeParser:
     def __init__(self, llm_client: Optional[OllamaClient] = None):
         self.llm_client = llm_client or OllamaClient()
@@ -46,11 +84,18 @@ class ResumeParser:
                 if is_cancelled is not None and await is_cancelled():
                     raise ResumeParseCancelled(f"Client disconnected before parsing {s3_key}")
 
-                ext = os.path.splitext(tmp_path)[1].lower()
+                name_ext = os.path.splitext(tmp_path)[1].lower()
+                ext = await asyncio.to_thread(detect_resume_format, tmp_path)
                 if ext not in SUPPORTED_RESUME_EXTENSIONS:
-                    raise ValueError(
-                        f"Unsupported resume format: {ext or 'unknown'}. "
-                        "Only PDF and DOCX resumes are supported."
+                    raise ValueError(_unsupported_format_message(ext, name_ext))
+                if os.path.splitext(tmp_path)[1] != ext:
+                    # Docling picks its reader from the extension.
+                    fixed_path = os.path.splitext(tmp_path)[0] + ext
+                    os.replace(tmp_path, fixed_path)
+                    tmp_path = fixed_path
+                    logger.info(
+                        "Resume type taken from file contents",
+                        extra={"s3_key": s3_key, "name_ext": name_ext, "detected": ext},
                     )
 
                 docling_md, page_count = await asyncio.to_thread(

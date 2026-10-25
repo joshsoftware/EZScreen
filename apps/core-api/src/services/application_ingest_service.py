@@ -253,9 +253,11 @@ def _classify_ingest_error(exc: Exception) -> tuple[str, str]:
             return "invalid_candidate", text
         if "could not extract candidate email" in lowered:
             return "invalid_candidate", text
-        if "unsupported resume format" in lowered or "only pdf" in lowered:
+        if "unsupported resume format" in lowered:
             return "unsupported_format", text
-        if "parse" in lowered or "parsed_resume" in lowered:
+        if "timed out" in lowered or "timeout" in lowered:
+            return "parse_timeout", text
+        if "pars" in lowered:
             return "parse_failed", text
         return "processing_failed", text or "Resume processing failed"
     return "processing_failed", "Resume processing failed"
@@ -267,11 +269,12 @@ def _ingest_error_message(error_code: str, exc: Exception) -> str:
     if error_code == "invalid_candidate":
         return str(exc).strip() or "Could not create a candidate from this resume."
     if error_code == "unsupported_format":
-        return "Only PDF resumes are supported — convert this file to PDF and re-upload."
+        if "old word .doc" in str(exc).lower():
+            return "This is an old Word .doc file — save it as DOCX or PDF and re-upload."
+        return "This file is not a PDF or DOCX resume — upload a PDF or DOCX file."
+    if error_code == "parse_timeout":
+        return "Resume parsing timed out — re-upload this file."
     if error_code == "parse_failed":
-        text = str(exc).strip().lower()
-        if "timed out" in text or "timeout" in text:
-            return "Resume parsing timed out — re-upload this file."
         return str(exc).strip() or "Resume parsing failed."
     if isinstance(exc, ValueError) and str(exc).strip():
         return str(exc).strip()
