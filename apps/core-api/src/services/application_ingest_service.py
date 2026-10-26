@@ -46,6 +46,7 @@ from src.services.application_ingest_error_store import (
 )
 from src.services.application_ingest_progress import (
     mark_item_failure,
+    mark_item_parsed,
     mark_item_success,
     start_batch,
 )
@@ -214,6 +215,8 @@ def _process_resume(
         db.commit()
         db.refresh(application)
         db.refresh(job)
+        if batch_id:
+            mark_item_parsed(batch_id, file_name=file_name)
 
         apply_job_fit(db, job, application, parsed_resume)
         db.commit()

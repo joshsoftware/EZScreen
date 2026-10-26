@@ -150,9 +150,11 @@ export function OrgAdminJobDetailPage() {
             const errors = Array.isArray(event.errors) ? event.errors : []
             setIngestErrors(errors)
 
-            const completed = Number(event.completed) || 0
-            if (completed > lastCompletedRef.current) {
-              lastCompletedRef.current = completed
+            // Refetch when an applicant is created (still awaiting its score,
+            // Bug-031) and again when it is scored.
+            const progressed = (Number(event.parsed) || 0) + (Number(event.completed) || 0)
+            if (progressed > lastCompletedRef.current) {
+              lastCompletedRef.current = progressed
               void refetchApplicants()
             }
 
