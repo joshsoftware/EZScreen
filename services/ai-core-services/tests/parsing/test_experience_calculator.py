@@ -371,8 +371,8 @@ def test_internship_gte_6_months_kept_in_roles():
     assert intern_role["years"] > 0
 
 
-def test_internship_lt_6_months_removed_from_roles():
-    """Internship < 6 months should be completely removed from the roles list."""
+def test_internship_lt_6_months_kept_for_display_but_not_counted():
+    """Short internships stay in roles for the timeline (Bug-036) but add no years."""
     parsed = {
         "experience": {
             "roles": [
@@ -395,8 +395,9 @@ def test_internship_lt_6_months_removed_from_roles():
     recalculate_experience(parsed)
 
     roles = parsed["experience"]["roles"]
-    assert len(roles) == 1
-    assert roles[0]["title"] == "Software Engineer"
+    assert [role["title"] for role in roles] == ["Software Engineer", "Software Engineering Intern"]
+    assert roles[1]["is_internship"] is True
+    assert parsed["experience"]["total_years"] == 4.0
 
 
 def test_internship_excluded_from_total_years():

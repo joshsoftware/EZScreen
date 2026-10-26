@@ -20,12 +20,25 @@ class EducationCertificate(BaseModel):
     year: Optional[str] = None
     type: Optional[str] = None
 
+class HighlightGroup(BaseModel):
+    heading: Optional[str] = None
+    highlights: List[str] = Field(default_factory=list)
+
 class Role(BaseModel):
     title: Optional[str] = None
     company: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     years: Optional[float] = None
+    is_internship: bool = False
+    # Flat list of every bullet, for skill-years / job fit / questions.
+    highlights: List[str] = Field(default_factory=list)
+    # The same bullets under their resume sub-headings, for display.
+    highlight_groups: List[HighlightGroup] = Field(default_factory=list)
+
+class Project(BaseModel):
+    name: Optional[str] = None
+    tech_stack: List[str] = Field(default_factory=list)
     highlights: List[str] = Field(default_factory=list)
 
 class Experience(BaseModel):
@@ -44,6 +57,7 @@ class ParsedResumeData(BaseModel):
     experience: Experience = Field(default_factory=Experience)
     skill_experience: List[CandidateSkillExperience] = Field(default_factory=list)
     education_certificates: List[EducationCertificate] = Field(default_factory=list)
+    projects: List[Project] = Field(default_factory=list)
 
 class ParsedResumeResponse(BaseModel):
     resume_name: str

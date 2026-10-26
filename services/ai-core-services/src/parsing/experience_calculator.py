@@ -208,7 +208,6 @@ def _extract_summary_skill_years(resume_text: str, all_skills: list[str]) -> dic
 
 
 _INTERNSHIP_RE = re.compile(r'\binterns?\b|\binternship\b', re.IGNORECASE)
-_MIN_INTERNSHIP_MONTHS = 6
 
 
 def _is_internship_role(role: dict) -> bool:
@@ -222,9 +221,9 @@ def _is_internship_role(role: dict) -> bool:
 def recalculate_experience(parsed_data: dict, resume_text: str = "") -> None:
     """Recalculate role years and total_years from start/end dates.
 
-    Internship roles (>= 6 months) are kept in the parsed data for display
+    Internship roles are kept in the parsed data for display (any length)
     but are excluded from ``total_years`` and ``skill_experience`` so they
-    do not affect scoring.  Internships shorter than 6 months are removed.
+    do not affect scoring.
 
     Args:
         parsed_data: The parsed resume dict (mutated in place).
@@ -262,12 +261,8 @@ def recalculate_experience(parsed_data: dict, resume_text: str = "") -> None:
         is_intern = _is_internship_role(role)
         role["is_internship"] = is_intern
 
-        if is_intern:
-            # Remove internships shorter than 6 months
-            months = (role.get("years") or 0.0) * 12
-            if months < _MIN_INTERNSHIP_MONTHS:
-                continue  # drop this role entirely
-
+        # Short internships used to be dropped here; they now stay so the
+        # experience timeline shows them (Bug-036). They never count below.
         roles_to_keep.append(role)
 
         if start_dt and end_dt:

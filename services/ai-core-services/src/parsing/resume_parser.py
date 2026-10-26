@@ -65,6 +65,60 @@ def _unsupported_format_message(detected: Optional[str], name_ext: str) -> str:
     )
 
 
+def _string_list(value) -> list[str]:
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def normalize_highlights(parsed: dict) -> None:
+    """Keep role sub-headings and rebuild the flat highlights list from them.
+
+    The timeline shows highlight_groups (sub-heading + bullets, Bug-036);
+    skill-years, job fit and question generation keep reading the flat
+    highlights list.
+    """
+    experience = parsed.get("experience")
+    roles = experience.get("roles") if isinstance(experience, dict) else None
+    for role in roles if isinstance(roles, list) else []:
+        if not isinstance(role, dict):
+            continue
+        groups = []
+        for group in role.get("highlight_groups") or []:
+            if not isinstance(group, dict):
+                continue
+            points = _string_list(group.get("highlights"))
+            heading = group.get("heading")
+            heading = heading.strip() if isinstance(heading, str) and heading.strip() else None
+            if points or heading:
+                groups.append({"heading": heading, "highlights": points})
+        if not groups:
+            # Model answered in the old flat shape.
+            points = _string_list(role.get("highlights"))
+            groups = [{"heading": None, "highlights": points}] if points else []
+        role["highlight_groups"] = groups
+        role["highlights"] = [point for group in groups for point in group["highlights"]]
+
+    projects = []
+    for project in parsed.get("projects") or []:
+        if not isinstance(project, dict):
+            continue
+        name = project.get("name")
+        name = name.strip() if isinstance(name, str) else ""
+        points = _string_list(project.get("highlights"))
+        if name or points:
+            projects.append(
+                {
+                    "name": name or None,
+                    "tech_stack": _string_list(project.get("tech_stack")),
+                    "highlights": points,
+                }
+            )
+    parsed["projects"] = projects
+
+
 class ResumeParser:
     def __init__(self, llm_client: Optional[OllamaClient] = None):
         self.llm_client = llm_client or OllamaClient()
@@ -130,6 +184,7 @@ class ResumeParser:
                 if isinstance(parsed_data, dict) and "parsed_resume" in parsed_data:
                     parsed_data = parsed_data["parsed_resume"]
 
+                normalize_highlights(parsed_data)
                 recalculate_experience(parsed_data, resume_text=markdown_text)
                 return parsed_data
             except json.JSONDecodeError as e:
