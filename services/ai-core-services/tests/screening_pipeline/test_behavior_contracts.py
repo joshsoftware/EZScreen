@@ -1528,7 +1528,10 @@ async def test_moving_on_from_an_unanswered_follow_up_saves_without_it():
 
     await policy._move_on({"id": 1, "question": "Q?"}, "Q?", "Hello", primary, reason="test")
 
-    assert policy.transcript_log[-1]["follow_ups"] == []
+    # HR still sees the follow-up that was asked; only the Q&A save drops it.
+    assert policy.transcript_log[-1]["follow_ups"] == [
+        {"candidate_speech": "", "ai_response": "Could you explain more?"}
+    ]
     policy._complete_question.assert_awaited_once()
 
 

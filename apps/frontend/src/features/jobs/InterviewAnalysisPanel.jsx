@@ -354,6 +354,10 @@ export function TranscriptTurn({ turn }) {
           {fu?.bot_speech ? <ChatBubble side="left">{fu.bot_speech}</ChatBubble> : null}
           {fu?.candidate_answer ? (
             <ChatBubble side="right">{fu.candidate_answer}</ChatBubble>
+          ) : fu?.bot_speech ? (
+            <ChatBubble side="right" muted>
+              No answer
+            </ChatBubble>
           ) : null}
         </div>
       ))}

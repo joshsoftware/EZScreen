@@ -64,8 +64,12 @@ async def test_main_answer_is_scored_when_the_interview_ends_on_silence():
     assert len(policy.analysis_evaluations) == 1
     save_question.assert_awaited_once()
     qa_entry = save_question.await_args.args[1]
-    # The unanswered follow-up is dropped (core-api rejects empty answers).
+    # The unanswered follow-up is left out of the Q&A save (core-api rejects
+    # empty answers) but kept in the transcript so HR sees it was asked.
     assert qa_entry.get("follow_ups", []) == []
+    assert policy.transcript_log[0]["follow_ups"] == [
+        {"candidate_speech": "", "ai_response": "Can you elaborate?"}
+    ]
     assert close.await_args.args[2] == policy.analysis_evaluations
     policy.api_client.update_status.assert_awaited_once_with("completed")
 

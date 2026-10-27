@@ -55,6 +55,19 @@ from src.screening_pipeline.tts_prewarm import coerce_questions_list, known_bot_
 _FINISHED_SESSION_STATUSES = frozenset({"completed", "failed", "cancelled", "no_show"})
 
 
+def _answered_follow_ups(follow_ups: Any) -> list:
+    """Follow-ups the candidate replied to, for the Q&A save: core-api rejects
+    (422) one with an empty answer, losing the whole question. The transcript
+    keeps the unanswered ones so HR sees the follow-up was asked."""
+    if not isinstance(follow_ups, list):
+        return []
+    return [
+        f
+        for f in follow_ups
+        if isinstance(f, dict) and str(f.get("candidate_speech") or "").strip()
+    ]
+
+
 class PipecatInterviewPolicy:
     """
     Manages the state machine for the AI interview.
@@ -332,10 +345,6 @@ class PipecatInterviewPolicy:
         primary_eval = entry.get("primary_eval") if entry else None
         if not primary_eval:
             return
-        # core-api rejects (422) a follow-up with an empty answer.
-        entry["follow_ups"] = [
-            f for f in entry.get("follow_ups") or [] if str(f.get("candidate_speech") or "").strip()
-        ]
         qa_entry, evaluation = build_completed_question_payload(
             question_obj=question_obj,
             current_q=current_q,
@@ -343,7 +352,7 @@ class PipecatInterviewPolicy:
             primary_eval=None,
             current_eval=primary_eval,
             question_number=self.current_question_idx + 1,
-            follow_ups=entry["follow_ups"],
+            follow_ups=_answered_follow_ups(entry.get("follow_ups")),
         )
         self.analysis_evaluations.append(evaluation)
         self._schedule_persist(persist_qa_and_evaluation(self.api_client, qa_entry, evaluation))
@@ -905,13 +914,8 @@ class PipecatInterviewPolicy:
         )
         await self.speak(MOVE_ON_TEXT)
         if primary_eval_data is not None:
-            # The follow-up went unanswered; core-api rejects (422) a
-            # follow-up with an empty answer, losing the whole question.
-            if self.transcript_log:
-                follow_ups = self.transcript_log[-1].get("follow_ups") or []
-                self.transcript_log[-1]["follow_ups"] = [
-                    f for f in follow_ups if str(f.get("candidate_speech") or "").strip()
-                ]
+            # The follow-up went unanswered; _complete_question leaves it out
+            # of the Q&A save but it stays in the transcript.
             await self._complete_question(
                 question_obj, current_q, transcript, None, primary_eval_data
             )
@@ -1053,7 +1057,11 @@ class PipecatInterviewPolicy:
         if self.transcript_log and not self.transcript_log[-1].get("candidate_answer"):
             self.transcript_log[-1]["candidate_answer"] = transcript
 
-        follow_ups = self.transcript_log[-1].get("follow_ups") if self.transcript_log else None
+        follow_ups = (
+            _answered_follow_ups(self.transcript_log[-1].get("follow_ups"))
+            if self.transcript_log
+            else None
+        )
         primary_transcript = (
             self.transcript_log[-1].get("candidate_answer", transcript)
             if self.transcript_log
