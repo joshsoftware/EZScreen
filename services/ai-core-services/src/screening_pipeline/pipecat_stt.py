@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Callable
@@ -19,7 +20,11 @@ MAX_PROMPT_CHARS = 800
 
 
 WHISPER_TIMEOUT_SECONDS = 10.0
-WHISPER_ATTEMPTS = 2
+WHISPER_ATTEMPTS = 3
+# Wait before retrying a rate-limited (429) request: the provider's
+# Retry-After, capped so the candidate isn't left waiting mid-conversation.
+RATE_LIMIT_DEFAULT_WAIT_SECONDS = 1.0
+RATE_LIMIT_MAX_WAIT_SECONDS = 2.0
 # Whisper's own signals that a segment is not real speech (the thresholds
 # OpenAI's reference decoder uses). Dropping these removes invented text
 # like "See you on the next slide." from noise or near-silence.
@@ -62,6 +67,14 @@ def _confident_text(body: dict) -> str:
             continue
         kept.append(str(segment.get("text") or "").strip())
     return " ".join(part for part in kept if part).strip()
+
+
+def _retry_after_seconds(response: httpx.Response) -> float:
+    try:
+        wait = float(response.headers.get("retry-after", RATE_LIMIT_DEFAULT_WAIT_SECONDS))
+    except (TypeError, ValueError):
+        wait = RATE_LIMIT_DEFAULT_WAIT_SECONDS
+    return min(max(wait, 0.0), RATE_LIMIT_MAX_WAIT_SECONDS)
 
 
 def _echoes_prompt(transcript: str, prompt: str) -> bool:
@@ -142,15 +155,23 @@ class WhisperHttpSTTService(SegmentedSTTService):
                 break
             except Exception as error:
                 # Timeouts carry no message, so log the type as well.
-                retryable = isinstance(error, (httpx.TimeoutException, httpx.TransportError)) or (
-                    isinstance(error, httpx.HTTPStatusError) and error.response.status_code >= 500
+                status_code = (
+                    error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
                 )
+                # 429: the STT provider is rate limiting; dropping the segment
+                # loses the candidate's answer, so wait briefly and retry.
+                retryable = isinstance(error, (httpx.TimeoutException, httpx.TransportError)) or (
+                    status_code is not None and (status_code >= 500 or status_code == 429)
+                )
+                will_retry = retryable and attempt < WHISPER_ATTEMPTS
                 logger.error(
                     "Pipecat Whisper transcription failed",
-                    extra={"error": repr(error), "attempt": attempt, "will_retry": retryable},
+                    extra={"error": repr(error), "attempt": attempt, "will_retry": will_retry},
                 )
-                if not retryable or attempt == WHISPER_ATTEMPTS:
+                if not will_retry:
                     return
+                if status_code == 429:
+                    await asyncio.sleep(_retry_after_seconds(error.response))
         transcript = _confident_text(body or {})
 
         if transcript and prompt and _echoes_prompt(transcript, prompt):

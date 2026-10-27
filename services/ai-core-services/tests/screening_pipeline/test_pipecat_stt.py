@@ -115,3 +115,36 @@ async def test_whisper_timeout_is_retried_once():
         frames = [frame async for frame in service.run_stt(bytes(16000 * 2))]
 
     assert [f.text for f in frames] == ["A ConcurrentHashMap is thread safe."]
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_transcription_is_retried_not_dropped():
+    """A 429 from the STT provider used to drop the candidate's answer."""
+    import httpx
+
+    service = WhisperHttpSTTService(sample_rate=16000)
+    audio = bytes(16000 * 2)
+
+    limited = httpx.Response(
+        429, headers={"retry-after": "30"}, request=httpx.Request("POST", "https://stt")
+    )
+    rate_limited = MagicMock()
+    rate_limited.raise_for_status = MagicMock(
+        side_effect=httpx.HTTPStatusError("429", request=limited.request, response=limited)
+    )
+    ok = MagicMock()
+    ok.raise_for_status = MagicMock()
+    ok.json.return_value = {"text": "A HashMap is not thread safe."}
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.post = AsyncMock(side_effect=[rate_limited, ok])
+
+    with patch("src.screening_pipeline.pipecat_stt.httpx.AsyncClient", return_value=client), patch(
+        "src.screening_pipeline.pipecat_stt.asyncio.sleep", AsyncMock()
+    ) as wait:
+        frames = [frame async for frame in service.run_stt(audio)]
+
+    assert [frame.text for frame in frames] == ["A HashMap is not thread safe."]
+    # Retry-After is honoured but capped for a live conversation.
+    wait.assert_awaited_once_with(2.0)
