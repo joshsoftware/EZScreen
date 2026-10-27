@@ -21,6 +21,7 @@ import {
 } from './applicationFields'
 import { formatDateTime } from './jobFields'
 import { getReEvaluationStatusRequest, reEvaluateApplicationRequest } from './api'
+import { useJobQueryClient } from './useJobQueries'
 import { ApiError } from '../../lib/api/client'
 import { toast } from 'sonner'
 
@@ -66,6 +67,9 @@ export function ApplicantsTable({
   const [reevaluationStartedAt, setReevaluationStartedAt] = useState(null)
   const pollInFlightRef = useRef(false)
   const onRefreshRef = useRef(onRefresh)
+  const { invalidateApplication } = useJobQueryClient()
+  const invalidateApplicationRef = useRef(invalidateApplication)
+  invalidateApplicationRef.current = invalidateApplication
   onRefreshRef.current = onRefresh
   const filterOptions = fitFilterOptions(fitLabels)
 
@@ -111,6 +115,9 @@ export function ApplicantsTable({
           return
         }
         if (pipeline?.status === 'completed') {
+          // Also drop this applicant's cached profile (and timeline), or
+          // opening it shows the pre-evaluation analysis until a refresh.
+          await invalidateApplicationRef.current(reevaluatingId)
           await onRefreshRef.current?.()
           setReevaluatingId(null)
           setReevaluationStartedAt(null)

@@ -21,7 +21,7 @@ function StepLabel({ n, label, active }) {
 export function OrgAdminJobCreatePage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { setJobData } = useJobQueryClient()
+  const { setJobData, invalidateJob } = useJobQueryClient()
   const cloneInitialValues = location.state?.cloneInitialValues
   const isClone = Boolean(cloneInitialValues)
   const [step, setStep] = useState(1)
@@ -63,6 +63,9 @@ export function OrgAdminJobCreatePage() {
     setSkillsError(null)
     try {
       await updateJobRequest(job.id, { skills: nextSkills })
+      // Step 1 cached this job without skills; opening it showed "0 must-have"
+      // until a page refresh.
+      await invalidateJob(job.id)
       toast.success('Job created')
       navigate('/org-admin/jobs', { replace: true })
     } catch (err) {
