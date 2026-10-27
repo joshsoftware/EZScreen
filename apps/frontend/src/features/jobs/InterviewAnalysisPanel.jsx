@@ -468,12 +468,16 @@ export function InterviewAnalysisPanel({
   loading = false,
   error = null,
   visible = false,
+  attemptNumber = 1,
 }) {
   if (!visible && !loading) return null
+  // After a reschedule, name the attempt so it lines up with "Earlier interviews".
+  const panelTitle =
+    attemptNumber > 1 ? `Screening analysis · Interview ${attemptNumber}` : 'Screening analysis'
 
   if (loading) {
     return (
-      <Panel title="Screening analysis">
+      <Panel title={panelTitle}>
         <div className="grid lg:grid-cols-[minmax(240px,280px)_minmax(0,1fr)] gap-md">
           <Skeleton className="h-56 rounded-xl" />
           <Skeleton className="h-56 rounded-xl" />
@@ -484,7 +488,7 @@ export function InterviewAnalysisPanel({
 
   if (error) {
     return (
-      <Panel title="Screening analysis">
+      <Panel title={panelTitle}>
         <Alert>{error}</Alert>
       </Panel>
     )
@@ -492,7 +496,7 @@ export function InterviewAnalysisPanel({
 
   if (!analysis) {
     return (
-      <Panel title="Screening analysis">
+      <Panel title={panelTitle}>
         <p className="text-body-sm text-on-surface-variant rounded-xl border border-dashed border-outline-variant px-md py-lg text-center">
           Analysis is not available yet for this screening session.
         </p>
@@ -526,7 +530,7 @@ export function InterviewAnalysisPanel({
   ].filter((item) => item.value != null)
 
   return (
-    <Panel title="Screening analysis">
+    <Panel title={panelTitle}>
       <div className="space-y-md">
         <FinalSummarySection
           summary={summary}

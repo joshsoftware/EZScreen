@@ -105,7 +105,8 @@ async def import_recording(session_id: str, bot_id: str, s3_key: str) -> None:
             "Meeting recording copy failed",
             extra={"session_id": session_id, "bot_id": bot_id, "error": str(err)},
         )
-        payload = {"success": False, "error": str(err)[:1000], "retryable": True}
+        # s3_key tells core-api which attempt of a rescheduled session failed.
+        payload = {"success": False, "s3_key": s3_key, "error": str(err)[:1000], "retryable": True}
     else:
         logger.info(
             "Meeting recording saved to MinIO",

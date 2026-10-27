@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
@@ -16,6 +16,7 @@ import {
 import { ApplicationDetailPanel } from '../../features/jobs/ApplicationDetailPanel'
 import { CandidateScreeningQuestionsPanel } from '../../features/jobs/CandidateScreeningQuestionsPanel'
 import { InterviewAnalysisPanel, interviewAnalysisHeader } from '../../features/jobs/InterviewAnalysisPanel'
+import { PreviousInterviewsPanel } from '../../features/jobs/PreviousInterviewsPanel'
 import { ResumePreviewButton } from '../../features/jobs/ResumeActions'
 import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
@@ -133,7 +134,31 @@ export function OrgAdminApplicationDetailPage() {
     data: interviewSession,
     isLoading: sessionLoading,
     error: sessionError,
-  } = useInterviewSessionQuery(sessionId)
+  } = useInterviewSessionQuery(sessionId, {
+    // While the screening is live its status changes (rescheduled ->
+    // in_progress -> completed) and decides Reschedule; also show an earlier
+    // attempt's recording once it has been copied.
+    refetchInterval: (query) => {
+      if (screeningLive) return SCREENING_POLL_MS
+      return query.state.data?.previous_attempts?.some((attempt) =>
+        ['pending', 'in_progress'].includes(attempt.recording_status),
+      )
+        ? 30_000
+        : false
+    },
+  })
+
+  // The timeline (polled) shows the attempt ended before the session and its
+  // analysis are refetched: reload both, or the page keeps the pre-interview
+  // status and still offers Reschedule after a scored interview.
+  const wasScreeningLiveRef = useRef(screeningLive)
+  useEffect(() => {
+    if (wasScreeningLiveRef.current && !screeningLive && sessionId) {
+      void invalidateInterviewSession(sessionId)
+      void invalidateInterviewAnalysis(sessionId)
+    }
+    wasScreeningLiveRef.current = screeningLive
+  }, [screeningLive, sessionId, invalidateInterviewSession, invalidateInterviewAnalysis])
 
   const showAnalysis = canShowInterviewAnalysis(timeline, interviewSession?.status)
   const interviewLive = interviewSession?.status === 'in_progress'
@@ -358,6 +383,7 @@ export function OrgAdminApplicationDetailPage() {
 
       <InterviewAnalysisPanel
         visible={showAnalysis}
+        attemptNumber={interviewSession?.attempt_number}
         analysis={interviewAnalysis}
         loading={Boolean(sessionId) && showAnalysis && analysisLoading}
         error={
@@ -368,6 +394,8 @@ export function OrgAdminApplicationDetailPage() {
             : null
         }
       />
+
+      <PreviousInterviewsPanel attempts={interviewSession?.previous_attempts} />
 
       <ApplicationDetailPanel
         jobId={jobId}

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from src.config.settings import settings
 from src.models.application import Application
 from src.models.enums import (
     ApplicationStatus,
@@ -20,6 +21,7 @@ from src.models.enums import (
 from src.models.interview_session import InterviewSession
 from src.schemas.interview_session import (
     InterviewSessionResponse,
+    PreviousInterviewAttempt,
     RescheduleInterviewSessionRequest,
     ScheduleInterviewSessionRequest,
 )
@@ -41,6 +43,12 @@ from src.services.email_service import (
     send_screening_invite,
 )
 from src.services.meet_link_service import ScreeningMeetResult, create_screening_meet
+from src.services.recording_import_service import (
+    attempt_number,
+    new_import_state,
+    previous_attempts,
+)
+from src.services.storage_service import create_presigned_recording_url
 from src.services.session_question_service import generate_candidate_screening_questions
 
 __all__ = [
@@ -74,6 +82,36 @@ def _scored_answer_count(session: InterviewSession) -> int:
     result = analysis.analysis_result if analysis is not None else None
     evaluations = result.get("evaluations") if isinstance(result, dict) else None
     return len(evaluations) if isinstance(evaluations, list) else 0
+
+
+def _archived_attempt(session: InterviewSession, prior_meta: dict[str, Any]) -> dict[str, Any]:
+    """The attempt being rescheduled, kept so HR can still replay its recording."""
+    bot_id = prior_meta.get("bot_id") if isinstance(prior_meta.get("bot_id"), str) else None
+    state = prior_meta.get("recording_import")
+    state = dict(state) if isinstance(state, dict) else None
+    recording_key = session.analysis.recording_url if session.analysis is not None else None
+    if recording_key:
+        state = {**(state or {}), "status": "complete", "s3_key": recording_key, "last_error": None}
+    elif state is None and bot_id and session.status not in {
+        InterviewStatus.failed,
+        InterviewStatus.cancelled,
+    }:
+        # The bot's `ended` webhook (which queues the copy) hasn't arrived and
+        # will no longer find this booking, or the bot is being removed now:
+        # queue the copy here. Retries cover Attendee still finishing the file.
+        state = new_import_state(
+            bot_id=bot_id,
+            import_after=datetime.now(timezone.utc)
+            + timedelta(seconds=settings.recording_import_retry_seconds),
+        )
+    return {
+        "attempt": attempt_number(prior_meta),
+        "status": session.status.value,
+        "scheduled_at": session.scheduled_at.isoformat() if session.scheduled_at else None,
+        "ended_at": (session.completed_at or datetime.now(timezone.utc)).isoformat(),
+        "bot_id": bot_id,
+        "recording_import": state,
+    }
 
 
 _TERMINAL_SESSION_STATUSES = frozenset(
@@ -136,7 +174,22 @@ def interview_session_to_response(session: InterviewSession) -> InterviewSession
         bot_status=bot_status,
         additional_emails=additional,
         generated_questions=session.generated_questions,
+        attempt_number=attempt_number(meta),
+        previous_attempts=[_previous_attempt_response(item) for item in previous_attempts(meta)],
         created_at=session.created_at,
+    )
+
+
+def _previous_attempt_response(item: dict[str, Any]) -> PreviousInterviewAttempt:
+    state = item.get("recording_import") if isinstance(item.get("recording_import"), dict) else {}
+    key = state.get("s3_key") if state.get("status") == "complete" else None
+    return PreviousInterviewAttempt(
+        attempt=item.get("attempt") if isinstance(item.get("attempt"), int) else 1,
+        status=str(item.get("status") or "unknown"),
+        scheduled_at=item.get("scheduled_at"),
+        ended_at=item.get("ended_at"),
+        recording_url=create_presigned_recording_url(key) if isinstance(key, str) and key else None,
+        recording_status=state.get("status") if isinstance(state.get("status"), str) else None,
     )
 
 
@@ -638,14 +691,17 @@ def reschedule_interview_session(
             "scheduled_at": prior_scheduled_at.isoformat(),
             "gmeet_link": prior_meta.get("gmeet_link"),
         }
+    # Earlier attempts (and their recordings) stay with the session as
+    # "Interview 1", "Interview 2", ...; the new booking is the next one.
+    metadata["attempt_number"] = attempt_number(prior_meta)
+    metadata["previous_attempts"] = previous_attempts(prior_meta)
+    if session.status not in {InterviewStatus.scheduled, InterviewStatus.rescheduled}:
+        metadata["previous_attempts"].append(_archived_attempt(session, prior_meta))
+        metadata["attempt_number"] += 1
 
     # The earlier attempt scored nothing; drop its analysis so the new attempt
-    # doesn't show the old recording / "no answers" summary. Keep a link to
-    # that recording with the reschedule record.
-    stale_analysis = session.analysis
-    if stale_analysis is not None and _scored_answer_count(session) == 0:
-        if stale_analysis.recording_url:
-            metadata.setdefault("rescheduled_from", {})["recording_url"] = stale_analysis.recording_url
+    # doesn't show the old "no answers" summary. Its recording was kept above.
+    if session.analysis is not None and _scored_answer_count(session) == 0:
         session.analysis = None  # delete-orphan removes the row
 
     session.scheduled_at = body.scheduled_at

@@ -101,9 +101,13 @@ def build_recording_s3_key(
     organization_id: uuid.UUID,
     job_id: uuid.UUID,
     session_id: uuid.UUID,
+    attempt: int = 1,
 ) -> str:
-    """orgs/{org}/jobs/{job}/recordings/{session_id}.mp4"""
-    return f"{recording_key_prefix(organization_id, job_id)}{session_id}.mp4"
+    """orgs/{org}/jobs/{job}/recordings/{session_id}.mp4 for the first attempt,
+    {session_id}-attempt-{n}.mp4 after a reschedule, so a later attempt never
+    overwrites an earlier attempt's recording."""
+    suffix = "" if attempt <= 1 else f"-attempt-{attempt}"
+    return f"{recording_key_prefix(organization_id, job_id)}{session_id}{suffix}.mp4"
 
 
 def create_presigned_recording_url(s3_key: str) -> str:

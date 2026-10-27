@@ -339,12 +339,14 @@ export function interviewSessionIdFromTimeline(timeline, candidateEmail = null) 
 }
 
 export function canShowInterviewAnalysis(timeline, sessionStatus = null) {
-  if (sessionStatus === 'completed') return true
+  // A no-show still has its recording (and the "no answers" summary) to show.
+  if (sessionStatus === 'completed' || sessionStatus === 'no_show') return true
   // Latest attempt only: after a reschedule the earlier attempt's
   // "completed" must not show its (cleared) analysis for the new one.
   const types = screeningAttemptEventTypes(timeline)
   return (
     types.has('screening_completed') ||
+    types.has('screening_no_show') ||
     types.has('analysis_ready')
   )
 }
