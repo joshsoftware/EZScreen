@@ -5,6 +5,7 @@ from src.common.llm_utils import parse_llm_json
 from src.core.logger import logger
 from src.job_fit_analysis.prompt_builder import matching_prompt_builder
 from src.job_fit_analysis.score_calculator import recalculate_scores
+from src.job_fit_analysis.skill_reconciler import reconcile_skills
 from src.llm.client import OllamaClient
 from src.parsing.schemas import ParsedJDData, ParsedResumeData
 
@@ -27,6 +28,7 @@ class JobFitMatcher:
             )
 
             match_result = parse_llm_json(response.response)
+            reconcile_skills(match_result, resume_data.model_dump(), jd_data.model_dump())
             recalculate_scores(match_result)
 
             return match_result
