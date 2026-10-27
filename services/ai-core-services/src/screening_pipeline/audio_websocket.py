@@ -14,7 +14,9 @@ seen_triggers = set()
 
 # States in which the bot is waiting for, or working on, the candidate's reply.
 _CANDIDATE_TURN_STATES = frozenset(
-    {"listening", "collecting_answer", "evaluating", "closing"}
+    # waiting_for_candidate: speech means the candidate is here (in case the
+    # join webhook was missed).
+    {"waiting_for_candidate", "listening", "collecting_answer", "evaluating", "closing"}
 )
 
 

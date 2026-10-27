@@ -17,8 +17,10 @@ from src.screening_pipeline.persistence import (
     persist_interview_close,
     persist_qa_and_evaluation,
 )
+from src.screening_pipeline.candidate_presence import forget_session, is_candidate_present
 from src.screening_pipeline.prompts import (
     ANSWER_ACKNOWLEDGEMENT_TEXT,
+    CANDIDATE_JOIN_WAIT_SECONDS,
     ANSWER_SETTLE_SECONDS,
     CANDIDATE_SPEAKING_POLL_SECONDS,
     CLOSING_REPLY_TIMEOUT_SECONDS,
@@ -116,6 +118,8 @@ class PipecatInterviewPolicy:
         # Runs for the settle-wait + classify_and_evaluate span of a turn;
         # see _start_filler_schedule / _cancel_filler_schedule / _run_filler_schedule.
         self._filler_task: Optional[asyncio.Task] = None
+        # Runs while the bot waits in the meeting for the candidate to join.
+        self._candidate_wait_task: Optional[asyncio.Task] = None
 
 
     # ──────────────────────────── LIFECYCLE ────────────────────────────
@@ -158,6 +162,18 @@ class PipecatInterviewPolicy:
         if self.tts_cache_warmer is not None:
             self._tts_warm_task = asyncio.create_task(self._warm_tts_cache())
 
+        if is_candidate_present(self.session_id):
+            await self._greet()
+            return
+        # Don't talk to an empty meeting: greet when the candidate joins.
+        self.current_interaction_state = "waiting_for_candidate"
+        self._candidate_wait_task = asyncio.create_task(self._end_if_candidate_never_joins())
+        logger.info(
+            "Waiting for the candidate to join",
+            extra={"session_id": self.session_id, "wait_seconds": CANDIDATE_JOIN_WAIT_SECONDS},
+        )
+
+    async def _greet(self) -> None:
         self.transcript_log.append(
             {
                 "interaction_type": "greeting",
@@ -167,6 +183,27 @@ class PipecatInterviewPolicy:
         )
         await self.speak(GREETING_TEXT)
         self._begin_listening()
+
+    async def candidate_joined(self) -> None:
+        """A participant joined (or spoke): start the interview if waiting."""
+        if not self.is_active or self.current_interaction_state != "waiting_for_candidate":
+            return
+        self._cancel_candidate_wait()
+        self.current_interaction_state = "idle"
+        logger.info("Candidate joined; starting the interview", extra={"session_id": self.session_id})
+        await self._greet()
+
+    async def _end_if_candidate_never_joins(self) -> None:
+        await asyncio.sleep(CANDIDATE_JOIN_WAIT_SECONDS)
+        if self.current_interaction_state == "waiting_for_candidate":
+            logger.info("Candidate never joined; ending as no-show", extra={"session_id": self.session_id})
+            await self.end_interview("candidate_absent", leave_bot=True)
+
+    def _cancel_candidate_wait(self):
+        task = self._candidate_wait_task
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+        self._candidate_wait_task = None
 
     async def _warm_tts_cache(self) -> None:
         """Pre-synthesize all deterministic bot text for this session.
@@ -253,13 +290,56 @@ class PipecatInterviewPolicy:
             self._cancel_processing()
             self._cancel_filler_schedule()
             self._cancel_tts_warm()
+            self._cancel_candidate_wait()
+            # The session row is reused if HR reschedules; start that attempt fresh.
+            forget_session(self.session_id)
+            # A candidate who never joined (or never said a word) is a no-show,
+            # not a completed interview; HR reschedules those.
+            no_show = not self._candidate_responded()
+            if no_show:
+                reason = "candidate_absent"
+                self.termination_reason = reason
             await self.finalize(reason=reason)
             # The status endpoint has no termination-reason field yet; the
             # reason remains in this orchestration's durable finalization log.
             if self.api_client is not None:
-                await self.api_client.update_status("completed")
+                await self.api_client.update_status("no_show" if no_show else "completed")
             if leave_bot:
                 await self._leave_bot_after_close()
+
+    def _candidate_responded(self) -> bool:
+        if self.analysis_evaluations:
+            return True
+        return any(
+            isinstance(entry, dict) and str(entry.get("candidate_answer") or "").strip()
+            for entry in self.transcript_log
+        )
+
+    async def abort_for_reschedule(self) -> None:
+        """HR rescheduled this session while the bot was in the meeting.
+
+        Stop without persisting anything: the session row now belongs to the
+        new booking, so this attempt must not write a summary, transcript or
+        status into it. Teardown's end_interview() becomes a no-op.
+        """
+        async with self._end_lock:
+            if self._ending or self.is_finalized:
+                return
+            self._ending = True
+            self.is_finalized = True
+            self.termination_reason = "rescheduled"
+            self.is_active = False
+            self.current_interaction_state = "ending"
+            self._cancel_inactivity_deadline()
+            self._cancel_answer_settle()
+            self._cancel_closing_reply_timeout()
+            self._cancel_processing()
+            self._cancel_filler_schedule()
+            self._cancel_tts_warm()
+            self._cancel_candidate_wait()
+            # The session row is reused if HR reschedules; start that attempt fresh.
+            forget_session(self.session_id)
+        logger.info("Interview aborted for reschedule", extra={"session_id": self.session_id})
 
     async def fail_session(self, reason: str) -> None:
         """Mark the session failed and pull the bot out of the meeting.
@@ -281,6 +361,9 @@ class PipecatInterviewPolicy:
             self._cancel_processing()
             self._cancel_filler_schedule()
             self._cancel_tts_warm()
+            self._cancel_candidate_wait()
+            # The session row is reused if HR reschedules; start that attempt fresh.
+            forget_session(self.session_id)
             logger.error(
                 "Interview session failed; removing bot from meeting",
                 extra={"session_id": self.session_id, "reason": reason},
@@ -396,6 +479,11 @@ class PipecatInterviewPolicy:
     def handle_candidate_activity(self):
         """Extend the deadline and invalidate stale work as soon as VAD fires."""
         if not self.is_active:
+            return
+        if self.current_interaction_state == "waiting_for_candidate":
+            # Someone is talking, so the candidate is here even if the join
+            # webhook never arrived.
+            asyncio.create_task(self.candidate_joined())
             return
         now = asyncio.get_running_loop().time()
         self._last_candidate_activity_at = now

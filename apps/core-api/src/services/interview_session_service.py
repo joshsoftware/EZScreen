@@ -29,7 +29,7 @@ from src.services.application_timeline_service import (
     assert_not_terminal,
     timeline_event_types,
 )
-from src.services.bot_dispatch_service import dispatch_screening_bot
+from src.services.bot_dispatch_service import abort_screening_session, dispatch_screening_bot
 from src.services.candidate_email_masking import (
     default_additional_invite_emails,
     mask_email_for_application,
@@ -67,6 +67,14 @@ _RETRYABLE_SESSION_STATUSES = frozenset(
         InterviewStatus.no_show,
     }
 )
+
+
+def _scored_answer_count(session: InterviewSession) -> int:
+    analysis = session.analysis
+    result = analysis.analysis_result if analysis is not None else None
+    evaluations = result.get("evaluations") if isinstance(result, dict) else None
+    return len(evaluations) if isinstance(evaluations, list) else 0
+
 
 _TERMINAL_SESSION_STATUSES = frozenset(
     {
@@ -253,30 +261,30 @@ def _assert_reschedulable(
 ) -> None:
     types = timeline_event_types(db, application.id)
     assert_not_terminal(application, types)
-
-    # A screening whose bot failed or whose candidate didn't show up is
-    # exactly the one HR needs to book again; without this it was stuck
-    # (no reschedule, and a new booking is refused as "already scheduled").
-    retry = session.status in _RETRYABLE_SESSION_STATUSES
-    if session.status not in _ACTIVE_SESSION_STATUSES and not retry:
-        raise ValueError("Only active screening sessions can be rescheduled")
-
-    if application.status != ApplicationStatus.interview_scheduled:
-        raise ValueError("Application is not in a scheduled screening state")
-
     if "screening_scheduled" not in types:
         raise ValueError("Screening must be scheduled before it can be rescheduled")
 
-    blocked = {
-        "screening_completed",
-        "rejected",
-        "shortlisted_for_l1",
-    }
-    if not retry:
-        # The failed / no-show attempt may have started before it broke.
-        blocked.add("screening_in_progress")
-    if blocked.intersection(types):
-        raise ValueError("Screening can no longer be rescheduled")
+    # Decided by this session's own state, not the whole timeline, so an
+    # earlier attempt (completed / in progress) can't block a later one.
+    scored = _scored_answer_count(session)
+    if session.status in {InterviewStatus.scheduled, InterviewStatus.rescheduled}:
+        pass  # not started yet
+    elif session.status in _RETRYABLE_SESSION_STATUSES:
+        pass  # failed / no-show: book it again
+    elif session.status == InterviewStatus.in_progress and scored == 0:
+        pass  # bot is in the meeting but nothing answered yet; it gets removed
+    elif session.status == InterviewStatus.completed and scored == 0:
+        pass  # ran but nothing scored (silence, left, all skipped)
+    elif session.status == InterviewStatus.in_progress:
+        raise ValueError("The screening is underway and can no longer be rescheduled")
+    else:
+        raise ValueError("Only active screening sessions can be rescheduled")
+
+    # A finished attempt may have moved the application on to
+    # interview_completed; rejected / shortlisted were refused above.
+    allowed_statuses = {ApplicationStatus.interview_scheduled, ApplicationStatus.interview_completed}
+    if application.status not in allowed_statuses:
+        raise ValueError("Application is not in a scheduled screening state")
 
     if scheduled_at.astimezone(timezone.utc) <= datetime.now(timezone.utc):
         raise ValueError("scheduled_at must be in the future")
@@ -590,6 +598,19 @@ def reschedule_interview_session(
         session=session,
         scheduled_at=body.scheduled_at,
     )
+    previous_status = application.status
+
+    if session.status == InterviewStatus.in_progress:
+        # The bot is in the meeting: stop that attempt (nothing is saved) and
+        # take the bot out before this row is reused for the new booking.
+        live_meta = session.interview_metadata if isinstance(session.interview_metadata, dict) else {}
+        bot_id = live_meta.get("bot_id")
+        error = abort_screening_session(
+            interview_session_id=session.id,
+            bot_id=bot_id if isinstance(bot_id, str) else None,
+        )
+        if error:
+            raise ValueError(error)
 
     job = application.job_description
     job_title = job.title if job is not None else "Role"
@@ -618,6 +639,15 @@ def reschedule_interview_session(
             "gmeet_link": prior_meta.get("gmeet_link"),
         }
 
+    # The earlier attempt scored nothing; drop its analysis so the new attempt
+    # doesn't show the old recording / "no answers" summary. Keep a link to
+    # that recording with the reschedule record.
+    stale_analysis = session.analysis
+    if stale_analysis is not None and _scored_answer_count(session) == 0:
+        if stale_analysis.recording_url:
+            metadata.setdefault("rescheduled_from", {})["recording_url"] = stale_analysis.recording_url
+        session.analysis = None  # delete-orphan removes the row
+
     session.scheduled_at = body.scheduled_at
     session.comment = body.comment
     session.scheduled_by = actor_id
@@ -626,6 +656,9 @@ def reschedule_interview_session(
     session.completed_at = None
     session.interview_metadata = metadata
     db.add(session)
+    # A completed-but-empty attempt had moved the application on; book it again.
+    application.status = ApplicationStatus.interview_scheduled
+    db.add(application)
 
     append_timeline_event(
         db,
@@ -633,7 +666,7 @@ def reschedule_interview_session(
         event_type=TimelineEventType.screening_rescheduled,
         actor_id=actor_id,
         actor_type=TimelineActorType.user,
-        from_status=ApplicationStatus.interview_scheduled,
+        from_status=previous_status,
         to_status=ApplicationStatus.interview_scheduled,
         metadata=_scheduling_timeline_metadata(
             session_id=session.id,

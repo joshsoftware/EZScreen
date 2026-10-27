@@ -63,6 +63,7 @@ async def persist_qa_and_evaluation(
 SYSTEM_FAILURE_REASONS = frozenset({"tts_unavailable", "pipeline_failed"})
 
 _NO_SCORED_ANSWER_REASONS = {
+    "candidate_absent": "the candidate did not join the meeting or never spoke",
     "candidate_silence": "the candidate stopped responding and the interview ended due to silence",
     "candidate_left": "the candidate left the meeting before answering a question",
     "meeting_ended": "the meeting ended before any question was answered",

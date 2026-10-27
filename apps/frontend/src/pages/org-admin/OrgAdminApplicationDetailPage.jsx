@@ -54,8 +54,13 @@ const SCREENING_POLL_MS = 10_000
 export function OrgAdminApplicationDetailPage() {
   const { jobId = '', applicationId = '' } = useParams()
   const { fitLabels } = useOrgSettings()
-  const { invalidateApplication, invalidateApplicationTimeline, invalidateInterviewSession, invalidateJobApplicants } =
-    useJobQueryClient()
+  const {
+    invalidateApplication,
+    invalidateApplicationTimeline,
+    invalidateInterviewAnalysis,
+    invalidateInterviewSession,
+    invalidateJobApplicants,
+  } = useJobQueryClient()
   const [rerunning, setRerunning] = useState(false)
   const [rejecting, setRejecting] = useState(false)
   const [showRejectConfirm, setShowRejectConfirm] = useState(false)
@@ -119,8 +124,6 @@ export function OrgAdminApplicationDetailPage() {
     detail?.status !== 'rejected'
   const showScheduleBtn =
     Boolean(detail) && !mismatch && canScheduleScreening(detail, timeline)
-  const showRescheduleBtn =
-    Boolean(detail) && !mismatch && canRescheduleScreening(detail, timeline)
   const screeningSlot = screeningSlotFromTimeline(timeline, detail?.email)
   const showReject = Boolean(detail) && !mismatch && canRejectApplication(detail, timeline)
   const sessionId =
@@ -133,13 +136,16 @@ export function OrgAdminApplicationDetailPage() {
   } = useInterviewSessionQuery(sessionId)
 
   const showAnalysis = canShowInterviewAnalysis(timeline, interviewSession?.status)
+  const interviewLive = interviewSession?.status === 'in_progress'
   const {
     data: interviewAnalysis,
     isLoading: analysisLoading,
     error: analysisError,
     isError: analysisIsError,
   } = useInterviewAnalysisQuery(sessionId, {
-    enabled: Boolean(sessionId) && showAnalysis,
+    // Also while live: whether anything is scored yet decides Reschedule.
+    enabled: Boolean(sessionId) && (showAnalysis || interviewLive),
+    refetchInterval: interviewLive ? 15000 : false,
     retry: (failureCount, err) => {
       if (err instanceof ApiError && err.status === 404) return false
       return failureCount < 2
@@ -147,6 +153,22 @@ export function OrgAdminApplicationDetailPage() {
   })
 
   const screeningHeader = interviewAnalysisHeader(interviewAnalysis)
+
+  // Answers scored in this attempt: a completed interview with none scored
+  // (silence, candidate left) can be rescheduled. No analysis row = none.
+  const analysisEvaluations = interviewAnalysis?.analysis_result?.evaluations
+  const scoredAnswers = Array.isArray(analysisEvaluations)
+    ? analysisEvaluations.length
+    : analysisError instanceof ApiError && analysisError.status === 404
+      ? 0
+      : null
+  const showRescheduleBtn =
+    Boolean(detail) &&
+    !mismatch &&
+    canRescheduleScreening(detail, timeline, {
+      sessionStatus: interviewSession?.status,
+      scoredAnswers,
+    })
 
   async function reload() {
     await Promise.all([refetchDetail(), refetchTimeline()])
@@ -159,6 +181,8 @@ export function OrgAdminApplicationDetailPage() {
       invalidateApplicationTimeline(applicationId),
       invalidateJobApplicants(jobId),
       nextSessionId ? invalidateInterviewSession(nextSessionId) : Promise.resolve(),
+      // A reschedule clears an unscored attempt's analysis.
+      nextSessionId ? invalidateInterviewAnalysis(nextSessionId) : Promise.resolve(),
     ])
     await reload()
   }

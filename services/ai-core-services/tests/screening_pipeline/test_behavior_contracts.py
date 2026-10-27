@@ -244,6 +244,8 @@ async def test_inactivity_finalizes_and_requests_bot_leave(monkeypatch):
     policy._last_candidate_activity_at = now
     policy._inactivity_cycle_started_at = now
     policy._leave_bot_after_close = AsyncMock()
+    # The candidate answered earlier, then went silent.
+    policy.transcript_log = [{"interaction_type": "greeting", "candidate_answer": "Yes, ready."}]
     monkeypatch.setattr("src.screening_pipeline.pipecat_policy.SILENCE_PROMPT_SECONDS", 0)
 
     with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()) as persistence:
@@ -258,6 +260,57 @@ async def test_inactivity_finalizes_and_requests_bot_leave(monkeypatch):
         SILENCE_PROMPT_TEXT,
         CLOSING_TEXT,
     ]
+
+
+@pytest.mark.asyncio
+async def test_candidate_who_never_spoke_is_a_no_show():
+    """The bot asked into an empty meeting and ended on silence: that is a
+    no-show (reschedulable), not a completed interview."""
+    api_client = MagicMock()
+    api_client.update_status = AsyncMock(return_value=True)
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        llm_client=MagicMock(),
+        api_client=api_client,
+        speech_output=AsyncMock(),
+    )
+    policy.transcript_log = [
+        {"interaction_type": "greeting", "candidate_answer": ""},
+        {"interaction_type": "question", "candidate_answer": None},
+        {"interaction_type": "silence_prompt", "candidate_answer": "  "},
+    ]
+
+    with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()) as persistence:
+        await policy.end_interview("candidate_silence")
+
+    assert policy.termination_reason == "candidate_absent"
+    assert persistence.await_args.kwargs["termination_reason"] == "candidate_absent"
+    api_client.update_status.assert_awaited_once_with("no_show")
+
+
+@pytest.mark.asyncio
+async def test_abort_for_reschedule_saves_nothing():
+    """HR rescheduled while the bot was in the meeting: the session row now
+    belongs to the new booking, so teardown must not write into it."""
+    api_client = MagicMock()
+    api_client.update_status = AsyncMock(return_value=True)
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        llm_client=MagicMock(),
+        api_client=api_client,
+        speech_output=AsyncMock(),
+    )
+    policy.is_active = True
+
+    with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()) as persistence:
+        await policy.abort_for_reschedule()
+        await policy.cleanup()  # websocket closes when the bot leaves
+
+    assert policy.is_active is False
+    persistence.assert_not_awaited()
+    api_client.update_status.assert_not_awaited()
 
 
 @pytest.mark.asyncio

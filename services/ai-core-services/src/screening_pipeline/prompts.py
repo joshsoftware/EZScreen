@@ -97,6 +97,11 @@ SILENCE_PROMPT_SECONDS = 30
 # twice and the bot left without asking a single question. After this much
 # silence following the greeting, start the questions instead.
 GREETING_REPLY_TIMEOUT_SECONDS = 15
+# The bot joins at the booked time but waits for the candidate before
+# greeting. A candidate who joined a few minutes late used to find the bot
+# already gone: it greeted an empty meeting and left after ~2 minutes of
+# silence. If nobody joins within this window, it's a no-show.
+CANDIDATE_JOIN_WAIT_SECONDS = 600
 START_WITHOUT_REPLY_TEXT = "Let's get started with the first question."
 # Prompt twice at 30-second intervals, then close after the final 30-second
 # unanswered interval (90 seconds total).

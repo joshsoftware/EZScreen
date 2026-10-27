@@ -66,4 +66,31 @@ async def test_candidate_leave_finalizes_active_runtime():
         )
 
     runtime.policy.end_interview.assert_awaited_once_with("candidate_left")
+    # The runtime reports its own outcome (completed or no_show).
+    mock_update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_candidate_leave_without_runtime_marks_completed():
+    session = MagicMock()
+    session.id = "sess-1"
+    session.interview_metadata = {"candidate_participant_uuid": "candidate-1"}
+
+    with patch(
+        "src.screening_pipeline.webhook_handler.interview_session_repo.get_by_bot_id",
+        new_callable=AsyncMock,
+        return_value=session,
+    ), patch(
+        "src.screening_pipeline.webhook_handler.update_session_status",
+        new_callable=AsyncMock,
+    ) as mock_update, patch(
+        "src.screening_pipeline.audio_websocket.active_sessions", {},
+    ):
+        await process_participant_event(
+            {
+                "bot_id": "bot-1",
+                "data": {"event_type": "leave", "participant_uuid": "candidate-1"},
+            }
+        )
+
     mock_update.assert_awaited_once_with("sess-1", "completed")

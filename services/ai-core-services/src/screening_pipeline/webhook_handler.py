@@ -50,6 +50,9 @@ async def process_state_change(payload: Dict[str, Any]):
         pass
     
     elif new_state in ["ended", "left"]:
+        from src.screening_pipeline.candidate_presence import forget_session
+
+        forget_session(str(session.id))
         # A live runtime owns the transcript and must finalize before this
         # confirmation webhook marks the session complete.  It is safe to
         # receive this after normal completion: end_interview is idempotent.
@@ -58,7 +61,10 @@ async def process_state_change(payload: Dict[str, Any]):
         runtime = active_sessions.get(str(session.id))
         if runtime:
             await runtime.policy.end_interview("meeting_ended")
-        await update_session_status(session.id, "completed")
+        if runtime is None or runtime.policy.api_client is None:
+            # A live runtime reports its own outcome (completed / no_show);
+            # sending "completed" here could beat its "no_show".
+            await update_session_status(session.id, "completed")
         if new_state == "ended":
             # Attendee's recording is only downloadable once the bot has ended.
             from src.screening_pipeline.recording_import import schedule_recording_import
@@ -68,6 +74,25 @@ async def process_state_change(payload: Dict[str, Any]):
     elif new_state == "fatal_error":
         # Bot crashed or failed to join
         await update_session_status(session.id, "failed")
+
+
+async def _handle_participant_join(bot_id: str) -> None:
+    """Someone (the candidate) joined: the waiting bot starts the interview.
+
+    Attendee never reports the bot itself, and people already in the call
+    are reported as soon as the bot joins, possibly before the runtime
+    exists, so presence is remembered for the runtime's start.
+    """
+    session = await interview_session_repo.get_by_bot_id(bot_id)
+    if not session:
+        return
+    from src.screening_pipeline.audio_websocket import active_sessions
+    from src.screening_pipeline.candidate_presence import mark_candidate_joined
+
+    mark_candidate_joined(str(session.id))
+    runtime = active_sessions.get(str(session.id))
+    if runtime:
+        await runtime.policy.candidate_joined()
 
 
 async def process_participant_event(payload: Dict[str, Any]):
@@ -80,6 +105,10 @@ async def process_participant_event(payload: Dict[str, Any]):
         # Live audio VAD performs the actual interruption; this remains useful
         # diagnostic coverage when provider webhook delivery races audio.
         logger.debug("Barge-in detected via webhook", extra={"bot_id": bot_id})
+
+    if event in {"join", "participant_join", "participant_joined", "joined"} and bot_id:
+        await _handle_participant_join(bot_id)
+        return
 
     # Provider event spelling varies by meeting platform, so accept the
     # canonical leave/end values without making a speech event terminal.
@@ -109,7 +138,8 @@ async def process_participant_event(payload: Dict[str, Any]):
     runtime = active_sessions.get(str(session.id))
     if runtime:
         await runtime.policy.end_interview("candidate_left")
-    await update_session_status(session.id, "completed")
+    if runtime is None or runtime.policy.api_client is None:
+        await update_session_status(session.id, "completed")
 
 
 @router.post("/webhook", status_code=status.HTTP_200_OK)

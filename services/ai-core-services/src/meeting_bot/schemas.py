@@ -64,6 +64,17 @@ class DispatchBotRequest(BaseModel):
     meeting_url: Optional[str] = None
 
 
+class AbortSessionRequest(BaseModel):
+    interview_session_id: str
+    bot_id: Optional[str] = None
+
+
+class AbortSessionResponse(BaseModel):
+    interview_session_id: str
+    status: str = "aborted"
+    error_message: Optional[str] = None
+
+
 class InterviewSessionDetailResponse(BaseModel):
     id: str
     application_id: str

@@ -9,11 +9,32 @@ import httpx
 
 from src.config.settings import settings
 
-__all__ = ["dispatch_screening_bot"]
+__all__ = ["abort_screening_session", "dispatch_screening_bot"]
 
 
 def _dispatch_url() -> str:
     return f"{settings.ai_services_base_url.rstrip('/')}/screening/bot/dispatch"
+
+
+def abort_screening_session(*, interview_session_id: UUID, bot_id: str | None) -> str | None:
+    """Stop a live interview without saving it and pull its bot out.
+
+    Returns None on success, else an error message.
+    """
+    url = f"{settings.ai_services_base_url.rstrip('/')}/screening/bot/abort"
+    body: dict[str, str] = {"interview_session_id": str(interview_session_id)}
+    if bot_id:
+        body["bot_id"] = bot_id
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(url, json=body)
+            response.raise_for_status()
+            data = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        return f"Could not stop the current interview: {exc}"
+    if isinstance(data, dict) and data.get("status") == "error":
+        return str(data.get("error_message") or "Could not stop the current interview")
+    return None
 
 
 def dispatch_screening_bot(
