@@ -88,7 +88,7 @@ export function OrgAdminJobsPage() {
                 <th className="ez-table-head">Experience</th>
                 <th className="ez-table-head">Applicants</th>
                 <th className="ez-table-head">Status</th>
-                <th className="ez-table-head">Created</th>
+                <th className="ez-table-head">Posted / created</th>
               </tr>
             </thead>
             {loading ? (
@@ -161,7 +161,19 @@ export function OrgAdminJobsPage() {
                       </Badge>
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
-                      {formatDate(job.created_at)}
+                      {/* Same "Posted" date the candidate portal shows (Bug-019);
+                          drafts that were never published show when they were created. */}
+                      {job.published_at ? (
+                        <>
+                          {formatDate(job.published_at)}
+                          <span className="block text-label-md">Posted</span>
+                        </>
+                      ) : (
+                        <>
+                          {formatDate(job.created_at)}
+                          <span className="block text-label-md">Created</span>
+                        </>
+                      )}
                     </td>
                   </StaggerItem>
                 ))}
