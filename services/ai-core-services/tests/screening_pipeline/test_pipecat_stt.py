@@ -83,6 +83,22 @@ def test_low_confidence_segments_are_dropped():
     assert _confident_text({"text": " plain json "}) == "plain json"
 
 
+def test_long_hard_to_transcribe_answer_is_kept():
+    """A real 17-second answer on a noisy mic came back below the log-prob
+    bar and was dropped whole; the bot then asked "Are you there?"."""
+    from src.screening_pipeline.pipecat_stt import _confident_text
+
+    answer = " I'll choose a ConcurrentHashMap when I want the maps to be synchronized."
+    body = {
+        "text": answer,
+        "segments": [
+            {"text": answer, "no_speech_prob": 0.04, "avg_logprob": -1.1, "compression_ratio": 1.5},
+        ],
+    }
+
+    assert _confident_text(body) == answer.strip()
+
+
 @pytest.mark.asyncio
 async def test_whisper_timeout_is_retried_once():
     import httpx

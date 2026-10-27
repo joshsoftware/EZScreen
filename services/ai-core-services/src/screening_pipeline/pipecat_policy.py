@@ -88,6 +88,9 @@ class PipecatInterviewPolicy:
         self.current_interaction_state = "idle"  # idle, speaking, listening, evaluating
         self.transcript_log: list = []
         self.analysis_evaluations: list = []
+        # (question_obj, question text) while its follow-up awaits a reply; the
+        # main answer's evaluation sits on that question's transcript entry.
+        self._question_awaiting_follow_up: Optional[tuple[dict, str]] = None
         self.is_finalized = False
         self._inactivity_task: Optional[asyncio.Task] = None
         self._answer_settle_task: Optional[asyncio.Task] = None
@@ -293,6 +296,7 @@ class PipecatInterviewPolicy:
             self._cancel_candidate_wait()
             # The session row is reused if HR reschedules; start that attempt fresh.
             forget_session(self.session_id)
+            self._save_question_awaiting_follow_up()
             # A candidate who never joined (or never said a word) is a no-show,
             # not a completed interview; HR reschedules those.
             no_show = not self._candidate_responded()
@@ -306,6 +310,47 @@ class PipecatInterviewPolicy:
                 await self.api_client.update_status("no_show" if no_show else "completed")
             if leave_bot:
                 await self._leave_bot_after_close()
+
+    def _save_question_awaiting_follow_up(self) -> None:
+        """The interview ended (silence, hang-up) before a follow-up was
+        answered: score the question on its main answer, as _move_on does,
+        instead of dropping an answer the candidate already gave."""
+        pending = self._question_awaiting_follow_up
+        self._question_awaiting_follow_up = None
+        if pending is None or self.api_client is None:
+            return
+        question_obj, current_q = pending
+        entry = next(
+            (
+                item
+                for item in reversed(self.transcript_log)
+                if item.get("interaction_type") == "question"
+                and item.get("question_id") == question_obj.get("id")
+            ),
+            None,
+        )
+        primary_eval = entry.get("primary_eval") if entry else None
+        if not primary_eval:
+            return
+        # core-api rejects (422) a follow-up with an empty answer.
+        entry["follow_ups"] = [
+            f for f in entry.get("follow_ups") or [] if str(f.get("candidate_speech") or "").strip()
+        ]
+        qa_entry, evaluation = build_completed_question_payload(
+            question_obj=question_obj,
+            current_q=current_q,
+            transcript=entry.get("candidate_answer") or "",
+            primary_eval=None,
+            current_eval=primary_eval,
+            question_number=self.current_question_idx + 1,
+            follow_ups=entry["follow_ups"],
+        )
+        self.analysis_evaluations.append(evaluation)
+        self._schedule_persist(persist_qa_and_evaluation(self.api_client, qa_entry, evaluation))
+        logger.info(
+            "Saved a question whose follow-up was never answered",
+            extra={"session_id": self.session_id, "question_id": question_obj.get("id")},
+        )
 
     def _candidate_responded(self) -> bool:
         if self.analysis_evaluations:
@@ -879,6 +924,7 @@ class PipecatInterviewPolicy:
         analysis_evaluations is updated synchronously (routing reads it right
         after this returns); the Core API save runs in the background.
         """
+        self._question_awaiting_follow_up = None
         if self.transcript_log:
             self.transcript_log[-1]["candidate_answer"] = transcript
 
@@ -980,6 +1026,7 @@ class PipecatInterviewPolicy:
                         "ai_response": follow_up_question,
                     }
                 )
+            self._question_awaiting_follow_up = (question_obj, current_q)
             await self.speak(follow_up_question)
             self._begin_listening()
         else:
@@ -1002,6 +1049,7 @@ class PipecatInterviewPolicy:
         it immediately and must see this question's result. Only the Core API
         HTTP save is deferred to the background.
         """
+        self._question_awaiting_follow_up = None
         if self.transcript_log and not self.transcript_log[-1].get("candidate_answer"):
             self.transcript_log[-1]["candidate_answer"] = transcript
 

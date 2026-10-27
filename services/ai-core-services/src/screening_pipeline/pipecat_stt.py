@@ -26,6 +26,8 @@ WHISPER_ATTEMPTS = 2
 NO_SPEECH_PROB_MAX = 0.6
 AVG_LOGPROB_MIN = -1.0
 COMPRESSION_RATIO_MAX = 2.4
+# Low-probability segments with at least this many words are kept.
+MIN_DOUBTFUL_WORDS_KEPT = 4
 
 
 def _confident_text(body: dict) -> str:
@@ -37,11 +39,18 @@ def _confident_text(body: dict) -> str:
     for segment in segments:
         if not isinstance(segment, dict):
             continue
-        if (
-            float(segment.get("no_speech_prob") or 0.0) > NO_SPEECH_PROB_MAX
-            or float(segment.get("avg_logprob") or 0.0) < AVG_LOGPROB_MIN
-            or float(segment.get("compression_ratio") or 0.0) > COMPRESSION_RATIO_MAX
-        ):
+        text = str(segment.get("text") or "")
+        silent = float(segment.get("no_speech_prob") or 0.0) > NO_SPEECH_PROB_MAX
+        # Low probability drops only short fragments ("you", "mumble"). A long
+        # low-probability segment is real speech that was hard to transcribe
+        # (a noisy mic, an accent); dropping it lost a whole 17-second answer.
+        doubtful_fragment = (
+            float(segment.get("avg_logprob") or 0.0) < AVG_LOGPROB_MIN
+            and len(re.findall(r"[a-z0-9]+", text.lower())) < MIN_DOUBTFUL_WORDS_KEPT
+        )
+        # Highly repetitive text is Whisper looping on noise.
+        looping = float(segment.get("compression_ratio") or 0.0) > COMPRESSION_RATIO_MAX
+        if silent or doubtful_fragment or looping:
             logger.info(
                 "Dropped low-confidence STT segment",
                 extra={
