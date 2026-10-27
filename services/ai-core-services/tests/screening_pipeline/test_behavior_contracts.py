@@ -46,8 +46,11 @@ from src.screening_pipeline.prompts import (
 
 
 def test_interview_timing_and_prompt_contract_is_explicit():
+    # The greeting invites a reply ("Let me know when you're ready") and the
+    # first question follows it (START_WITHOUT_REPLY_TEXT if none comes).
     assert GREETING_TEXT == (
-        "Hi! I am your interviewer for today's interview. Let's start with some technical questions."
+        "Hi! I am your interviewer for today's interview. We’ll begin with a few "
+        "technical questions. Let me know when you’re ready."
     )
     assert CLOSING_TEXT == (
         "Thank you for your time today. Our HR team will be in touch shortly."
@@ -455,6 +458,9 @@ class _AudioCollector(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+PIPELINE_TIMEOUT_SECONDS = 30
+
+
 async def _run_input_pipeline(processor, chunks=(), *, cancel=False):
     """Run `processor` in a real Pipecat pipeline, feed it `chunks`, then shut it down."""
     collector = _AudioCollector()
@@ -463,11 +469,13 @@ async def _run_input_pipeline(processor, chunks=(), *, cancel=False):
         params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=24000),
     )
     runner_task = asyncio.create_task(PipelineRunner(handle_sigint=False).run(task))
-    await asyncio.wait_for(processor.ready.wait(), timeout=5)
+    # The first pipeline in a fresh process starts slowly (Pipecat imports and
+    # warm-up); 5s timed out now and then on a cold container.
+    await asyncio.wait_for(processor.ready.wait(), timeout=PIPELINE_TIMEOUT_SECONDS)
     for pcm_bytes, sample_rate in chunks:
         await processor.push_audio(pcm_bytes, sample_rate)
     await (task.cancel(reason="test") if cancel else task.stop_when_done())
-    await asyncio.wait_for(runner_task, timeout=5)
+    await asyncio.wait_for(runner_task, timeout=PIPELINE_TIMEOUT_SECONDS)
     return collector.frames
 
 
