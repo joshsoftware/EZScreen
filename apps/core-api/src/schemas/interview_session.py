@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -142,6 +143,7 @@ class PreviousInterviewAttempt(BaseModel):
     recording_url: str | None = None
     # pending / in_progress while the meeting recording is still being copied.
     recording_status: str | None = None
+    conversation_transcript: list[Any] = Field(default_factory=list)
 
 
 class InterviewSessionResponse(BaseModel):

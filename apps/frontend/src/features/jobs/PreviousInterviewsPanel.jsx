@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { Badge } from '../../components/ui/Badge'
+import { Modal } from '../../components/ui/Modal'
 import { Panel } from '../../components/ui/PageHeader'
+import { TranscriptTurn } from './InterviewAnalysisPanel'
 import { formatDateTime } from './jobFields'
 
 const ATTEMPT_OUTCOMES = {
@@ -46,16 +49,23 @@ function AttemptRecording({ attempt }) {
   )
 }
 
+function transcriptOf(attempt) {
+  return Array.isArray(attempt?.conversation_transcript) ? attempt.conversation_transcript : []
+}
+
 /** Earlier attempts of a rescheduled screening, Screening 1 first, each with its recording. */
 export function PreviousInterviewsPanel({ attempts }) {
+  const [transcriptAttempt, setTranscriptAttempt] = useState(null)
   if (!Array.isArray(attempts) || attempts.length === 0) return null
   const ordered = [...attempts].sort((a, b) => a.attempt - b.attempt)
+  const openTranscript = transcriptOf(transcriptAttempt)
 
   return (
     <Panel title="Earlier screenings">
       <div className="grid gap-md sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {ordered.map((attempt) => {
           const outcome = attemptOutcome(attempt.status)
+          const turns = transcriptOf(attempt).length
           return (
             <section
               key={attempt.attempt}
@@ -71,10 +81,31 @@ export function PreviousInterviewsPanel({ attempts }) {
                 {formatDateTime(attempt.scheduled_at)}
               </p>
               <AttemptRecording attempt={attempt} />
+              {turns > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setTranscriptAttempt(attempt)}
+                  className="self-start text-label-md text-primary hover:underline"
+                >
+                  View transcript · {turns}
+                </button>
+              ) : null}
             </section>
           )
         })}
       </div>
+
+      <Modal
+        open={transcriptAttempt != null}
+        onClose={() => setTranscriptAttempt(null)}
+        title={transcriptAttempt ? `Screening ${transcriptAttempt.attempt} · Transcript` : ''}
+      >
+        <div className="max-h-[65vh] overflow-y-auto">
+          {openTranscript.map((turn, index) => (
+            <TranscriptTurn key={`prev-t-${index}`} turn={turn} />
+          ))}
+        </div>
+      </Modal>
     </Panel>
   )
 }

@@ -325,7 +325,7 @@ function ChatBubble({ side, children, muted = false }) {
   )
 }
 
-function TranscriptTurn({ turn }) {
+export function TranscriptTurn({ turn }) {
   const type = turn?.interaction_type || 'turn'
   const followUps = Array.isArray(turn?.follow_ups) ? turn.follow_ups : []
   const typeLabel = String(type).replaceAll('_', ' ')

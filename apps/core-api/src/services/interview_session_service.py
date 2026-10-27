@@ -104,6 +104,7 @@ def _archived_attempt(session: InterviewSession, prior_meta: dict[str, Any]) -> 
             import_after=datetime.now(timezone.utc)
             + timedelta(seconds=settings.recording_import_retry_seconds),
         )
+    transcript = prior_meta.get("conversation_transcript")
     return {
         "attempt": attempt_number(prior_meta),
         "status": session.status.value,
@@ -111,6 +112,8 @@ def _archived_attempt(session: InterviewSession, prior_meta: dict[str, Any]) -> 
         "ended_at": (session.completed_at or datetime.now(timezone.utc)).isoformat(),
         "bot_id": bot_id,
         "recording_import": state,
+        # The new booking's metadata replaces this one; keep what was said.
+        "conversation_transcript": transcript if isinstance(transcript, list) else [],
     }
 
 
@@ -190,6 +193,11 @@ def _previous_attempt_response(item: dict[str, Any]) -> PreviousInterviewAttempt
         ended_at=item.get("ended_at"),
         recording_url=create_presigned_recording_url(key) if isinstance(key, str) and key else None,
         recording_status=state.get("status") if isinstance(state.get("status"), str) else None,
+        conversation_transcript=(
+            item["conversation_transcript"]
+            if isinstance(item.get("conversation_transcript"), list)
+            else []
+        ),
     )
 
 
