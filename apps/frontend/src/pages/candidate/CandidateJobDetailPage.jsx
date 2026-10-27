@@ -71,7 +71,14 @@ export function CandidateJobDetailPage() {
       />
 
       <div className="flex flex-wrap gap-xs -mt-sm mb-sm">
-        {job.location ? <Badge tone="neutral">{job.location}</Badge> : null}
+        {job.location ? (
+          // Long unbroken locations overflowed the page (Bug-027).
+          <Badge tone="neutral" className="max-w-full sm:max-w-[20rem] min-w-0">
+            <span className="truncate" title={job.location}>
+              {job.location}
+            </span>
+          </Badge>
+        ) : null}
         {job.work_type ? <Badge tone="neutral">{formatWorkType(job.work_type)}</Badge> : null}
         {job.job_type ? <Badge tone="info">{formatJobType(job.job_type)}</Badge> : null}
         {job.experience_min != null || job.experience_max != null ? (

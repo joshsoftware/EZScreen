@@ -131,7 +131,7 @@ export function OrgAdminJobsPage() {
                     }}
                   >
                     <td className="py-md px-md">
-                      <span className="text-body-sm font-medium text-on-surface group-hover:text-secondary">
+                      <span className="text-body-sm font-medium text-on-surface group-hover:text-secondary [overflow-wrap:anywhere]">
                         {job.title || 'Untitled job'}
                       </span>
                     </td>
@@ -142,7 +142,10 @@ export function OrgAdminJobsPage() {
                       {formatWorkType(job.work_type)}
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
-                      {job.location || '—'}
+                      {/* Long unbroken text pushed the table off-screen (Bug-027). */}
+                      <span className="block max-w-[14rem] truncate" title={job.location || undefined}>
+                        {job.location || '—'}
+                      </span>
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
                       {formatExperience(job.experience_min, job.experience_max)}

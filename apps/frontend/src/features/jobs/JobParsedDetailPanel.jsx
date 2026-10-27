@@ -49,7 +49,7 @@ function Row({ label, value }) {
   return (
     <div className="flex gap-md py-xs">
       <span className="text-label-md text-on-surface-variant w-40 shrink-0">{label}</span>
-      <span className="text-body-sm text-on-surface">{value ?? '—'}</span>
+      <span className="text-body-sm text-on-surface min-w-0 [overflow-wrap:anywhere]">{value ?? '—'}</span>
     </div>
   )
 }

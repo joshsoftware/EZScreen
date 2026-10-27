@@ -11,14 +11,14 @@ export function PageHeader({ title, description, actions, breadcrumb, className 
       <div className="min-w-0">
         {breadcrumb ? <div className="mb-xs">{breadcrumb}</div> : null}
         {typeof title === 'string' ? (
-          <h1 className="font-headline-md text-headline-md text-on-surface tracking-tight">
+          <h1 className="font-headline-md text-headline-md text-on-surface tracking-tight [overflow-wrap:anywhere]">
             {title}
           </h1>
         ) : (
           title
         )}
         {description ? (
-          <p className="text-body-sm text-on-surface-variant mt-xs max-w-2xl">
+          <p className="text-body-sm text-on-surface-variant mt-xs max-w-2xl [overflow-wrap:anywhere]">
             {description}
           </p>
         ) : null}

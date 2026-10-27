@@ -9,8 +9,10 @@ import {
 function SummaryRow({ label, value }) {
   return (
     <div className="flex items-baseline justify-between gap-sm border-b border-outline-variant/50 py-sm last:border-b-0">
-      <span className="text-label-md text-on-surface-variant">{label}</span>
-      <span className="text-body-sm font-medium text-on-surface text-right">{value}</span>
+      <span className="text-label-md text-on-surface-variant shrink-0">{label}</span>
+      <span className="text-body-sm font-medium text-on-surface text-right min-w-0 [overflow-wrap:anywhere]">
+        {value}
+      </span>
     </div>
   )
 }
