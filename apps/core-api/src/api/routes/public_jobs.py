@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
-from src.api.deps import DbSession
+from src.api.deps import TOTAL_COUNT_HEADER, DbSession
 from src.models.enums import JobType, WorkType
 from src.schemas.public_job import (
     PublicCandidateApplyRequest,
@@ -27,12 +27,23 @@ router = APIRouter(prefix="/public", tags=["Public Candidate Portal"])
 def list_public_jobs_by_org_name(
     org_name: str,
     db: DbSession,
+    response: Response,
     search: str | None = Query(default=None),
     job_type: JobType | None = Query(default=None),
     work_type: WorkType | None = Query(default=None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
 ) -> list[PublicJobListItem]:
+    # Body stays a plain list; the total drives the page numbers.
+    response.headers[TOTAL_COUNT_HEADER] = str(
+        public_job_service.count_public_jobs(
+            db,
+            org_name=org_name,
+            search=search,
+            job_type=job_type,
+            work_type=work_type,
+        )
+    )
     return public_job_service.list_public_jobs(
         db,
         org_name=org_name,

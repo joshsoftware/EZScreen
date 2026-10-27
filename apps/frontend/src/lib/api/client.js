@@ -60,6 +60,7 @@ export async function apiRequest(path, options = {}) {
     token,
     skipAuthRetry = false,
     headers: initHeaders,
+    onResponse,
     ...rest
   } = options
   const headers = new Headers(initHeaders)
@@ -116,7 +117,26 @@ export async function apiRequest(path, options = {}) {
     return undefined
   }
 
+  onResponse?.(response)
   return response.json()
+}
+
+/**
+ * GET a paginated list: the body is the page's rows, the total row count
+ * comes in the X-Total-Count header.
+ * @returns {Promise<{ items: any[], total: number }>}
+ */
+export async function apiPagedRequest(path, options = {}) {
+  let total = null
+  const data = await apiRequest(path, {
+    ...options,
+    onResponse(response) {
+      const header = Number(response.headers.get('X-Total-Count'))
+      total = Number.isFinite(header) ? header : null
+    },
+  })
+  const items = Array.isArray(data) ? data : []
+  return { items, total: total ?? items.length }
 }
 
 /**

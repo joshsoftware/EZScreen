@@ -76,6 +76,21 @@ def list_jobs(
     return list(db.scalars(stmt).all())
 
 
+def count_jobs(
+    db: Session,
+    *,
+    organization_id: UUID,
+    status: JobStatus | None = None,
+) -> int:
+    """Total for list_jobs with the same filters, for pagination."""
+    stmt = select(func.count(JobDescription.id)).where(
+        JobDescription.organization_id == organization_id
+    )
+    if status is not None:
+        stmt = stmt.where(JobDescription.status == status)
+    return int(db.scalar(stmt) or 0)
+
+
 def get_job(db: Session, job_id: UUID) -> JobDescription | None:
     return db.get(JobDescription, job_id)
 

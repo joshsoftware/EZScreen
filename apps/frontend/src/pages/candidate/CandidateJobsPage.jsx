@@ -12,8 +12,11 @@ import {
 import { Alert } from '../../components/ui/Alert'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { PageHeader, Panel } from '../../components/ui/PageHeader'
+import { Pagination } from '../../components/ui/Pagination'
 import { TableSkeleton } from '../../components/ui/Skeleton'
 import { Stagger, StaggerItem } from '../../components/motion/Motion'
+
+const PAGE_SIZE = 20
 
 export function CandidateJobsPage() {
   const navigate = useNavigate()
@@ -23,15 +26,21 @@ export function CandidateJobsPage() {
   const search = searchParams.get('search') || ''
   const jobType = searchParams.get('job_type') || ''
   const workType = searchParams.get('work_type') || ''
+  const page = Math.max(1, Number(searchParams.get('page')) || 1)
 
   const [searchInput, setSearchInput] = useState(search)
 
-  const { data: jobs = [], isLoading, isError, error } = usePublicJobsQuery({
+  // Without paging only the first page of jobs was ever shown (Suggestion-005).
+  const { data, isLoading, isError, error } = usePublicJobsQuery({
     orgName: org,
     search,
     jobType,
     workType,
+    page,
+    limit: PAGE_SIZE,
   })
+  const jobs = data?.items ?? []
+  const total = data?.total ?? 0
 
   const updateParam = (key, val) => {
     const next = new URLSearchParams(searchParams)
@@ -40,7 +49,19 @@ export function CandidateJobsPage() {
     } else {
       next.delete(key)
     }
+    next.delete('page') // a new filter starts from page 1
     setSearchParams(next)
+  }
+
+  const goToPage = (nextPage) => {
+    const next = new URLSearchParams(searchParams)
+    if (nextPage > 1) {
+      next.set('page', String(nextPage))
+    } else {
+      next.delete('page')
+    }
+    setSearchParams(next)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const handleSearchSubmit = (e) => {
@@ -166,6 +187,9 @@ export function CandidateJobsPage() {
             )}
           </table>
         </div>
+        {!isLoading ? (
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={goToPage} />
+        ) : null}
       </Panel>
     </>
   )

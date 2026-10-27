@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 
-from src.api.deps import DbSession, require_roles
+from src.api.deps import TOTAL_COUNT_HEADER, DbSession, require_roles
 from src.models.enums import JobStatus, UserRole
 from src.models.user import User
 from src.schemas.job import (
@@ -65,6 +65,7 @@ def _assert_job_access(user: User, job) -> None:
 def list_jobs(
     db: DbSession,
     current_user: JobActor,
+    response: Response,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     status_filter: JobStatus | None = Query(default=None, alias="status"),
@@ -77,6 +78,10 @@ def list_jobs(
         status=status_filter,
         page=page,
         limit=limit,
+    )
+    # Body stays a plain list; the total drives the page numbers.
+    response.headers[TOTAL_COUNT_HEADER] = str(
+        job_service.count_jobs(db, organization_id=org_id, status=status_filter)
     )
     return [
         JobListItem(

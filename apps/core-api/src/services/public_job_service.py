@@ -69,6 +69,56 @@ def _org_lookup_filter(org_key: str):
     )
 
 
+def _public_jobs_filters(
+    stmt,
+    *,
+    org_name: str,
+    search: str | None = None,
+    job_type: JobType | None = None,
+    work_type: WorkType | None = None,
+):
+    """Published jobs of an active org, narrowed by the candidate's filters."""
+    stmt = (
+        stmt.join(Organization, JobDescription.organization_id == Organization.id)
+        .where(
+            JobDescription.status == JobStatus.published,
+            Organization.is_active.is_(True),
+        )
+        .where(_org_lookup_filter(org_name))
+    )
+    if search:
+        pattern = f"%{search.strip()}%"
+        stmt = stmt.where(
+            JobDescription.title.ilike(pattern)
+            | JobDescription.location.ilike(pattern)
+            | JobDescription.description.ilike(pattern)
+        )
+    if job_type:
+        stmt = stmt.where(JobDescription.job_type == job_type)
+    if work_type:
+        stmt = stmt.where(JobDescription.work_type == work_type)
+    return stmt
+
+
+def count_public_jobs(
+    db: Session,
+    *,
+    org_name: str,
+    search: str | None = None,
+    job_type: JobType | None = None,
+    work_type: WorkType | None = None,
+) -> int:
+    """Total for list_public_jobs with the same filters, for pagination."""
+    stmt = _public_jobs_filters(
+        select(func.count(JobDescription.id)).select_from(JobDescription),
+        org_name=org_name,
+        search=search,
+        job_type=job_type,
+        work_type=work_type,
+    )
+    return int(db.scalar(stmt) or 0)
+
+
 def list_public_jobs(
     db: Session,
     *,
@@ -79,34 +129,16 @@ def list_public_jobs(
     page: int = 1,
     limit: int = 20,
 ) -> list[PublicJobListItem]:
-    stmt = (
-        select(JobDescription, Organization)
-        .join(Organization, JobDescription.organization_id == Organization.id)
-        .where(
-            JobDescription.status == JobStatus.published,
-            Organization.is_active.is_(True),
-        )
-        .order_by(
-            JobDescription.published_at.desc().nullslast(),
-            JobDescription.created_at.desc(),
-        )
+    stmt = _public_jobs_filters(
+        select(JobDescription, Organization),
+        org_name=org_name,
+        search=search,
+        job_type=job_type,
+        work_type=work_type,
+    ).order_by(
+        JobDescription.published_at.desc().nullslast(),
+        JobDescription.created_at.desc(),
     )
-
-    stmt = stmt.where(_org_lookup_filter(org_name))
-
-    if search:
-        pattern = f"%{search.strip()}%"
-        stmt = stmt.where(
-            JobDescription.title.ilike(pattern)
-            | JobDescription.location.ilike(pattern)
-            | JobDescription.description.ilike(pattern)
-        )
-
-    if job_type:
-        stmt = stmt.where(JobDescription.job_type == job_type)
-
-    if work_type:
-        stmt = stmt.where(JobDescription.work_type == work_type)
 
     offset = max(page - 1, 0) * limit
     stmt = stmt.offset(offset).limit(min(limit, 50))
