@@ -46,13 +46,13 @@ function AttemptRecording({ attempt }) {
   )
 }
 
-/** Earlier attempts of a rescheduled screening, newest first, each with its recording. */
+/** Earlier attempts of a rescheduled screening, Screening 1 first, each with its recording. */
 export function PreviousInterviewsPanel({ attempts }) {
   if (!Array.isArray(attempts) || attempts.length === 0) return null
-  const ordered = [...attempts].sort((a, b) => b.attempt - a.attempt)
+  const ordered = [...attempts].sort((a, b) => a.attempt - b.attempt)
 
   return (
-    <Panel title="Earlier interviews">
+    <Panel title="Earlier screenings">
       <div className="grid gap-md sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {ordered.map((attempt) => {
           const outcome = attemptOutcome(attempt.status)
@@ -63,7 +63,7 @@ export function PreviousInterviewsPanel({ attempts }) {
             >
               <div className="flex flex-wrap items-center justify-between gap-xs">
                 <h3 className="font-medium text-body-sm text-on-surface">
-                  Interview {attempt.attempt}
+                  Screening {attempt.attempt}
                 </h3>
                 <Badge tone={outcome.tone}>{outcome.label}</Badge>
               </div>

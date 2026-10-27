@@ -471,9 +471,9 @@ export function InterviewAnalysisPanel({
   attemptNumber = 1,
 }) {
   if (!visible && !loading) return null
-  // After a reschedule, name the attempt so it lines up with "Earlier interviews".
+  // After a reschedule, name the attempt so it lines up with "Earlier screenings".
   const panelTitle =
-    attemptNumber > 1 ? `Screening analysis · Interview ${attemptNumber}` : 'Screening analysis'
+    attemptNumber > 1 ? `Screening ${attemptNumber} · Analysis` : 'Screening analysis'
 
   if (loading) {
     return (
