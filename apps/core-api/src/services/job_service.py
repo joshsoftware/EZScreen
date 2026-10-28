@@ -67,7 +67,13 @@ def list_jobs(
         select(JobDescription)
         .where(JobDescription.organization_id == organization_id)
         .options(selectinload(JobDescription.applications))
-        .order_by(JobDescription.created_at.desc())
+        # Newest first by the date the list shows ("Posted / created"): a job
+        # created long ago but posted today belongs at the top, as on the
+        # candidate portal. id breaks ties so pages never overlap.
+        .order_by(
+            func.coalesce(JobDescription.published_at, JobDescription.created_at).desc(),
+            JobDescription.id.desc(),
+        )
     )
     if status is not None:
         stmt = stmt.where(JobDescription.status == status)
