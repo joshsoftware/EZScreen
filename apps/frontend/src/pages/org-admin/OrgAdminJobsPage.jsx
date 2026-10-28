@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { listJobsRequest } from '../../features/jobs/api'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { listJobsPageRequest } from '../../features/jobs/api'
 import {
   formatDate,
   formatExperience,
@@ -16,13 +16,43 @@ import { Button } from '../../components/ui/Button'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { Select } from '../../components/ui/Input'
 import { PageHeader, Panel } from '../../components/ui/PageHeader'
+import { Pagination } from '../../components/ui/Pagination'
 import { TableSkeleton } from '../../components/ui/Skeleton'
 import { Stagger, StaggerItem } from '../../components/motion/Motion'
+
+const PAGE_SIZE = 20
+const STATUS_FILTERS = new Set(['draft', 'published', 'closed'])
 
 export function OrgAdminJobsPage() {
   const navigate = useNavigate()
   const [jobs, setJobs] = useState([])
-  const [status, setStatus] = useState('')
+  const [total, setTotal] = useState(0)
+  // Filter and page live in the URL (?status=draft&page=2) so a refresh,
+  // Back, or returning from a job keeps them, like the candidate portal.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const statusParam = searchParams.get('status') || ''
+  const status = STATUS_FILTERS.has(statusParam) ? statusParam : ''
+  const page = Math.max(1, Number(searchParams.get('page')) || 1)
+
+  const updateParams = useCallback(
+    (changes) => {
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current)
+          Object.entries(changes).forEach(([key, value]) => {
+            if (value && !(key === 'page' && Number(value) <= 1)) {
+              next.set(key, String(value))
+            } else {
+              next.delete(key)
+            }
+          })
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -30,16 +60,25 @@ export function OrgAdminJobsPage() {
     setLoading(true)
     setError(null)
     try {
-      const data = await listJobsRequest({
+      // Without paging only the first page of jobs was ever shown (Suggestion-005).
+      const { items, total: count } = await listJobsPageRequest({
         status: status || undefined,
+        page,
+        limit: PAGE_SIZE,
       })
-      setJobs(data)
+      const lastPage = Math.max(1, Math.ceil(count / PAGE_SIZE))
+      if (page > lastPage) {
+        updateParams({ page: lastPage }) // e.g. the filter now has fewer pages
+        return
+      }
+      setJobs(items)
+      setTotal(count)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load jobs')
     } finally {
       setLoading(false)
     }
-  }, [status])
+  }, [page, status, updateParams])
 
   useEffect(() => {
     void load()
@@ -63,7 +102,9 @@ export function OrgAdminJobsPage() {
             id="job-status-filter"
             label="Status"
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(e) => {
+              updateParams({ status: e.target.value, page: null })
+            }}
             className="h-10"
           >
             <option value="">All statuses</option>
@@ -181,6 +222,17 @@ export function OrgAdminJobsPage() {
             )}
           </table>
         </div>
+        {!loading ? (
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            onPageChange={(next) => {
+              updateParams({ page: next })
+              window.scrollTo({ top: 0, behavior: 'smooth' })
+            }}
+          />
+        ) : null}
       </Panel>
     </>
   )

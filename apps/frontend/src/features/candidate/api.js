@@ -1,4 +1,4 @@
-import { apiRequest } from '../../lib/api/client'
+import { apiPagedRequest, apiRequest } from '../../lib/api/client'
 import { ORG_URL_SLUG } from './constants'
 
 export async function fetchPublicJobs({ orgName = ORG_URL_SLUG, search, jobType, workType, page = 1, limit = 20 } = {}) {
@@ -11,7 +11,7 @@ export async function fetchPublicJobs({ orgName = ORG_URL_SLUG, search, jobType,
 
   const queryString = queryParams.toString()
   const path = `/api/v1/public/${encodeURIComponent(orgName)}/jobs${queryString ? `?${queryString}` : ''}`
-  return apiRequest(path, { method: 'GET' })
+  return apiPagedRequest(path, { method: 'GET' })
 }
 
 export async function fetchPublicJobDetail(jobId, orgName = ORG_URL_SLUG) {

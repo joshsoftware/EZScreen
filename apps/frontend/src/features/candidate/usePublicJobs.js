@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
 import {
   fetchPublicJobDetail,
   fetchPublicJobs,
@@ -10,10 +10,10 @@ import { queryKeys } from '../../lib/queryKeys'
 export function usePublicJobsQuery(params = {}, options = {}) {
   return useQuery({
     queryKey: queryKeys.publicJobs(params),
-    queryFn: async () => {
-      const data = await fetchPublicJobs(params)
-      return Array.isArray(data) ? data : []
-    },
+    // { items, total } — total drives the page numbers.
+    queryFn: () => fetchPublicJobs(params),
+    // Keep the current page on screen while the next one loads.
+    placeholderData: keepPreviousData,
     ...options,
   })
 }

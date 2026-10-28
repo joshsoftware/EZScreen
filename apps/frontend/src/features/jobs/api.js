@@ -1,4 +1,4 @@
-import { apiBlobRequest, apiRequest } from '../../lib/api/client'
+import { apiBlobRequest, apiPagedRequest, apiRequest } from '../../lib/api/client'
 import { API_BASE_URL } from '../../config/env'
 import {
   getAccessToken,
@@ -14,6 +14,15 @@ export function listJobsRequest({ status, page = 1, limit = 50 } = {}) {
   return apiRequest(`/api/v1/jobs?${search.toString()}`, {
     method: 'GET',
   })
+}
+
+/** One page of the org's jobs plus the total, for the paginated jobs list. */
+export function listJobsPageRequest({ status, page = 1, limit = 20 } = {}) {
+  const search = new URLSearchParams()
+  search.set('page', String(page))
+  search.set('limit', String(limit))
+  if (status) search.set('status', status)
+  return apiPagedRequest(`/api/v1/jobs?${search.toString()}`, { method: 'GET' })
 }
 
 export function getJobRequest(jobId) {

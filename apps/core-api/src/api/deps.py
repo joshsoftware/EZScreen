@@ -17,7 +17,11 @@ from src.models.enums import UserRole, UserStatus
 from src.models.user import User
 from src.services.auth_service import get_user_by_id
 
+# Response header carrying the total row count of a paginated list.
+TOTAL_COUNT_HEADER = "X-Total-Count"
+
 __all__ = [
+    "TOTAL_COUNT_HEADER",
     "DbSession",
     "CurrentUser",
     "get_db",
