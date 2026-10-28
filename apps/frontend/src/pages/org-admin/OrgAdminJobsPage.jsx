@@ -88,7 +88,7 @@ export function OrgAdminJobsPage() {
                 <th className="ez-table-head">Experience</th>
                 <th className="ez-table-head">Applicants</th>
                 <th className="ez-table-head">Status</th>
-                <th className="ez-table-head">Created</th>
+                <th className="ez-table-head">Posted / created</th>
               </tr>
             </thead>
             {loading ? (
@@ -131,7 +131,7 @@ export function OrgAdminJobsPage() {
                     }}
                   >
                     <td className="py-md px-md">
-                      <span className="text-body-sm font-medium text-on-surface group-hover:text-secondary">
+                      <span className="text-body-sm font-medium text-on-surface group-hover:text-secondary [overflow-wrap:anywhere]">
                         {job.title || 'Untitled job'}
                       </span>
                     </td>
@@ -142,7 +142,10 @@ export function OrgAdminJobsPage() {
                       {formatWorkType(job.work_type)}
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
-                      {job.location || '—'}
+                      {/* Long unbroken text pushed the table off-screen (Bug-027). */}
+                      <span className="block max-w-[14rem] truncate" title={job.location || undefined}>
+                        {job.location || '—'}
+                      </span>
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
                       {formatExperience(job.experience_min, job.experience_max)}
@@ -158,7 +161,19 @@ export function OrgAdminJobsPage() {
                       </Badge>
                     </td>
                     <td className="py-md px-md text-body-sm text-on-surface-variant">
-                      {formatDate(job.created_at)}
+                      {/* Same "Posted" date the candidate portal shows (Bug-019);
+                          drafts that were never published show when they were created. */}
+                      {job.published_at ? (
+                        <>
+                          {formatDate(job.published_at)}
+                          <span className="block text-label-md">Posted</span>
+                        </>
+                      ) : (
+                        <>
+                          {formatDate(job.created_at)}
+                          <span className="block text-label-md">Created</span>
+                        </>
+                      )}
                     </td>
                   </StaggerItem>
                 ))}

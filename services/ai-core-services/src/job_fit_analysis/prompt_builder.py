@@ -18,7 +18,7 @@ __JD_JSON__
 1. Must-Have Skills (40 Points):
    - Calculate the percentage of JD must-have skills found in the resume.
    - Multiply that percentage by 40.
-   - A skill is considered found (and MUST be placed in `matched_skills`) if it is present anywhere in the candidate's `primary_skills` or `secondary_skills` arrays, REGARDLESS of whether they have 0.0 years of experience with it. If they listed it, they possess the baseline skill.
+   - A skill is considered found (and MUST be placed in `matched_skills`) if it is present anywhere in the candidate's `primary_skills` or `secondary_skills` arrays, OR explicitly mentioned in any role's highlights (including internships) or in `projects` (name, tech_stack, highlights), REGARDLESS of whether they have 0.0 years of experience with it. If they listed or used it, they possess the baseline skill.
    - Normalize equivalent technology names before matching.
    - Do not infer a skill from a job title.
 
@@ -43,7 +43,7 @@ __JD_JSON__
 3. Good-to-Have Skills (20 Points):
    - Calculate the percentage of JD good-to-have skills found.
    - Multiply that percentage by 20.
-   - A skill is considered found (and MUST be placed in `matched_skills`) if it is present anywhere in the candidate's `primary_skills` or `secondary_skills` arrays, REGARDLESS of whether they have 0.0 years of experience with it.
+   - A skill is considered found (and MUST be placed in `matched_skills`) if it is present anywhere in the candidate's `primary_skills` or `secondary_skills` arrays, OR explicitly mentioned in any role's highlights (including internships) or in `projects`, REGARDLESS of whether they have 0.0 years of experience with it.
    - Normalize equivalent technology names before matching.
    - Do not infer a skill from a job title.
 
@@ -75,6 +75,8 @@ __JD_JSON__
    - `strengths`: 4-5 bullet points highlighting the candidate's strongest alignments with the JD. CRITICAL: If the candidate is "overqualified" (e.g., having 14 years of experience for a 3-6 year role), this MUST be listed as a massive STRENGTH (e.g., "Brings a veteran level of expertise..."), NEVER as a concern.
    - `concerns`: 4-5 bullet points highlighting gaps, missing skills, or shortfalls in experience. CRITICAL: If the JD requires a balanced skill set but experience is heavily skewed, point this out. NEVER list being "overqualified" as a concern. If no concerns, provide 1 bullet saying "No major concerns identified."
 7. CRITICAL RULE: Never put a skill in `missing_skills` if it exists in `primary_skills` or `secondary_skills`, even if the candidate has 0.0 years of experience with it. If it is in their skills array, it MUST go into `matched_skills`.
+8. CRITICAL RULE: `strengths` and `concerns` MUST agree with `matched_skills` and `missing_skills`. Never describe a matched skill as missing, absent, or not found. A concern about a matched skill may only be about falling short of the JD's required years for it.
+9. Match a JD skill to the candidate's skill only when it is the same technology (e.g. "JavaScript (ES6+)" matches "JavaScript"; "MySQL" does NOT match "SQL Server"). Do not treat a different technology as a match (e.g. "Java" is not "JavaScript"). Building or consuming REST/third-party APIs counts as "API Integration".
 
 ### Output Format (STRICT JSON):
 

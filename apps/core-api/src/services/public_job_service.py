@@ -128,12 +128,22 @@ def list_public_jobs(
                 location=job.location,
                 experience_min=job.experience_min,
                 experience_max=job.experience_max,
-                skills=job.skills,
+                skills=_job_skills(job),
                 created_at=job.created_at,
                 published_at=job.published_at,
             )
         )
     return items
+
+
+def _job_skills(job: JobDescription) -> dict | None:
+    """Skills as the admin job page shows them: saved skills, else the ones
+    inside parsed_jd (older jobs), so candidates see the same list (Bug-019)."""
+    if isinstance(job.skills, dict):
+        return job.skills
+    parsed = job.parsed_jd if isinstance(job.parsed_jd, dict) else {}
+    skills = parsed.get("skills")
+    return skills if isinstance(skills, dict) else None
 
 
 def get_public_job(
@@ -172,7 +182,7 @@ def get_public_job(
         location=job.location,
         experience_min=job.experience_min,
         experience_max=job.experience_max,
-        skills=job.skills,
+        skills=_job_skills(job),
         parsed_jd=job.parsed_jd,
         created_at=job.created_at,
         published_at=job.published_at,

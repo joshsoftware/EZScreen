@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from src.config.settings import settings
 from src.models.application import Application
 from src.models.enums import (
     ApplicationStatus,
@@ -20,6 +21,7 @@ from src.models.enums import (
 from src.models.interview_session import InterviewSession
 from src.schemas.interview_session import (
     InterviewSessionResponse,
+    PreviousInterviewAttempt,
     RescheduleInterviewSessionRequest,
     ScheduleInterviewSessionRequest,
 )
@@ -29,7 +31,7 @@ from src.services.application_timeline_service import (
     assert_not_terminal,
     timeline_event_types,
 )
-from src.services.bot_dispatch_service import dispatch_screening_bot
+from src.services.bot_dispatch_service import abort_screening_session, dispatch_screening_bot
 from src.services.candidate_email_masking import (
     default_additional_invite_emails,
     mask_email_for_application,
@@ -41,6 +43,12 @@ from src.services.email_service import (
     send_screening_invite,
 )
 from src.services.meet_link_service import ScreeningMeetResult, create_screening_meet
+from src.services.recording_import_service import (
+    attempt_number,
+    new_import_state,
+    previous_attempts,
+)
+from src.services.storage_service import create_presigned_recording_url
 from src.services.session_question_service import generate_candidate_screening_questions
 
 __all__ = [
@@ -59,6 +67,55 @@ _ACTIVE_SESSION_STATUSES = frozenset(
         InterviewStatus.in_progress,
     }
 )
+
+# Ended without an interview; HR can book the same session again.
+_RETRYABLE_SESSION_STATUSES = frozenset(
+    {
+        InterviewStatus.failed,
+        InterviewStatus.no_show,
+    }
+)
+
+
+def _scored_answer_count(session: InterviewSession) -> int:
+    analysis = session.analysis
+    result = analysis.analysis_result if analysis is not None else None
+    evaluations = result.get("evaluations") if isinstance(result, dict) else None
+    return len(evaluations) if isinstance(evaluations, list) else 0
+
+
+def _archived_attempt(session: InterviewSession, prior_meta: dict[str, Any]) -> dict[str, Any]:
+    """The attempt being rescheduled, kept so HR can still replay its recording."""
+    bot_id = prior_meta.get("bot_id") if isinstance(prior_meta.get("bot_id"), str) else None
+    state = prior_meta.get("recording_import")
+    state = dict(state) if isinstance(state, dict) else None
+    recording_key = session.analysis.recording_url if session.analysis is not None else None
+    if recording_key:
+        state = {**(state or {}), "status": "complete", "s3_key": recording_key, "last_error": None}
+    elif state is None and bot_id and session.status not in {
+        InterviewStatus.failed,
+        InterviewStatus.cancelled,
+    }:
+        # The bot's `ended` webhook (which queues the copy) hasn't arrived and
+        # will no longer find this booking, or the bot is being removed now:
+        # queue the copy here. Retries cover Attendee still finishing the file.
+        state = new_import_state(
+            bot_id=bot_id,
+            import_after=datetime.now(timezone.utc)
+            + timedelta(seconds=settings.recording_import_retry_seconds),
+        )
+    transcript = prior_meta.get("conversation_transcript")
+    return {
+        "attempt": attempt_number(prior_meta),
+        "status": session.status.value,
+        "scheduled_at": session.scheduled_at.isoformat() if session.scheduled_at else None,
+        "ended_at": (session.completed_at or datetime.now(timezone.utc)).isoformat(),
+        "bot_id": bot_id,
+        "recording_import": state,
+        # The new booking's metadata replaces this one; keep what was said.
+        "conversation_transcript": transcript if isinstance(transcript, list) else [],
+    }
+
 
 _TERMINAL_SESSION_STATUSES = frozenset(
     {
@@ -120,7 +177,27 @@ def interview_session_to_response(session: InterviewSession) -> InterviewSession
         bot_status=bot_status,
         additional_emails=additional,
         generated_questions=session.generated_questions,
+        attempt_number=attempt_number(meta),
+        previous_attempts=[_previous_attempt_response(item) for item in previous_attempts(meta)],
         created_at=session.created_at,
+    )
+
+
+def _previous_attempt_response(item: dict[str, Any]) -> PreviousInterviewAttempt:
+    state = item.get("recording_import") if isinstance(item.get("recording_import"), dict) else {}
+    key = state.get("s3_key") if state.get("status") == "complete" else None
+    return PreviousInterviewAttempt(
+        attempt=item.get("attempt") if isinstance(item.get("attempt"), int) else 1,
+        status=str(item.get("status") or "unknown"),
+        scheduled_at=item.get("scheduled_at"),
+        ended_at=item.get("ended_at"),
+        recording_url=create_presigned_recording_url(key) if isinstance(key, str) and key else None,
+        recording_status=state.get("status") if isinstance(state.get("status"), str) else None,
+        conversation_transcript=(
+            item["conversation_transcript"]
+            if isinstance(item.get("conversation_transcript"), list)
+            else []
+        ),
     )
 
 
@@ -245,24 +322,30 @@ def _assert_reschedulable(
 ) -> None:
     types = timeline_event_types(db, application.id)
     assert_not_terminal(application, types)
-
-    if session.status not in _ACTIVE_SESSION_STATUSES:
-        raise ValueError("Only active screening sessions can be rescheduled")
-
-    if application.status != ApplicationStatus.interview_scheduled:
-        raise ValueError("Application is not in a scheduled screening state")
-
     if "screening_scheduled" not in types:
         raise ValueError("Screening must be scheduled before it can be rescheduled")
 
-    blocked = {
-        "screening_completed",
-        "screening_in_progress",
-        "rejected",
-        "shortlisted_for_l1",
-    }
-    if blocked.intersection(types):
-        raise ValueError("Screening can no longer be rescheduled")
+    # Decided by this session's own state, not the whole timeline, so an
+    # earlier attempt (completed / in progress) can't block a later one.
+    scored = _scored_answer_count(session)
+    if session.status in {InterviewStatus.scheduled, InterviewStatus.rescheduled}:
+        pass  # not started yet
+    elif session.status in _RETRYABLE_SESSION_STATUSES:
+        pass  # failed / no-show: book it again
+    elif session.status == InterviewStatus.in_progress and scored == 0:
+        pass  # bot is in the meeting but nothing answered yet; it gets removed
+    elif session.status == InterviewStatus.completed and scored == 0:
+        pass  # ran but nothing scored (silence, left, all skipped)
+    elif session.status == InterviewStatus.in_progress:
+        raise ValueError("The screening is underway and can no longer be rescheduled")
+    else:
+        raise ValueError("Only active screening sessions can be rescheduled")
+
+    # A finished attempt may have moved the application on to
+    # interview_completed; rejected / shortlisted were refused above.
+    allowed_statuses = {ApplicationStatus.interview_scheduled, ApplicationStatus.interview_completed}
+    if application.status not in allowed_statuses:
+        raise ValueError("Application is not in a scheduled screening state")
 
     if scheduled_at.astimezone(timezone.utc) <= datetime.now(timezone.utc):
         raise ValueError("scheduled_at must be in the future")
@@ -576,6 +659,19 @@ def reschedule_interview_session(
         session=session,
         scheduled_at=body.scheduled_at,
     )
+    previous_status = application.status
+
+    if session.status == InterviewStatus.in_progress:
+        # The bot is in the meeting: stop that attempt (nothing is saved) and
+        # take the bot out before this row is reused for the new booking.
+        live_meta = session.interview_metadata if isinstance(session.interview_metadata, dict) else {}
+        bot_id = live_meta.get("bot_id")
+        error = abort_screening_session(
+            interview_session_id=session.id,
+            bot_id=bot_id if isinstance(bot_id, str) else None,
+        )
+        if error:
+            raise ValueError(error)
 
     job = application.job_description
     job_title = job.title if job is not None else "Role"
@@ -603,13 +699,30 @@ def reschedule_interview_session(
             "scheduled_at": prior_scheduled_at.isoformat(),
             "gmeet_link": prior_meta.get("gmeet_link"),
         }
+    # Earlier attempts (and their recordings) stay with the session as
+    # "Interview 1", "Interview 2", ...; the new booking is the next one.
+    metadata["attempt_number"] = attempt_number(prior_meta)
+    metadata["previous_attempts"] = previous_attempts(prior_meta)
+    if session.status not in {InterviewStatus.scheduled, InterviewStatus.rescheduled}:
+        metadata["previous_attempts"].append(_archived_attempt(session, prior_meta))
+        metadata["attempt_number"] += 1
+
+    # The earlier attempt scored nothing; drop its analysis so the new attempt
+    # doesn't show the old "no answers" summary. Its recording was kept above.
+    if session.analysis is not None and _scored_answer_count(session) == 0:
+        session.analysis = None  # delete-orphan removes the row
 
     session.scheduled_at = body.scheduled_at
     session.comment = body.comment
     session.scheduled_by = actor_id
     session.status = InterviewStatus.rescheduled
+    # A retried failed / no-show attempt starts fresh.
+    session.completed_at = None
     session.interview_metadata = metadata
     db.add(session)
+    # A completed-but-empty attempt had moved the application on; book it again.
+    application.status = ApplicationStatus.interview_scheduled
+    db.add(application)
 
     append_timeline_event(
         db,
@@ -617,7 +730,7 @@ def reschedule_interview_session(
         event_type=TimelineEventType.screening_rescheduled,
         actor_id=actor_id,
         actor_type=TimelineActorType.user,
-        from_status=ApplicationStatus.interview_scheduled,
+        from_status=previous_status,
         to_status=ApplicationStatus.interview_scheduled,
         metadata=_scheduling_timeline_metadata(
             session_id=session.id,

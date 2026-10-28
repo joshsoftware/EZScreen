@@ -36,16 +36,21 @@ from src.screening_pipeline.prompts import (
     GREETING_TEXT,
     MAX_FOLLOW_UPS_PER_QUESTION,
     MAX_SILENCE_PROMPTS,
+    MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
+    START_WITHOUT_REPLY_TEXT,
 )
 
 
 def test_interview_timing_and_prompt_contract_is_explicit():
+    # The greeting invites a reply ("Let me know when you're ready") and the
+    # first question follows it (START_WITHOUT_REPLY_TEXT if none comes).
     assert GREETING_TEXT == (
-        "Hi! I am your interviewer for today's interview. Let's start with some technical questions."
+        "Hi! I am your interviewer for today's interview. We’ll begin with a few "
+        "technical questions. Let me know when you’re ready."
     )
     assert CLOSING_TEXT == (
         "Thank you for your time today. Our HR team will be in touch shortly."
@@ -242,6 +247,8 @@ async def test_inactivity_finalizes_and_requests_bot_leave(monkeypatch):
     policy._last_candidate_activity_at = now
     policy._inactivity_cycle_started_at = now
     policy._leave_bot_after_close = AsyncMock()
+    # The candidate answered earlier, then went silent.
+    policy.transcript_log = [{"interaction_type": "greeting", "candidate_answer": "Yes, ready."}]
     monkeypatch.setattr("src.screening_pipeline.pipecat_policy.SILENCE_PROMPT_SECONDS", 0)
 
     with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()) as persistence:
@@ -256,6 +263,57 @@ async def test_inactivity_finalizes_and_requests_bot_leave(monkeypatch):
         SILENCE_PROMPT_TEXT,
         CLOSING_TEXT,
     ]
+
+
+@pytest.mark.asyncio
+async def test_candidate_who_never_spoke_is_a_no_show():
+    """The bot asked into an empty meeting and ended on silence: that is a
+    no-show (reschedulable), not a completed interview."""
+    api_client = MagicMock()
+    api_client.update_status = AsyncMock(return_value=True)
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        llm_client=MagicMock(),
+        api_client=api_client,
+        speech_output=AsyncMock(),
+    )
+    policy.transcript_log = [
+        {"interaction_type": "greeting", "candidate_answer": ""},
+        {"interaction_type": "question", "candidate_answer": None},
+        {"interaction_type": "silence_prompt", "candidate_answer": "  "},
+    ]
+
+    with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()) as persistence:
+        await policy.end_interview("candidate_silence")
+
+    assert policy.termination_reason == "candidate_absent"
+    assert persistence.await_args.kwargs["termination_reason"] == "candidate_absent"
+    api_client.update_status.assert_awaited_once_with("no_show")
+
+
+@pytest.mark.asyncio
+async def test_abort_for_reschedule_saves_nothing():
+    """HR rescheduled while the bot was in the meeting: the session row now
+    belongs to the new booking, so teardown must not write into it."""
+    api_client = MagicMock()
+    api_client.update_status = AsyncMock(return_value=True)
+    policy = PipecatInterviewPolicy(
+        "session-id",
+        evaluator=MagicMock(),
+        llm_client=MagicMock(),
+        api_client=api_client,
+        speech_output=AsyncMock(),
+    )
+    policy.is_active = True
+
+    with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()) as persistence:
+        await policy.abort_for_reschedule()
+        await policy.cleanup()  # websocket closes when the bot leaves
+
+    assert policy.is_active is False
+    persistence.assert_not_awaited()
+    api_client.update_status.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -400,6 +458,9 @@ class _AudioCollector(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+PIPELINE_TIMEOUT_SECONDS = 30
+
+
 async def _run_input_pipeline(processor, chunks=(), *, cancel=False):
     """Run `processor` in a real Pipecat pipeline, feed it `chunks`, then shut it down."""
     collector = _AudioCollector()
@@ -408,11 +469,13 @@ async def _run_input_pipeline(processor, chunks=(), *, cancel=False):
         params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=24000),
     )
     runner_task = asyncio.create_task(PipelineRunner(handle_sigint=False).run(task))
-    await asyncio.wait_for(processor.ready.wait(), timeout=5)
+    # The first pipeline in a fresh process starts slowly (Pipecat imports and
+    # warm-up); 5s timed out now and then on a cold container.
+    await asyncio.wait_for(processor.ready.wait(), timeout=PIPELINE_TIMEOUT_SECONDS)
     for pcm_bytes, sample_rate in chunks:
         await processor.push_audio(pcm_bytes, sample_rate)
     await (task.cancel(reason="test") if cancel else task.stop_when_done())
-    await asyncio.wait_for(runner_task, timeout=5)
+    await asyncio.wait_for(runner_task, timeout=PIPELINE_TIMEOUT_SECONDS)
     return collector.frames
 
 
@@ -660,6 +723,8 @@ async def test_start_warms_tts_cache_with_greeting_closing_and_all_questions():
             ANSWER_ACKNOWLEDGEMENT_TEXT,
             REPEAT_QUESTION_PREFIX_TEXT,
             REPEAT_QUESTION_LIMIT_TEXT,
+            MOVE_ON_TEXT,
+            START_WITHOUT_REPLY_TEXT,
             *FILLER_TEXTS,
             "What is a closure?",
             "Explain event loops.",
@@ -1239,3 +1304,318 @@ async def test_short_thanks_counts_as_a_reply_to_the_greeting_only(last_interact
 
     assert (policy._answer_buffer == ["Thank you."]) is accepted
     assert (policy.current_interaction_state == "collecting_answer") is accepted
+
+
+@pytest.mark.parametrize(
+    "transcript, unfinished",
+    [
+        # Real answers from a local interview (Bug-042).
+        ("uh contains uh methods that are abstract by default. uh the third point is", True),
+        ("Talking about how it is implemented, we make the fields private and", True),
+        ("So we can say that,", True),
+        ("Um", True),
+        ("PATCH is used to update the existing data, so these are the methods", False),
+        ("This is really nice.", False),
+        ("It belongs to the class variable.", False),
+        ("", False),
+    ],
+)
+def test_looks_unfinished(transcript, unfinished):
+    from src.screening_pipeline.speech_filter import looks_unfinished
+
+    assert looks_unfinished(transcript) is unfinished
+
+
+@pytest.mark.parametrize("answer, extra_wait", [("the third point is", True), ("That's my answer.", False)])
+@pytest.mark.asyncio
+async def test_unfinished_answers_get_extra_time_before_evaluation(monkeypatch, answer, extra_wait):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.01)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.UNFINISHED_ANSWER_EXTRA_SECONDS", 0.3)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [10.0])
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "collecting_answer"
+    policy._answer_buffer = [answer]
+    policy._process_speech = AsyncMock()
+
+    task = asyncio.create_task(policy._process_after_answer_settles())
+    await asyncio.sleep(0.15)
+    evaluated_early = policy._process_speech.await_count == 1
+    await asyncio.wait_for(task, timeout=2)
+
+    assert evaluated_early is not extra_wait
+    policy._process_speech.assert_awaited_once_with(answer)
+
+
+@pytest.mark.asyncio
+async def test_resuming_during_the_extra_wait_keeps_collecting(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.01)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.UNFINISHED_ANSWER_EXTRA_SECONDS", 0.3)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [10.0])
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "collecting_answer"
+    policy._answer_buffer = ["the third point is"]
+    policy._process_speech = AsyncMock()
+
+    policy._answer_settle_task = asyncio.create_task(policy._process_after_answer_settles())
+    await asyncio.sleep(0.1)
+    policy.handle_candidate_activity()  # candidate carries on talking
+    await asyncio.sleep(0.4)
+
+    policy._process_speech.assert_not_awaited()
+    assert policy.current_interaction_state == "collecting_answer"
+
+
+@pytest.mark.parametrize(
+    "transcript, skip",
+    [
+        ("Skip this question.", True),
+        ("Can we go to the next question?", True),
+        ("Let's move on.", True),
+        ("I'll pass on this one.", True),
+        ("I don't know the answer to this.", True),
+        ("Sorry, no idea.", True),
+        ("Java is pass by value.", False),
+        ("I don't know exactly, but a HashMap is not thread safe at all.", False),
+        ("A skip list keeps sorted layers of linked lists to search fast.", False),
+    ],
+)
+def test_is_skip_request(transcript, skip):
+    from src.screening_pipeline.speech_filter import is_skip_request
+
+    assert is_skip_request(transcript) is skip
+
+
+def _question_policy(**extra_log):
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_question_obj = {"id": 1, "question": "What is Docker?"}
+    policy.transcript_log = [
+        {"interaction_type": "question", "candidate_answer": "", "follow_ups": [], **extra_log}
+    ]
+    policy.evaluator.classify_and_evaluate = AsyncMock()
+    policy._handle_skip = AsyncMock()
+    policy._complete_question = AsyncMock()
+    return policy
+
+
+@pytest.mark.asyncio
+async def test_skip_request_moves_on_without_asking_the_llm():
+    policy = _question_policy()
+
+    await policy._process_speech("Skip this question, please.")
+
+    policy.evaluator.classify_and_evaluate.assert_not_awaited()
+    assert policy.speech_output.await_args_list[0].args[0] == MOVE_ON_TEXT
+    policy._handle_skip.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_skip_during_a_follow_up_keeps_the_main_answer_score():
+    primary = {"score": 7, "decision": "ASK_FOLLOW_UP"}
+    policy = _question_policy(primary_eval=primary, follow_ups=[{"ai_response": "Why?"}])
+
+    await policy._process_speech("Next question please.")
+
+    policy._handle_skip.assert_not_awaited()
+    args = policy._complete_question.await_args.args
+    assert args[3] is None and args[4] == primary
+
+
+@pytest.mark.asyncio
+async def test_bot_moves_on_after_two_non_answers_instead_of_re_asking():
+    policy = _question_policy(
+        conversational_turns=[
+            {"candidate_speech": "Wonderful.", "ai_response": "Please go ahead."},
+            {"candidate_speech": "Thank you.", "ai_response": "Whenever you're ready."},
+        ]
+    )
+    policy.evaluator.classify_and_evaluate = AsyncMock(
+        return_value={"intent": "SMALL_TALK", "response": "Please go ahead and answer."}
+    )
+
+    await policy._process_speech("Yes.")
+
+    assert [c.args[0] for c in policy.speech_output.await_args_list] == [MOVE_ON_TEXT]
+    policy._handle_skip.assert_awaited_once()
+
+
+def _collecting_policy(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.05)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.STT_RESULT_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [10.0])
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "listening"
+    policy.transcript_log = [{"interaction_type": "question", "candidate_answer": ""}]
+    policy._process_speech = AsyncMock()
+    return policy
+
+
+@pytest.mark.asyncio
+async def test_answer_is_processed_even_if_the_next_speech_is_dropped_as_noise(monkeypatch):
+    """Replays a stuck local interview: a sentence was collected, the
+    candidate spoke again (cancelling the settle), that speech came back as
+    "Thank you." and was ignored, and nothing ever processed the answer."""
+    policy = _collecting_policy(monkeypatch)
+
+    policy.handle_candidate_speech("And then, you can build the instance.")
+    policy.handle_candidate_activity()          # speaks again -> settle cancelled
+    policy.handle_candidate_speech_stopped()
+    policy.handle_candidate_speech("Thank you.")  # ignored as a hallucination
+    await asyncio.sleep(0.3)
+
+    policy._process_speech.assert_awaited_once_with("And then, you can build the instance.")
+
+
+@pytest.mark.asyncio
+async def test_bot_does_not_reply_while_the_candidate_is_still_talking(monkeypatch):
+    policy = _collecting_policy(monkeypatch)
+
+    policy.handle_candidate_speech("We can start.")
+    policy.handle_candidate_activity()
+    # Settle elapses while VAD still says the candidate is talking.
+    policy._answer_settle_task = asyncio.create_task(policy._process_after_answer_settles())
+    await asyncio.sleep(0.15)
+    policy._process_speech.assert_not_awaited()
+
+    policy.handle_candidate_speech_stopped()
+    policy.handle_candidate_speech("and then let's go.")
+    await asyncio.sleep(0.3)
+
+    policy._process_speech.assert_awaited_once_with("We can start. and then let's go.")
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled", "no_show"])
+@pytest.mark.asyncio
+async def test_a_finished_session_is_not_started_again_on_reconnect(status):
+    """Attendee reconnects the audio stream while the bot is leaving. A new
+    run greeted the ending meeting and then saved a greeting-only transcript
+    over the real one."""
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), llm_client=MagicMock(), speech_output=AsyncMock()
+    )
+    session = MagicMock(id="session-id", status=status, generated_questions=[])
+    with patch(
+        "src.screening_pipeline.pipecat_policy.interview_session_repo.get_by_id",
+        AsyncMock(return_value=session),
+    ), patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()) as close:
+        await policy.start()
+        await policy.cleanup()
+
+    policy.speech_output.assert_not_awaited()
+    assert policy.is_active is False
+    close.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_moving_on_from_an_unanswered_follow_up_saves_without_it():
+    primary = {"score": 6, "decision": "ASK_FOLLOW_UP"}
+    policy = _question_policy(
+        primary_eval=primary,
+        candidate_answer="My main answer.",
+        follow_ups=[{"candidate_speech": "", "ai_response": "Could you explain more?"}],
+    )
+
+    await policy._move_on({"id": 1, "question": "Q?"}, "Q?", "Hello", primary, reason="test")
+
+    # HR still sees the follow-up that was asked; only the Q&A save drops it.
+    assert policy.transcript_log[-1]["follow_ups"] == [
+        {"candidate_speech": "", "ai_response": "Could you explain more?"}
+    ]
+    policy._complete_question.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_no_filler_is_armed_before_a_skip(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.ANSWER_SETTLE_SECONDS", 0.01)
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.current_interaction_state = "collecting_answer"
+    policy._answer_buffer = ["Please skip this question."]
+    policy._process_speech = AsyncMock()
+    policy._start_filler_schedule = MagicMock()
+
+    await policy._process_after_answer_settles()
+
+    policy._start_filler_schedule.assert_not_called()
+    policy._process_speech.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "prior_intent, new_intent, moves_on",
+    [
+        # Live test: "Yes. Yes. Yes." twice -> the question was asked 3 times.
+        ("SMALL_TALK", "SMALL_TALK", True),
+        # Asking to rephrase is a real attempt to answer: allow a second one.
+        ("CLARIFICATION", "CLARIFICATION", False),
+        ("CLARIFICATION", "SMALL_TALK", False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_non_answers_get_one_re_ask_clarifications_two(prior_intent, new_intent, moves_on):
+    policy = _question_policy(
+        conversational_turns=[
+            {"candidate_speech": "Yes. Yes. Yes.", "ai_response": "Could you explain?", "intent": prior_intent}
+        ]
+    )
+    policy.evaluator.classify_and_evaluate = AsyncMock(
+        return_value={"intent": new_intent, "response": "Could you explain how it works?"}
+    )
+    policy._begin_listening = MagicMock()
+
+    await policy._process_speech("Yes. Yes. Yes.")
+
+    spoken = [c.args[0] for c in policy.speech_output.await_args_list]
+    assert (spoken == [MOVE_ON_TEXT]) is moves_on
+    assert policy._handle_skip.await_count == (1 if moves_on else 0)
+
+
+def _greeted_policy(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.GREETING_REPLY_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.SILENCE_PROMPT_SECONDS", 10)
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), api_client=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy.transcript_log = [{"interaction_type": "greeting", "bot_speech": GREETING_TEXT, "candidate_answer": ""}]
+    policy._ask_next_question = AsyncMock()
+    return policy
+
+
+@pytest.mark.asyncio
+async def test_silent_candidate_still_gets_the_first_question(monkeypatch):
+    """Bug-029: silence after the greeting ended the interview without a
+    single question; now the bot starts the questions itself."""
+    policy = _greeted_policy(monkeypatch)
+    policy._begin_listening()
+
+    await asyncio.sleep(0.3)
+
+    assert [c.args[0] for c in policy.speech_output.await_args_list] == [START_WITHOUT_REPLY_TEXT]
+    policy._ask_next_question.assert_awaited_once()
+    policy._cancel_inactivity_deadline()
+
+
+@pytest.mark.asyncio
+async def test_candidate_replying_to_the_greeting_is_not_rushed(monkeypatch):
+    policy = _greeted_policy(monkeypatch)
+    policy._begin_listening()
+    policy._answer_buffer.append("Yes, I'm ready.")  # reply being processed
+
+    await asyncio.sleep(0.3)
+
+    policy._ask_next_question.assert_not_awaited()
+    assert START_WITHOUT_REPLY_TEXT not in [c.args[0] for c in policy.speech_output.await_args_list]
+    policy._cancel_inactivity_deadline()

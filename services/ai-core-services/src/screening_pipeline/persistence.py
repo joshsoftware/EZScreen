@@ -59,6 +59,40 @@ async def persist_qa_and_evaluation(
     await api_client.save_evaluation(evaluation)
 
 
+# The interview couldn't run because of EZScreen, not the candidate.
+SYSTEM_FAILURE_REASONS = frozenset({"tts_unavailable", "pipeline_failed"})
+
+_NO_SCORED_ANSWER_REASONS = {
+    "candidate_absent": "the candidate did not join the meeting or never spoke",
+    "candidate_silence": "the candidate stopped responding and the interview ended due to silence",
+    "candidate_left": "the candidate left the meeting before answering a question",
+    "meeting_ended": "the meeting ended before any question was answered",
+    "transport_disconnected": "the call disconnected before any question was answered",
+    "questions_completed": "the candidate skipped or did not answer every question",
+}
+
+
+def no_scored_answers_summary(termination_reason: str) -> Dict[str, Any]:
+    """Final summary for an interview that ended with nothing to score."""
+    why = _NO_SCORED_ANSWER_REASONS.get(
+        termination_reason, "no question received a scorable answer"
+    )
+    return {
+        "raw_must_have_score": 0.0,
+        "raw_domain_expertise_score": 0.0,
+        "raw_good_to_have_score": 0.0,
+        "raw_lacking_skill_score": 0.0,
+        "total_score": 0.0,
+        "max_possible_score": 100.0,
+        "overall_score": 0.0,
+        "final_recommendation": (
+            f"• No answers were scored: {why}.\n"
+            "• Review the transcript and recording before deciding; "
+            "consider rescheduling the screening."
+        ),
+    }
+
+
 async def persist_interview_close(
     api_client: SessionApiClient,
     llm_client: OllamaClient,
@@ -70,6 +104,14 @@ async def persist_interview_close(
     # The conversation itself is valuable audit data even if the candidate
     # leaves before producing a scoreable answer.  Always save it.
     if not evaluations:
+        # Bug-038: without a final summary the analysis page said "not
+        # available yet" forever. Close every candidate-side interview with
+        # a definite (zero-score) result that says why nothing was scored.
+        # A failure on our side isn't the candidate's result, so skip those.
+        if termination_reason not in SYSTEM_FAILURE_REASONS:
+            await api_client.save_final_summary(
+                no_scored_answers_summary(termination_reason)
+            )
         await api_client.save_interview_metadata(transcript_log)
         return
         

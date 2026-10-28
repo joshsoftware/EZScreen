@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Callable
 
 import httpx
 from pipecat.frames.frames import Frame, TranscriptionFrame
@@ -13,13 +15,99 @@ from src.core.config import settings
 from src.core.logger import logger
 
 MIN_ANSWER_SECONDS = 0.25
+# Whisper only reads the last ~224 tokens of a prompt.
+MAX_PROMPT_CHARS = 800
+
+
+WHISPER_TIMEOUT_SECONDS = 10.0
+WHISPER_ATTEMPTS = 3
+# Wait before retrying a rate-limited (429) request: the provider's
+# Retry-After, capped so the candidate isn't left waiting mid-conversation.
+RATE_LIMIT_DEFAULT_WAIT_SECONDS = 1.0
+RATE_LIMIT_MAX_WAIT_SECONDS = 2.0
+# Whisper's own signals that a segment is not real speech (the thresholds
+# OpenAI's reference decoder uses). Dropping these removes invented text
+# like "See you on the next slide." from noise or near-silence.
+NO_SPEECH_PROB_MAX = 0.6
+AVG_LOGPROB_MIN = -1.0
+COMPRESSION_RATIO_MAX = 2.4
+# Low-probability segments with at least this many words are kept.
+MIN_DOUBTFUL_WORDS_KEPT = 4
+
+
+def _confident_text(body: dict) -> str:
+    """Transcript text without the segments Whisper itself doubts."""
+    segments = body.get("segments")
+    if not isinstance(segments, list) or not segments:
+        return str(body.get("text") or "").strip()
+    kept = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        text = str(segment.get("text") or "")
+        silent = float(segment.get("no_speech_prob") or 0.0) > NO_SPEECH_PROB_MAX
+        # Low probability drops only short fragments ("you", "mumble"). A long
+        # low-probability segment is real speech that was hard to transcribe
+        # (a noisy mic, an accent); dropping it lost a whole 17-second answer.
+        doubtful_fragment = (
+            float(segment.get("avg_logprob") or 0.0) < AVG_LOGPROB_MIN
+            and len(re.findall(r"[a-z0-9]+", text.lower())) < MIN_DOUBTFUL_WORDS_KEPT
+        )
+        # Highly repetitive text is Whisper looping on noise.
+        looping = float(segment.get("compression_ratio") or 0.0) > COMPRESSION_RATIO_MAX
+        if silent or doubtful_fragment or looping:
+            logger.info(
+                "Dropped low-confidence STT segment",
+                extra={
+                    "text": str(segment.get("text") or "")[:80],
+                    "no_speech_prob": segment.get("no_speech_prob"),
+                    "avg_logprob": segment.get("avg_logprob"),
+                },
+            )
+            continue
+        kept.append(str(segment.get("text") or "").strip())
+    return " ".join(part for part in kept if part).strip()
+
+
+def _retry_after_seconds(response: httpx.Response) -> float:
+    try:
+        wait = float(response.headers.get("retry-after", RATE_LIMIT_DEFAULT_WAIT_SECONDS))
+    except (TypeError, ValueError):
+        wait = RATE_LIMIT_DEFAULT_WAIT_SECONDS
+    return min(max(wait, 0.0), RATE_LIMIT_MAX_WAIT_SECONDS)
+
+
+def _echoes_prompt(transcript: str, prompt: str) -> bool:
+    """Whisper sometimes returns (part of) its prompt for silence or noise."""
+    words = re.findall(r"[a-z0-9]+", transcript.lower())
+    if len(words) < 4:
+        return False
+    return " ".join(words) in " ".join(re.findall(r"[a-z0-9]+", prompt.lower()))
 
 
 class WhisperHttpSTTService(SegmentedSTTService):
     """Transcribe finalized audio segments using the existing Whisper endpoint."""
 
-    def __init__(self, *, sample_rate: int = 24000):
+    def __init__(
+        self,
+        *,
+        sample_rate: int = 24000,
+        prompt_provider: Callable[[], str | None] | None = None,
+    ):
         super().__init__(audio_passthrough=False, sample_rate=sample_rate)
+        # Context for the answer being transcribed (the current question and
+        # its expected keywords), so Whisper spells technical terms right:
+        # "ConcurrentHashMap" was coming back as "Concrete Hotsmap".
+        self._prompt_provider = prompt_provider
+
+    def _prompt(self) -> str | None:
+        if self._prompt_provider is None:
+            return None
+        try:
+            prompt = (self._prompt_provider() or "").strip()
+        except Exception:
+            return None
+        return prompt[-MAX_PROMPT_CHARS:] or None
 
     @property
     def wants_wav_segments(self) -> bool:
@@ -43,23 +131,51 @@ class WhisperHttpSTTService(SegmentedSTTService):
         files = {"file": ("audio.wav", audio, "audio/wav")}
         data = {
             "model": "whisper-large-v3",
-            "response_format": "json",
+            # Per-segment confidence, used to drop text Whisper made up.
+            "response_format": "verbose_json",
             "language": "en",
         }
+        prompt = self._prompt()
+        if prompt:
+            data["prompt"] = prompt
 
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    settings.whisper_api_url
-                    or "https://api.groq.com/openai/v1/audio/transcriptions",
-                    files=files,
-                    data=data,
-                    headers=headers,
+        body = None
+        for attempt in range(1, WHISPER_ATTEMPTS + 1):
+            try:
+                async with httpx.AsyncClient(timeout=WHISPER_TIMEOUT_SECONDS) as client:
+                    response = await client.post(
+                        settings.whisper_api_url
+                        or "https://api.groq.com/openai/v1/audio/transcriptions",
+                        files=files,
+                        data=data,
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    body = response.json()
+                break
+            except Exception as error:
+                # Timeouts carry no message, so log the type as well.
+                status_code = (
+                    error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
                 )
-                response.raise_for_status()
-                transcript = response.json().get("text", "").strip()
-        except Exception as error:
-            logger.error("Pipecat Whisper transcription failed", extra={"error": str(error)})
+                # 429: the STT provider is rate limiting; dropping the segment
+                # loses the candidate's answer, so wait briefly and retry.
+                retryable = isinstance(error, (httpx.TimeoutException, httpx.TransportError)) or (
+                    status_code is not None and (status_code >= 500 or status_code == 429)
+                )
+                will_retry = retryable and attempt < WHISPER_ATTEMPTS
+                logger.error(
+                    "Pipecat Whisper transcription failed",
+                    extra={"error": repr(error), "attempt": attempt, "will_retry": will_retry},
+                )
+                if not will_retry:
+                    return
+                if status_code == 429:
+                    await asyncio.sleep(_retry_after_seconds(error.response))
+        transcript = _confident_text(body or {})
+
+        if transcript and prompt and _echoes_prompt(transcript, prompt):
+            logger.info("Ignored transcript that only repeats the STT prompt")
             return
 
         if transcript:

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Alert } from '../../components/ui/Alert'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
@@ -204,8 +204,12 @@ export function JobSkillsEditor({
   submitLabel = 'Save skills',
 }) {
   const [localError, setLocalError] = useState(null)
+  // `submitting` only disables the button after a re-render, so fast repeat
+  // clicks each started a save (Bug-035). A ref blocks them immediately.
+  const savingRef = useRef(false)
 
-  function handleSubmit() {
+  async function handleSubmit() {
+    if (savingRef.current || submitting) return
     const next = {
       must_have: normalizeSkillList(skills.must_have),
       good_to_have: normalizeSkillList(skills.good_to_have),
@@ -218,7 +222,12 @@ export function JobSkillsEditor({
       return
     }
     setLocalError(null)
-    void onSubmit(next)
+    savingRef.current = true
+    try {
+      await onSubmit(next)
+    } finally {
+      savingRef.current = false
+    }
   }
 
   return (

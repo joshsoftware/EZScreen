@@ -17,8 +17,10 @@ export function interviewScoreTone(score) {
   return 'danger'
 }
 
-export function interviewDecisionLabel(score) {
+export function interviewDecisionLabel(score, evaluatedCount = null) {
   if (score == null) return 'Awaiting score'
+  // Nothing was assessed (silent / left / skipped everything): a 0 isn't a verdict.
+  if (evaluatedCount === 0) return 'No answers scored'
   if (score >= 7) return 'Strong fit'
   if (score >= 5) return 'Borderline'
   return 'Not a strong fit'
@@ -33,9 +35,10 @@ export function interviewAnalysisHeader(analysis) {
       : null
   const overall = asNumber(summary?.overall_score)
   if (overall == null && !summary) return null
+  const evaluations = analysis?.analysis_result?.evaluations
   return {
     overall,
-    label: interviewDecisionLabel(overall),
+    label: interviewDecisionLabel(overall, Array.isArray(evaluations) ? evaluations.length : null),
     tone: interviewScoreTone(overall),
   }
 }
@@ -75,7 +78,7 @@ function summaryRecommendationText(summary) {
   return ''
 }
 
-function FinalSummarySection({ summary, overall, lines }) {
+function FinalSummarySection({ summary, overall, lines, evaluated = null }) {
   if (!summary && lines.length === 0) return null
 
   return (
@@ -91,7 +94,7 @@ function FinalSummarySection({ summary, overall, lines }) {
               {overall.toFixed(1)} / 10
             </span>
             <span className="mx-xs">·</span>
-            {interviewDecisionLabel(overall)}
+            {interviewDecisionLabel(overall, evaluated)}
           </p>
         ) : null}
       </div>
@@ -322,7 +325,7 @@ function ChatBubble({ side, children, muted = false }) {
   )
 }
 
-function TranscriptTurn({ turn }) {
+export function TranscriptTurn({ turn }) {
   const type = turn?.interaction_type || 'turn'
   const followUps = Array.isArray(turn?.follow_ups) ? turn.follow_ups : []
   const typeLabel = String(type).replaceAll('_', ' ')
@@ -351,6 +354,10 @@ function TranscriptTurn({ turn }) {
           {fu?.bot_speech ? <ChatBubble side="left">{fu.bot_speech}</ChatBubble> : null}
           {fu?.candidate_answer ? (
             <ChatBubble side="right">{fu.candidate_answer}</ChatBubble>
+          ) : fu?.bot_speech ? (
+            <ChatBubble side="right" muted>
+              No answer
+            </ChatBubble>
           ) : null}
         </div>
       ))}
@@ -387,7 +394,7 @@ function Scorecard({
           <span className="text-body-sm text-on-surface-variant font-normal"> / 10</span>
         </p>
         <p className="text-body-sm font-medium text-on-surface mt-sm">
-          {interviewDecisionLabel(overall)}
+          {interviewDecisionLabel(overall, evaluated)}
         </p>
       </div>
 
@@ -465,12 +472,16 @@ export function InterviewAnalysisPanel({
   loading = false,
   error = null,
   visible = false,
+  attemptNumber = 1,
 }) {
   if (!visible && !loading) return null
+  // After a reschedule, name the attempt so it lines up with "Earlier screenings".
+  const panelTitle =
+    attemptNumber > 1 ? `Screening ${attemptNumber} · Analysis` : 'Screening analysis'
 
   if (loading) {
     return (
-      <Panel title="Screening analysis">
+      <Panel title={panelTitle}>
         <div className="grid lg:grid-cols-[minmax(240px,280px)_minmax(0,1fr)] gap-md">
           <Skeleton className="h-56 rounded-xl" />
           <Skeleton className="h-56 rounded-xl" />
@@ -481,7 +492,7 @@ export function InterviewAnalysisPanel({
 
   if (error) {
     return (
-      <Panel title="Screening analysis">
+      <Panel title={panelTitle}>
         <Alert>{error}</Alert>
       </Panel>
     )
@@ -489,7 +500,7 @@ export function InterviewAnalysisPanel({
 
   if (!analysis) {
     return (
-      <Panel title="Screening analysis">
+      <Panel title={panelTitle}>
         <p className="text-body-sm text-on-surface-variant rounded-xl border border-dashed border-outline-variant px-md py-lg text-center">
           Analysis is not available yet for this screening session.
         </p>
@@ -523,9 +534,14 @@ export function InterviewAnalysisPanel({
   ].filter((item) => item.value != null)
 
   return (
-    <Panel title="Screening analysis">
+    <Panel title={panelTitle}>
       <div className="space-y-md">
-        <FinalSummarySection summary={summary} overall={overall} lines={lines} />
+        <FinalSummarySection
+          summary={summary}
+          overall={overall}
+          lines={lines}
+          evaluated={evaluated}
+        />
 
         <div className="grid lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)] gap-lg items-start">
           <div className="lg:sticky lg:top-20 self-start">

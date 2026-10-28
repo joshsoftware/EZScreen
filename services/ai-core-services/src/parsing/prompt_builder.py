@@ -23,10 +23,23 @@ RESUME_SCHEMA_JSON = """
 "start_date": "string or null",
 "end_date": "string or null",
 "years": "number or null",
+"is_internship": "boolean",
+"highlight_groups": [
+{
+"heading": "string or null",
 "highlights": ["string"]
 }
 ]
+}
+]
 },
+"projects": [
+{
+"name": "string",
+"tech_stack": ["string"],
+"highlights": ["string"]
+}
+],
 "skill_experience": [
 {
 "skill": "string",
@@ -66,7 +79,8 @@ OUTPUT FORMAT:
 * secondary_skills MUST always be an array of strings, even if there is only one skill.
 * domain_expertise MUST always be an array of strings, even if there is only one domain.
 * roles MUST always be an array of objects, with one object per distinct work experience role.
-* highlights MUST always be an array of strings for every role, even if there is only one highlight.
+* highlight_groups MUST always be an array of objects for every role, and each group's highlights MUST be an array of strings, even if there is only one highlight.
+* projects MUST always be an array of objects; tech_stack and highlights inside each project MUST be arrays of strings.
 * education_certificates MUST always be an array of objects, even if there is only one degree or certification.
 * Never return an array field as a single string, object, or null.
 * If no information is available for an array field, return [].
@@ -88,6 +102,7 @@ SKILL-SPECIFIC EXPERIENCE (skill_experience):
 * STEP 1 - Calculate from ROLE HIGHLIGHTS for ALL skills (EXCLUDING internship roles):
   - Look at each NON-INTERNSHIP role in the "Professional Experience" / "Work Experience" section.
   - A skill is considered "used in a role" ONLY if it is explicitly mentioned in that role's bullet points/highlights.
+  - Professional projects listed in a separate "Projects" section (the `projects` field) count as work done during the candidate's non-internship roles: a skill explicitly mentioned in such a project's bullets or tech stack counts as used in every non-internship role. This does NOT apply to projects explicitly labelled academic, college, university, personal, or hobby, or dated before the first role.
   - Sum the durations (years) of all non-internship roles where the skill is explicitly mentioned.
   - Subtract overlapping role durations to prevent double-counting.
   - Do NOT include internship roles in this calculation, even if the internship is 6 months or longer.
@@ -108,13 +123,12 @@ WORK EXPERIENCE:
 
 * Extract every distinct professional role separately.
 * CRITICAL RULE - INTERNSHIPS:
-  - If a role title or description contains the word "Intern" or "Internship", calculate its duration from the start_date and end_date.
-  - If the internship duration is LESS THAN 6 months, you MUST skip it entirely. DO NOT extract it. Treat it as if it does not exist.
-  - If the internship duration is 6 months OR MORE, you MUST extract it as a normal role. Extract its title, company, dates, years, and highlights as you would for any other role.
-  - DO NOT add internship durations to `total_years` or the `total_years_calculation`, even for internships that are 6 months or longer. The `total_years` must represent only non-internship professional experience.
+  - If a role title or description contains the word "Intern" or "Internship" (or it is listed under an "Internship Experience" section), it is an internship: set "is_internship": true. Otherwise set "is_internship": false.
+  - Extract EVERY internship, whatever its duration, with its title, company, dates, years, and highlight_groups like any other role, so it is shown in the candidate's experience.
+  - DO NOT add internship durations to `total_years` or the `total_years_calculation`, whatever their length. The `total_years` must represent only non-internship professional experience.
   - DO NOT add internship durations to any skill in `skill_experience`. Internship roles must not contribute to skill experience years.
 * CRITICAL RULE - TRAINEES: Roles containing the word "Trainee" (e.g., "Engineer Trainee") MUST BE EXTRACTED. They are valid professional experience. Do NOT skip them.
-* For every role, extract title, company, start_date, end_date, years, and highlights.
+* For every role, extract title, company, start_date, end_date, years, and highlight_groups.
 * Extract dates only from information explicitly associated with that role.
 * If a date is unavailable, use null. Never infer a missing date from another role.
 * If the role is explicitly ongoing/current, end_date must be "present".
@@ -138,19 +152,28 @@ WORK EXPERIENCE:
 * After `total_years_calculation`, provide `total_years` as the final calculated float exactly matching your calculation. Do not guess.
 * `total_years` and individual role `years` should be rounded and formatted to only 1 decimal place (e.g., 3.45 becomes 3.4).
 
-ROLE HIGHLIGHTS:
+ROLE HIGHLIGHTS (highlight_groups):
 
-* highlights must contain concise, factual information specifically associated with that role.
-* Include role-specific technologies explicitly mentioned in that role, including programming languages, frameworks, libraries, databases, cloud, DevOps, CI/CD, APIs, monitoring, infrastructure, testing, and data tools.
-* Include important responsibilities, projects, architectures, systems, and measurable achievements explicitly stated for that role.
-* Preserve technology + context. For example: "Developed microservices using Java and Spring Boot" rather than only "Java".
-* A technology may appear in both global skills and the relevant role's highlights.
-* Associate a technology with a role ONLY when the resume explicitly connects it to that role's work, project, responsibility, or description.
-* Do not copy technologies from another role into the current role.
-* Do not copy the entire global skills section into every role.
+* A role's highlights are the bullet points / lines written under that role in the resume, in the original order.
+* Copy every bullet point COMPLETELY and VERBATIM, word for word, from its first word to its last. Do NOT summarize, shorten, paraphrase, or drop any clause, number, or trailing phrase (e.g. keep "... with 100% payout accuracy").
+* One highlight per bullet point: do NOT merge bullets together and do NOT split one bullet into several. A bullet that wraps over several lines is still ONE highlight.
+* Do NOT skip any bullet, including bullets without technologies.
+* Only fix text-extraction artifacts (broken words, stray spaces, bullet symbols); keep the candidate's wording.
+* Subsection headings: if a role's bullets are organised under sub-headings (e.g. "Finance Microservices System", "Microservices Infrastructure & DevOps", or a project name inside that role), make one group per sub-heading with "heading" set to the sub-heading text exactly as written, and its bullets in "highlights".
+* If a role has no sub-headings, return a single group with "heading": null containing all its bullets.
+* Keep groups in the order they appear in the resume.
+* Do not copy bullets from another role or from the skills section into a role.
 * Do not infer technologies from the job title. For example, "DevOps Engineer" does not automatically mean AWS, Docker, Kubernetes, or Jenkins.
-* Keep highlights concise, BUT you MUST ensure that EVERY technology, skill, and methodology (e.g., SDLC, Agile, Jira,any other language ,framework,softskill, and may more like these ) mentioned in the original role description is preserved in the highlights. Do not omit bullet points that contain skills.
-* If no role-specific details are available, return [].
+* If a role has no bullets or description, return [].
+
+PROJECTS:
+
+* projects lists entries from a separate "Projects" / "Personal Projects" / "Academic Projects" section of the resume.
+* name: the project title exactly as written (e.g. "E-KYC — Digital Identity Verification Platform").
+* highlights: the project's bullet points, copied COMPLETELY and VERBATIM with the same rules as role highlights.
+* tech_stack: the technologies listed on the project's "Tech Stack" / "Technologies" line, one string per technology. Use [] if there is no such line.
+* A project written inside a role's own description belongs to that role as a highlight group (heading = project name), NOT in projects. Never output the same project in both places.
+* If there is no separate projects section, return [].
 
 PERSONAL INFORMATION:
 
@@ -180,10 +203,11 @@ FINAL VALIDATION:
 Before returning the JSON, verify that:
 
 * Every schema field is present, even when its value is null or [].
-* Every extracted role has a title, company, start_date, end_date, years, and highlights field.
+* Every extracted role has a title, company, start_date, end_date, years, and highlight_groups field.
+* Every bullet point of every role and project is present, complete and verbatim, under its original sub-heading.
 * Ongoing roles use "present" as end_date.
 * Calculated years are numeric or null, never strings.
-* primary_skills, secondary_skills, domain_expertise, roles, highlights, and education_certificates are always arrays as defined in the schema.
+* primary_skills, secondary_skills, domain_expertise, roles, highlight_groups, highlights, projects, tech_stack, and education_certificates are always arrays as defined in the schema.
 * Empty array fields contain [] rather than null.
 * Skills are deduplicated and normalized.
 * Role highlights contain only information associated with that role.

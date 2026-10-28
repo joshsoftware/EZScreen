@@ -34,6 +34,7 @@ __all__ = [
 _SETTINGS_PATH = Path(__file__).resolve().parents[2] / "data" / "platform_settings.json"
 _APP_STARTED_AT = datetime.now(timezone.utc)
 _HEALTH_TIMEOUT_SECONDS = 5.0
+_HEALTH_ATTEMPTS = 2
 
 
 def _check_database(db: Session) -> ServiceStatus:
@@ -52,13 +53,25 @@ def _check_database(db: Session) -> ServiceStatus:
         )
 
 
+def _get_ai_core_health(url: str) -> dict:
+    """GET ai-core /health, retrying once: a single slow or dropped reply
+    should not show the "services degraded" banner across the workspace."""
+    with httpx.Client(timeout=_HEALTH_TIMEOUT_SECONDS) as client:
+        for attempt in range(_HEALTH_ATTEMPTS):
+            try:
+                response = client.get(url)
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError:
+                if attempt == _HEALTH_ATTEMPTS - 1:
+                    raise
+    raise RuntimeError("unreachable")
+
+
 def _check_ai_core_services() -> ServiceStatus:
     url = f"{settings.ai_services_base_url.rstrip('/')}/health"
     try:
-        with httpx.Client(timeout=_HEALTH_TIMEOUT_SECONDS) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            payload = response.json()
+        payload = _get_ai_core_health(url)
     except httpx.HTTPError as exc:
         return ServiceStatus(
             name="AI core services",

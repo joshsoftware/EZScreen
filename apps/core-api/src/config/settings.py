@@ -38,9 +38,13 @@ class Settings(BaseSettings):
     minio_bucket_resumes: str = "resumes"
     # Screening meeting recordings copied from Attendee (MP4, 0.5-3 GB each).
     minio_bucket_recordings: str = "attendee-recordings"
-    # A failed copy is retried after this delay, up to the max attempts.
-    recording_import_max_attempts: int = 5
+    # A failed copy is retried with exponential backoff (retry_seconds,
+    # doubling, capped at retry_max_seconds), up to the max attempts. Attendee
+    # keeps recordings for days, so a network outage shouldn't lose one:
+    # 8 attempts span ~2 hours.
+    recording_import_max_attempts: int = 8
     recording_import_retry_seconds: int = 60
+    recording_import_retry_max_seconds: int = 3600
     # An import claimed this long ago without a result is assumed abandoned
     # (ai-core restarted mid-copy) and becomes claimable again.
     recording_import_stale_seconds: int = 1800

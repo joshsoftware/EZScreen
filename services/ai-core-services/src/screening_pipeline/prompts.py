@@ -16,7 +16,7 @@ UNIFIED_SCREENING_SYSTEM = (
     "- ANSWERING: The candidate is attempting to answer the technical question. (Even if their answer is completely wrong, confusing, or poorly transcribed, if they are using technical terms or trying to answer, choose this!).\n"
     "- CLARIFICATION: The candidate is asking you to repeat, clarify, or rephrase the question.\n"
     "- SMALL_TALK: The candidate is ONLY asking for a moment to think (e.g. 'give me a second'), apologizing for a delay, confirming they are present (e.g. 'Yes I am here'), or responding to a greeting/closing. DO NOT use this for rambling. If classified as SMALL_TALK, provide a polite conversational response that encourages them or repeats the question to get them back on track.\n"
-    "- SKIP: The candidate explicitly states they do not know the answer and want to move on.\n\n"
+    "- SKIP: The candidate says they do not know the answer, or asks to skip this question / move on to the next question.\n\n"
     "STEP 2 \u2014 RESPONSE (conditional):\n"
     "- If intent is CLARIFICATION or SMALL_TALK: set \"response\" to a polite, brief conversational reply (per the STEP 1 guidance above).\n"
     "- Otherwise: set \"response\" to \"\".\n\n"
@@ -80,11 +80,29 @@ ANSWER_ACKNOWLEDGEMENT_TEXT = "Thank you for answering the question."
 # cache (it was pre-warmed as-is); "Let me repeat the question: <question>"
 # as a single string never would, since the cache is keyed on exact text.
 REPEAT_QUESTION_PREFIX_TEXT = "Let me repeat the question."
+# Spoken before moving on when the candidate asks to skip, or keeps replying
+# without answering (Bug-039: the bot re-asked the same question forever).
+MOVE_ON_TEXT = "No problem, let's move on to the next question."
+# How often the bot re-asks one question before moving on (Bug-039: it asked
+# the same question 2-3 times). A non-answer ("Yes.", "Thank you.") gets one
+# re-ask; asking to rephrase or clarify (a real attempt to answer) gets two.
+MAX_NON_ANSWER_REASKS_PER_QUESTION = 1
+MAX_CONVERSATIONAL_TURNS_PER_QUESTION = 2
 REPEAT_QUESTION_LIMIT_TEXT = (
     "I have already repeated the question once. "
     "Please share your best answer when you are ready."
 )
 SILENCE_PROMPT_SECONDS = 30
+# Bug-029: a candidate who never replies to the greeting got "Are you there?"
+# twice and the bot left without asking a single question. After this much
+# silence following the greeting, start the questions instead.
+GREETING_REPLY_TIMEOUT_SECONDS = 15
+# The bot joins at the booked time but waits for the candidate before
+# greeting. A candidate who joined a few minutes late used to find the bot
+# already gone: it greeted an empty meeting and left after ~2 minutes of
+# silence. If nobody joins within this window, it's a no-show.
+CANDIDATE_JOIN_WAIT_SECONDS = 600
+START_WITHOUT_REPLY_TEXT = "Let's get started with the first question."
 # Prompt twice at 30-second intervals, then close after the final 30-second
 # unanswered interval (90 seconds total).
 MAX_SILENCE_PROMPTS = 2
@@ -94,6 +112,14 @@ MAX_SILENCE_PROMPTS = 2
 # docs/architecture/SCREENING_BOT_LATENCY_OPTIMIZATION.md Phase 2 for the tuning
 # rationale and hard floor (1.5s).
 ANSWER_SETTLE_SECONDS = settings.screening_answer_settle_seconds
+# Extra wait when the answer so far stops mid-sentence ("...the third point
+# is"), so a candidate pausing to think isn't interrupted (Bug-042). Finished
+# answers keep the normal settle, so this doesn't slow ordinary replies.
+UNFINISHED_ANSWER_EXTRA_SECONDS = settings.screening_unfinished_answer_extra_seconds
+# When speech ends without producing a usable transcript (noise, "Thank
+# you."), the answer collected so far is processed after this much extra
+# time, so a slower real transcript can still arrive and restart the wait.
+STT_RESULT_GRACE_SECONDS = 2.0
 # This is intentionally separate from SILENCE_PROMPT_SECONDS: the closing
 # reply window must never speak the inactivity prompt.
 CLOSING_REPLY_TIMEOUT_SECONDS = 30
@@ -123,10 +149,13 @@ FILLER_TEXTS = [
 # _cancel_filler_schedule) the instant classify_and_evaluate resolves, so a
 # filler never overlaps the real response that follows; once this list is
 # exhausted with no result yet, the policy just keeps waiting silently.
-# A single filler, and only once the reply is genuinely slow (2s settle + ~2s
-# LLM): three back-to-back fillers ("Alright, one moment. Just a moment,
-# please. Okay, give me a second.") made the bot sound stuck (Bug-041).
-FILLER_SCHEDULE_SECONDS = [4.0]
+# A single filler, and only once the reply is genuinely slow: three
+# back-to-back fillers ("Alright, one moment. Just a moment, please. Okay,
+# give me a second.") made the bot sound stuck (Bug-041). Normal replies
+# land ~3.5-6s after the candidate stops (STT ~1-2.5s + 2s settle + LLM), so
+# at 4s nearly every reply was preceded by "one moment"; 7s keeps it for
+# genuinely slow turns only.
+FILLER_SCHEDULE_SECONDS = [7.0]
 
 # How often _end_after_inactivity rechecks whether the candidate has stopped
 # talking, while they're still mid-answer past SILENCE_PROMPT_SECONDS. A

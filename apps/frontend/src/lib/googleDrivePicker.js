@@ -8,9 +8,11 @@ const GAPI_SRC = 'https://apis.google.com/js/api.js'
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
 
 const MIME_PDF = 'application/pdf'
+const MIME_DOCX =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 const MIME_GOOGLE_DOC = 'application/vnd.google-apps.document'
 
-const PICKER_MIME_TYPES = [MIME_PDF, MIME_GOOGLE_DOC].join(',')
+const PICKER_MIME_TYPES = [MIME_PDF, MIME_DOCX, MIME_GOOGLE_DOC].join(',')
 
 function getConfig() {
   const clientId = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim()
@@ -153,6 +155,7 @@ function openPicker({ apiKey, accessToken }) {
 function ensureExtension(name, mimeType) {
   const lower = name.toLowerCase()
   if (mimeType === MIME_PDF && !lower.endsWith('.pdf')) return `${name}.pdf`
+  if (mimeType === MIME_DOCX && !lower.endsWith('.docx')) return `${name}.docx`
   return name
 }
 
@@ -167,7 +170,7 @@ async function downloadDriveFile(doc, accessToken) {
     outMime = MIME_PDF
     fileName = ensureExtension(fileName.replace(/\.gdoc$/i, ''), MIME_PDF)
     url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}/export?mimeType=${encodeURIComponent(MIME_PDF)}`
-  } else if (mimeType === MIME_PDF) {
+  } else if (mimeType === MIME_PDF || mimeType === MIME_DOCX) {
     outMime = mimeType
     fileName = ensureExtension(fileName, mimeType)
     url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`
@@ -186,7 +189,7 @@ async function downloadDriveFile(doc, accessToken) {
 }
 
 /**
- * Opens Google account + Drive picker, returns File[] (PDF).
+ * Opens Google account + Drive picker, returns File[] (PDF or DOCX).
  * Google Docs are exported as PDF. Empty array if the user cancels.
  */
 export async function pickResumesFromGoogleDrive() {

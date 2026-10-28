@@ -14,8 +14,29 @@ from src.screening_pipeline.pipecat_tts import KokoroSynthesizer, warm_shared_ph
 from src.screening_pipeline.recording_import import run_recording_import_poller
 from src.screening_pipeline.tts_prewarm import known_bot_texts
 
+def _warm_screening_imports() -> None:
+    """Pay the screening pipeline's one-off import cost before any interview.
+
+    The interview runtime is imported lazily (~7s) and Pipecat loads its
+    deferred imports (~6s) while setting up the first pipeline, inside a 20s
+    setup timeout. On the first interview after a (re)start, under CPU load
+    (e.g. a TTS pre-warm), that timed out and the bot left the meeting.
+    """
+    import src.screening_pipeline.pipecat_runtime  # noqa: F401
+
+    try:
+        from pipecat.utils.prewarm import warm_deferred_imports
+    except ImportError:
+        return
+    warm_deferred_imports()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        await asyncio.to_thread(_warm_screening_imports)
+    except Exception as e:
+        print(f"Failed to warm screening pipeline imports: {e}")
     # Pre-download models on startup if they don't exist in the volume, then
     # synthesize the fixed bot lines (greeting, closing, fillers) once in the
     # background so every interview can speak its greeting the moment it joins.

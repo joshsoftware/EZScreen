@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 __all__ = [
     "start_batch",
+    "mark_item_parsed",
     "mark_item_success",
     "mark_item_failure",
     "subscribe",
@@ -25,6 +26,8 @@ class _Batch:
     batch_id: str
     job_id: UUID
     queued: int
+    # Applications created from a parsed resume (scored or not yet).
+    parsed: int = 0
     completed: int = 0
     failed: int = 0
     errors: list[dict[str, Any]] = field(default_factory=list)
@@ -65,6 +68,7 @@ def _snapshot(batch: _Batch, *, event: str = "snapshot", **extra: Any) -> dict[s
         "batch_id": batch.batch_id,
         "job_id": str(batch.job_id),
         "queued": batch.queued,
+        "parsed": batch.parsed,
         "completed": batch.completed,
         "failed": batch.failed,
         "remaining": remaining,
@@ -103,6 +107,24 @@ def start_batch(job_id: UUID, queued: int) -> str:
         _BATCHES[batch_id] = batch
         _LATEST_BY_JOB[job_id] = batch_id
     return batch_id
+
+
+def mark_item_parsed(batch_id: str, *, file_name: str) -> dict[str, Any] | None:
+    """The applicant exists but isn't scored yet; lets the page show it as
+    "Awaiting score" while job-fit runs (Bug-031)."""
+    with _LOCK:
+        batch = _BATCHES.get(batch_id)
+        if batch is None:
+            return None
+        batch.parsed += 1
+        payload = _snapshot(
+            batch,
+            event="item",
+            file_name=file_name,
+            item_status="parsed",
+        )
+        _publish(batch, payload)
+        return payload
 
 
 def mark_item_success(batch_id: str, *, file_name: str) -> dict[str, Any] | None:

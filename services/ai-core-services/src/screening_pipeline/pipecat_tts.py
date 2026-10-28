@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Iterable
 
 import httpx
@@ -27,14 +29,89 @@ _shared_phrase_audio: dict[str, list[bytes]] = {}
 # interview (and timed out Pipecat's pipeline setup) when each session or
 # pre-warm loaded its own copy. The ONNX session is not safe to call
 # concurrently, so every synthesizer using it shares one lock.
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_CLAUSE_BREAK = re.compile(r"(?<=[,;:])\s+")
+# Phrases shorter than this are joined to the next one: very short pieces
+# sound choppy and cost a model call each.
+MIN_PHRASE_CHARS = 30
+# Sentences longer than this are split at commas / semicolons too.
+MAX_PHRASE_CHARS = 90
+
+
+def split_for_streaming(text: str) -> list[str]:
+    """Split text into short phrases, at sentence ends and (for long
+    sentences) clause breaks, so synthesis can start playing early."""
+    phrases: list[str] = []
+    for sentence in _SENTENCE_END.split(text.strip()):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        parts = (
+            _CLAUSE_BREAK.split(sentence)
+            if len(sentence) > MAX_PHRASE_CHARS
+            else [sentence]
+        )
+        current = ""
+        for part in parts:
+            current = f"{current} {part}".strip() if current else part
+            if len(current) >= MIN_PHRASE_CHARS:
+                phrases.append(current)
+                current = ""
+        if current:
+            if phrases and len(current) < MIN_PHRASE_CHARS:
+                phrases[-1] = f"{phrases[-1]} {current}"
+            else:
+                phrases.append(current)
+    return phrases or [text]
+
+
+class _SynthesisLock:
+    """One ONNX session at a time, with live speech ahead of background warming.
+
+    A pre-warm synthesizing a session's ~25 lines took minutes; a question the
+    candidate was waiting to hear queued behind it (~30s in a live test).
+    Background holders give way whenever a live request is waiting; a line
+    already being synthesized still finishes first.
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._live_waiting = 0
+        self._no_live_waiting = asyncio.Event()
+        self._no_live_waiting.set()
+
+    @asynccontextmanager
+    async def hold(self, *, live: bool):
+        if live:
+            self._live_waiting += 1
+            self._no_live_waiting.clear()
+            try:
+                await self._lock.acquire()
+            finally:
+                self._live_waiting -= 1
+                if self._live_waiting == 0:
+                    self._no_live_waiting.set()
+        else:
+            while True:
+                await self._no_live_waiting.wait()
+                await self._lock.acquire()
+                if self._live_waiting == 0:
+                    break
+                self._lock.release()  # a live request arrived meanwhile
+        try:
+            yield
+        finally:
+            self._lock.release()
+
+
 _shared_model = None
-_shared_model_lock: asyncio.Lock | None = None
+_shared_model_lock: _SynthesisLock | None = None
 
 
-def _shared_synth_lock() -> asyncio.Lock:
+def _shared_synth_lock() -> _SynthesisLock:
     global _shared_model_lock
     if _shared_model_lock is None:
-        _shared_model_lock = asyncio.Lock()
+        _shared_model_lock = _SynthesisLock()
     return _shared_model_lock
 
 
@@ -43,7 +120,7 @@ async def warm_shared_phrases(synthesizer: "KokoroSynthesizer", texts: Iterable[
     for text in texts:
         if not text or text in _shared_phrase_audio:
             continue
-        chunks = [chunk async for chunk in synthesizer.synthesize(text)]
+        chunks = [chunk async for chunk in synthesizer.synthesize(text, background=True)]
         _shared_phrase_audio[text] = chunks
     logger.info("Shared bot phrases ready", extra={"phrases": len(_shared_phrase_audio)})
 
@@ -68,7 +145,7 @@ class KokoroSynthesizer:
         self._cache: dict[str, list[bytes]] = {}
         # Kokoro's onnxruntime session is not safe to invoke concurrently from
         # multiple threads; serialize both warm-up and live synthesis through it.
-        self._synth_lock = asyncio.Lock()
+        self._synth_lock = _SynthesisLock()
         self._load_lock = asyncio.Lock()
 
     def _artifacts_present(self) -> bool:
@@ -138,7 +215,9 @@ class KokoroSynthesizer:
             if self.kokoro is None:
                 await self._load_model()
 
-    async def synthesize(self, text: str) -> AsyncGenerator[bytes, None]:
+    async def synthesize(
+        self, text: str, *, background: bool = False
+    ) -> AsyncGenerator[bytes, None]:
         cached = self._cache.get(text)
         if cached is None:
             cached = _shared_phrase_audio.get(text)
@@ -153,7 +232,7 @@ class KokoroSynthesizer:
         # generator is being consumed, so a second concurrent call sharing
         # this Kokoro instance could still race the onnx session even if we
         # only re-acquired the lock between individual chunk yields.
-        async with self._synth_lock:
+        async with self._synth_lock.hold(live=not background):
             # Another caller (e.g. a warm-up pass) may have populated the
             # cache while this one waited for the lock.
             cached = self._cache.get(text)
@@ -179,12 +258,17 @@ class KokoroSynthesizer:
         follow-up question) goes out well before the last sentence has been
         synthesized.
         """
-        async for samples, _sample_rate in self.kokoro.create_stream(
-            text, voice="af_bella", speed=1.0, lang="en-us"
-        ):
-            pcm_bytes = (samples * 32767).astype(np.int16).tobytes()
-            for offset in range(0, len(pcm_bytes), 2400):
-                yield pcm_bytes[offset : offset + 2400]
+        # Kokoro only splits text longer than ~510 phonemes, so a one- or
+        # two-sentence LLM reply was synthesized as one block and nothing
+        # played until all of it was ready (25-35s for a 14s explanation,
+        # Bug-037). Feed it short phrases so playback starts after the first.
+        for phrase in split_for_streaming(text):
+            async for samples, _sample_rate in self.kokoro.create_stream(
+                phrase, voice="af_bella", speed=1.0, lang="en-us"
+            ):
+                pcm_bytes = (samples * 32767).astype(np.int16).tobytes()
+                for offset in range(0, len(pcm_bytes), 2400):
+                    yield pcm_bytes[offset : offset + 2400]
 
     async def warm(self, texts: Iterable[str]) -> None:
         """Pre-synthesize known bot text so later speak() calls hit the cache.
@@ -203,7 +287,7 @@ class KokoroSynthesizer:
             ):
                 continue
             seen.add(text)
-            async for _ in self.synthesize(text):
+            async for _ in self.synthesize(text, background=True):
                 pass
 
 

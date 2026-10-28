@@ -46,6 +46,22 @@ import { PageSkeleton } from '../../components/ui/Skeleton'
 import { ResumeIngestErrorsBanner } from '../../components/jobs/ResumeIngestErrorsBanner'
 
 const POLL_TIMEOUT_MS = 900000
+/** One toast slot for skill saves, so repeats replace instead of stacking. */
+const SKILLS_TOAST_ID = 'job-skills-save'
+
+function skillsSignature(skills) {
+  const list = (items) =>
+    (Array.isArray(items) ? items : [])
+      .map((item) => {
+        const years = item?.required_years
+        return [
+          String(item?.skill || '').trim().toLowerCase(),
+          years == null || years === '' ? null : Number(years),
+        ]
+      })
+      .filter(([name]) => name)
+  return JSON.stringify([list(skills?.must_have), list(skills?.good_to_have)])
+}
 
 function ingestErrorCreatedAtMs(value) {
   if (value == null) return 0
@@ -110,7 +126,7 @@ export function OrgAdminJobDetailPage() {
     isFetching: applicantsFetching,
     error: applicantsQueryError,
     refetch: refetchApplicants,
-  } = useJobApplicantsQuery(jobId, {})
+  } = useJobApplicantsQuery(jobId)
 
   applicantsRef.current = applicants
 
@@ -150,9 +166,11 @@ export function OrgAdminJobDetailPage() {
             const errors = Array.isArray(event.errors) ? event.errors : []
             setIngestErrors(errors)
 
-            const completed = Number(event.completed) || 0
-            if (completed > lastCompletedRef.current) {
-              lastCompletedRef.current = completed
+            // Refetch when an applicant is created (still awaiting its score,
+            // Bug-031) and again when it is scored.
+            const progressed = (Number(event.parsed) || 0) + (Number(event.completed) || 0)
+            if (progressed > lastCompletedRef.current) {
+              lastCompletedRef.current = progressed
               void refetchApplicants()
             }
 
@@ -311,14 +329,23 @@ export function OrgAdminJobDetailPage() {
   }
 
   async function onSkillsSubmit(nextSkills = editSkills) {
+    // Saving unchanged skills again only stacked another "Skills updated" (Bug-035).
+    // Only skip when skills are already stored; parsed-JD skills still need saving.
+    const savedSkills = job?.skills && typeof job.skills === 'object' ? skillsFromJob(job) : null
+    if (savedSkills && skillsSignature(nextSkills) === skillsSignature(savedSkills)) {
+      toast.message('No changes to save', { id: SKILLS_TOAST_ID })
+      return
+    }
     setSkillsSubmitting(true)
     try {
       await updateJobRequest(jobId, { skills: nextSkills })
-      toast.success('Skills updated')
+      toast.success('Skills updated', { id: SKILLS_TOAST_ID })
       await invalidateJob(jobId)
       await refetchJob()
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to save skills')
+      toast.error(err instanceof ApiError ? err.message : 'Failed to save skills', {
+        id: SKILLS_TOAST_ID,
+      })
     } finally {
       setSkillsSubmitting(false)
     }

@@ -195,6 +195,13 @@ export function formatApplicationStatus(status, source, timeline) {
   if (status === 'interview_completed') return 'Interview completed'
 
   const types = timelineEventTypes(timeline)
+  // Outcome of the latest booking first: "Invite sent" stayed after the
+  // interview had run (no-show, failed, in progress).
+  const attempt = screeningAttemptEventTypes(timeline)
+  if (attempt.has('screening_no_show')) return 'No-show'
+  if (attempt.has('screening_failed')) return 'Screening failed'
+  if (attempt.has('screening_cancelled')) return 'Screening cancelled'
+  if (attempt.has('screening_in_progress')) return 'Interview in progress'
   if (types.has('invite_sent')) return 'Invite sent'
   if (status === 'interview_scheduled' || types.has('screening_scheduled')) {
     return 'Screening scheduled'
@@ -219,34 +226,59 @@ export function canScheduleScreening(detail, timeline) {
   return types.has('under_hr_review')
 }
 
-export function canRescheduleScreening(detail, timeline) {
-  if (!detail || detail.status !== 'interview_scheduled') return false
+/**
+ * Event types since the latest screening booking (scheduled or rescheduled).
+ * A reschedule starts a fresh attempt, so an earlier failure or no-show must
+ * not count against it.
+ */
+function screeningAttemptEventTypes(timeline) {
+  const list = Array.isArray(timeline) ? timeline : []
+  let start = -1
+  list.forEach((event, index) => {
+    if (
+      event.event_type === 'screening_scheduled' ||
+      event.event_type === 'screening_rescheduled'
+    ) {
+      start = index
+    }
+  })
+  return new Set(start < 0 ? [] : list.slice(start).map((event) => event.event_type))
+}
+
+/**
+ * Mirrors core-api's reschedule rule. Reschedule when the session hasn't
+ * started, failed, was a no-show, or ran / is running with no answer scored
+ * yet (candidate never joined, silence, left early).
+ * @param {{ sessionStatus?: string|null, scoredAnswers?: number|null }} session
+ *   scoredAnswers: answers scored in this attempt (null while unknown).
+ */
+export function canRescheduleScreening(detail, timeline, { sessionStatus = null, scoredAnswers = null } = {}) {
+  if (!detail || !sessionStatus) return false
   const types = timelineEventTypes(timeline)
   if (!types.has('screening_scheduled')) return false
-  if (
-    types.has('screening_completed') ||
-    types.has('screening_in_progress') ||
-    types.has('rejected') ||
-    types.has('shortlisted_for_l1')
-  ) {
-    return false
-  }
-  return Boolean(screeningSlotFromTimeline(timeline)?.sessionId)
+  if (types.has('rejected') || types.has('shortlisted_for_l1')) return false
+  if (!screeningSlotFromTimeline(timeline)?.sessionId) return false
+
+  const notStartedOrRetry = ['scheduled', 'rescheduled', 'failed', 'no_show'].includes(sessionStatus)
+  const ranWithoutAnswers =
+    ['in_progress', 'completed'].includes(sessionStatus) && scoredAnswers === 0
+  if (!notStartedOrRetry && !ranWithoutAnswers) return false
+
+  // A finished attempt may have moved the application to interview_completed.
+  return ['interview_scheduled', 'interview_completed'].includes(detail.status)
 }
 
 /** Screening is booked but has no outcome yet, so the bot can still change its status. */
 export function isScreeningLive(timeline) {
   const types = timelineEventTypes(timeline)
-  if (!types.has('screening_scheduled') && !types.has('screening_rescheduled')) {
-    return false
-  }
+  if (types.has('rejected') || types.has('shortlisted_for_l1')) return false
+  const attempt = screeningAttemptEventTypes(timeline)
+  if (attempt.size === 0) return false
   return !(
-    types.has('screening_completed') ||
-    types.has('screening_no_show') ||
-    types.has('screening_cancelled') ||
-    types.has('screening_failed') ||
-    types.has('rejected') ||
-    types.has('shortlisted_for_l1')
+    attempt.has('screening_completed') ||
+    attempt.has('screening_no_show') ||
+    attempt.has('screening_cancelled') ||
+    attempt.has('screening_failed')
   )
 }
 
@@ -307,10 +339,14 @@ export function interviewSessionIdFromTimeline(timeline, candidateEmail = null) 
 }
 
 export function canShowInterviewAnalysis(timeline, sessionStatus = null) {
-  if (sessionStatus === 'completed') return true
-  const types = timelineEventTypes(timeline)
+  // A no-show still has its recording (and the "no answers" summary) to show.
+  if (sessionStatus === 'completed' || sessionStatus === 'no_show') return true
+  // Latest attempt only: after a reschedule the earlier attempt's
+  // "completed" must not show its (cleared) analysis for the new one.
+  const types = screeningAttemptEventTypes(timeline)
   return (
     types.has('screening_completed') ||
+    types.has('screening_no_show') ||
     types.has('analysis_ready')
   )
 }

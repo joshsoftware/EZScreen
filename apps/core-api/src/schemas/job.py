@@ -253,6 +253,8 @@ class JobListItem(BaseModel):
     skills: JobSkills | None = None
     status: JobStatus
     created_at: datetime | None = None
+    # Shown as "Posted" in both the admin list and the candidate portal (Bug-019).
+    published_at: datetime | None = None
     applicant_count: int = 0
 
 
@@ -273,6 +275,8 @@ class JobResponse(BaseModel):
     status: JobStatus
     parsed_jd: dict | None = None
     screening_questions: dict | None = None
+    created_at: datetime | None = None
+    published_at: datetime | None = None
 
 
 class JobUpdateResponse(BaseModel):

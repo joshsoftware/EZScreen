@@ -21,6 +21,7 @@ import {
 } from './applicationFields'
 import { formatDateTime } from './jobFields'
 import { getReEvaluationStatusRequest, reEvaluateApplicationRequest } from './api'
+import { useJobQueryClient } from './useJobQueries'
 import { ApiError } from '../../lib/api/client'
 import { toast } from 'sonner'
 
@@ -66,12 +67,15 @@ export function ApplicantsTable({
   const [reevaluationStartedAt, setReevaluationStartedAt] = useState(null)
   const pollInFlightRef = useRef(false)
   const onRefreshRef = useRef(onRefresh)
+  const { invalidateApplication } = useJobQueryClient()
+  const invalidateApplicationRef = useRef(invalidateApplication)
+  invalidateApplicationRef.current = invalidateApplication
   onRefreshRef.current = onRefresh
   const filterOptions = fitFilterOptions(fitLabels)
 
   const filteredApplicants = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    return applicants.filter((applicant) => {
+    const matching = applicants.filter((applicant) => {
       if (!matchesFitFilter(applicant, fitFilter, fitLabels)) return false
       if (!needle) return true
       const haystack = [candidateName(applicant), applicant.email, applicant.phone]
@@ -80,6 +84,13 @@ export function ApplicantsTable({
         .toLowerCase()
       return haystack.includes(needle)
     })
+    // Unscored applicants first (the API sorts them last): new uploads are seen
+    // arriving while they await a score, and failed scoring stays in view next
+    // to its Re-evaluate button (Bug-031). Otherwise keep the API's score order.
+    return [
+      ...matching.filter((applicant) => applicantScore(applicant) == null),
+      ...matching.filter((applicant) => applicantScore(applicant) != null),
+    ]
   }, [applicants, fitFilter, fitLabels, query])
 
   useEffect(() => {
@@ -104,6 +115,9 @@ export function ApplicantsTable({
           return
         }
         if (pipeline?.status === 'completed') {
+          // Also drop this applicant's cached profile (and timeline), or
+          // opening it shows the pre-evaluation analysis until a refresh.
+          await invalidateApplicationRef.current(reevaluatingId)
           await onRefreshRef.current?.()
           setReevaluatingId(null)
           setReevaluationStartedAt(null)
@@ -193,7 +207,7 @@ export function ApplicantsTable({
     <div className="space-y-md">
       <div className="flex flex-wrap items-end justify-between gap-sm">
         <p className="text-body-sm text-on-surface-variant">
-          Sorted by resume score · {filteredApplicants.length} shown
+          Awaiting score first, then by resume score · {filteredApplicants.length} shown
         </p>
         <div className="flex flex-wrap items-end gap-sm">
           <div className="w-[220px]">

@@ -10,9 +10,11 @@ from src.screening_pipeline.prompts import (
     CLOSING_TEXT,
     FILLER_TEXTS,
     GREETING_TEXT,
+    MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
     SILENCE_PROMPT_TEXT,
+    START_WITHOUT_REPLY_TEXT,
 )
 from src.screening_pipeline.tts_prewarm import (
     TtsPrewarmRegistry,
@@ -42,6 +44,8 @@ def test_known_bot_texts_includes_constants_and_question_text():
         ANSWER_ACKNOWLEDGEMENT_TEXT,
         REPEAT_QUESTION_PREFIX_TEXT,
         REPEAT_QUESTION_LIMIT_TEXT,
+        MOVE_ON_TEXT,
+        START_WITHOUT_REPLY_TEXT,
         *FILLER_TEXTS,
         "What is Docker?",
     ]
@@ -92,6 +96,8 @@ async def test_schedule_warms_and_claim_returns_the_finished_synthesizer():
             ANSWER_ACKNOWLEDGEMENT_TEXT,
             REPEAT_QUESTION_PREFIX_TEXT,
             REPEAT_QUESTION_LIMIT_TEXT,
+            MOVE_ON_TEXT,
+            START_WITHOUT_REPLY_TEXT,
             *FILLER_TEXTS,
             "What is Docker?",
         ]
@@ -164,3 +170,26 @@ async def test_concurrent_prewarms_are_bounded_by_max_concurrent():
 
     for i in range(4):
         assert registry.claim(f"session-{i}") is not None
+
+
+@pytest.mark.asyncio
+async def test_an_interview_can_claim_a_prewarm_that_is_still_running():
+    """The pre-warm used to be handed over only when every line was done, so
+    an interview starting mid-warm synthesized from scratch alongside it."""
+    registry = TtsPrewarmRegistry(lead_seconds=0, ttl_seconds=3600, max_concurrent=3)
+    release = asyncio.Event()
+
+    async def slow_warm(self, texts):
+        self._cache["Question 1?"] = [b"pcm"]
+        await release.wait()
+
+    with patch.object(KokoroSynthesizer, "warm", slow_warm):
+        registry.schedule("session-1", [{"question": "Question 1?"}], join_at=None)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        claimed = registry.claim("session-1")
+        release.set()
+        await asyncio.sleep(0)
+
+    assert claimed is not None
+    assert claimed._cache["Question 1?"] == [b"pcm"]

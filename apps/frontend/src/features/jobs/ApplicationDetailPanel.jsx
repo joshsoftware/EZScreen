@@ -192,21 +192,50 @@ function SkillChipList({ title, items, tone = 'neutral', previewCount = 14 }) {
   )
 }
 
-function RoleHighlights({ highlights, previewCount = 3 }) {
+/** Bullets under their resume sub-headings (Bug-036). Resumes parsed before
+ * highlight_groups existed only have the flat highlights list. */
+function highlightGroups(item) {
+  if (Array.isArray(item?.highlight_groups) && item.highlight_groups.length) {
+    return item.highlight_groups.map((group) => ({
+      heading: group?.heading || null,
+      highlights: Array.isArray(group?.highlights) ? group.highlights : [],
+    }))
+  }
+  const flat = Array.isArray(item?.highlights) ? item.highlights : []
+  return flat.length ? [{ heading: null, highlights: flat }] : []
+}
+
+function RoleHighlights({ groups, previewCount = 3 }) {
   const [expanded, setExpanded] = useState(false)
-  const total = highlights?.length ?? 0
-  if (!total) return null
+  const total = groups.reduce((sum, group) => sum + group.highlights.length, 0)
+  if (!total && !groups.some((group) => group.heading)) return null
 
   const hidden = total > previewCount
-  const visible = expanded || !hidden ? highlights : highlights.slice(0, previewCount)
+  let budget = expanded || !hidden ? Infinity : previewCount
+  const visible = []
+  for (const group of groups) {
+    if (budget <= 0) break
+    const points = group.highlights.slice(0, budget)
+    budget -= points.length
+    visible.push({ ...group, highlights: points })
+  }
 
   return (
-    <div className="mt-xs">
-      <ul className="text-body-sm text-on-surface-variant list-disc pl-md space-y-xs">
-        {visible.map((highlight) => (
-          <li key={highlight}>{highlight}</li>
-        ))}
-      </ul>
+    <div className="mt-xs space-y-xs">
+      {visible.map((group, index) => (
+        <div key={`${group.heading ?? ''}-${index}`}>
+          {group.heading ? (
+            <p className="text-body-sm font-medium text-on-surface">{group.heading}</p>
+          ) : null}
+          {group.highlights.length ? (
+            <ul className="text-body-sm text-on-surface-variant list-disc pl-md space-y-xs">
+              {group.highlights.map((highlight, pointIndex) => (
+                <li key={`${pointIndex}-${highlight}`}>{highlight}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ))}
       {hidden ? (
         <button
           type="button"
@@ -234,12 +263,35 @@ function ExperienceTimeline({ roles }) {
             <p className="text-body-sm font-medium text-on-surface">
               {role.title}
               {role.company ? ` · ${role.company}` : ''}
+              {role.is_internship ? (
+                <Badge tone="neutral" className="ml-xs align-middle">
+                  Internship
+                </Badge>
+              ) : null}
             </p>
             <p className="text-label-md text-on-surface-variant">{period}</p>
-            <RoleHighlights highlights={role.highlights} />
+            <RoleHighlights groups={highlightGroups(role)} />
           </div>
         )
       })}
+    </div>
+  )
+}
+
+/** Entries of the resume's own Projects section, kept apart from work
+ * experience (Bug-036). */
+function ProjectList({ projects }) {
+  return (
+    <div className="space-y-md border-l border-outline-variant pl-md">
+      {projects.map((project, index) => (
+        <div key={`${project.name ?? ''}-${index}`}>
+          <p className="text-body-sm font-medium text-on-surface">{project.name || 'Project'}</p>
+          {project.tech_stack?.length ? (
+            <p className="text-label-md text-on-surface-variant">{project.tech_stack.join(', ')}</p>
+          ) : null}
+          <RoleHighlights groups={highlightGroups(project)} />
+        </div>
+      ))}
     </div>
   )
 }
@@ -275,6 +327,7 @@ export function ApplicationDetailPanel({
   const primarySkills = normalizeSkillList(parsed?.primary_skills)
   const secondarySkills = normalizeSkillList(parsed?.secondary_skills)
   const roles = parsed?.experience?.roles ?? []
+  const projects = Array.isArray(parsed?.projects) ? parsed.projects : []
   const education = parsed?.education_certificates ?? []
 
   if (loading) {
@@ -397,6 +450,12 @@ export function ApplicationDetailPanel({
           <Panel title="Experience timeline">
             <ExperienceTimeline roles={roles} />
           </Panel>
+
+          {projects.length ? (
+            <Panel title="Projects">
+              <ProjectList projects={projects} />
+            </Panel>
+          ) : null}
 
           <Panel title="Resume skills">
             <div className="grid md:grid-cols-2 gap-md items-start">
