@@ -59,7 +59,7 @@ function AddSkillRow({ onAdd }) {
     if (!trimmed) return
     if (!hasMeaningfulText(trimmed)) {
       setLocalError(
-        'Skill name must include letters or numbers — special characters alone are not allowed.',
+        'Skill name must include letters — numbers and special characters alone are not allowed.',
       )
       return
     }
