@@ -75,9 +75,32 @@ async def _receive_unless_runtime_failed(
     return await receive_task
 
 
+async def _drain_until_disconnect(websocket: WebSocket) -> None:
+    """Read and discard messages until the client goes away."""
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                return
+    except (WebSocketDisconnect, RuntimeError):
+        return
+
+
 async def _run_pipecat_session(websocket: WebSocket, session_id: str):
     """Run Pipecat behind the existing Attendee WebSocket contract."""
     from src.screening_pipeline.pipecat_runtime import PipecatInterviewRuntime
+
+    existing = active_sessions.get(session_id)
+    if existing is not None and existing.policy.is_active:
+        # One interviewer per session: a second runtime would start with an
+        # empty memory and could end the interview as "never spoke" over the
+        # real result (Bugs 44-46). Keep the running one.
+        logger.warning(
+            "Second audio connection for a running interview; ignoring it",
+            extra={"session_id": session_id},
+        )
+        await _drain_until_disconnect(websocket)
+        return
 
     runtime = PipecatInterviewRuntime(websocket=websocket, session_id=session_id)
     active_sessions[session_id] = runtime
@@ -156,8 +179,12 @@ async def _run_pipecat_session(websocket: WebSocket, session_id: str):
 
             await runtime.push_audio(pcm_bytes, data.get("sample_rate", 24000))
     finally:
-        active_sessions.pop(session_id, None)
+        # Clean up while still registered, so a webhook arriving meanwhile
+        # reaches this (ending) runtime; then unregister only this runtime,
+        # never one a newer connection registered under the same session.
         await runtime.cleanup()
+        if active_sessions.get(session_id) is runtime:
+            active_sessions.pop(session_id, None)
         if not runtime_task.done():
             runtime_task.cancel()
         try:
