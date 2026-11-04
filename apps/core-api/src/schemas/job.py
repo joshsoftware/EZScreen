@@ -45,29 +45,67 @@ def _normalize_experience_years(value: object) -> float | None:
     return round(years * 10) / 10
 
 
-_HEADING_RE = re.compile(r"<h[1-6][^>]*>.*?</h[1-6]>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
+# One "<h2>Heading</h2> body" section of the HTML the Create Job form writes.
+_SECTION_RE = re.compile(
+    r"<h2[^>]*>(.*?)</h2>(.*?)(?=<h2[^>]*>|$)", re.IGNORECASE | re.DOTALL
+)
+_COMPANY_HEADING = "about the company"
 
 
-def _description_has_meaningful_text(value: str) -> bool:
-    """True when the JD body (ignoring HTML tags and section headings) has a letter or digit.
+def _html_text(value: str) -> str:
+    return html.unescape(_TAG_RE.sub(" ", value)).strip()
 
-    Section headings like "Role overview" are template text added by the form,
-    so they must not count — otherwise a symbols-only JD would always pass.
-    """
-    text = _HEADING_RE.sub(" ", value)
-    text = html.unescape(_TAG_RE.sub(" ", text))
-    return any(ch.isalnum() for ch in text)
+
+def _has_letter(text: str) -> bool:
+    """Digits alone don't count: "8900877@#%^" is not real text (Bug-016)."""
+    return any(ch.isalpha() for ch in text)
+
+
+def _is_mostly_letters(text: str) -> bool:
+    """True when letters make up at least half of the non-space characters."""
+    chars = [ch for ch in text if not ch.isspace()]
+    if not chars:
+        return False
+    letters = sum(1 for ch in chars if ch.isalpha())
+    return letters * 2 >= len(chars)
 
 
 def _validate_description(value: str | None) -> str | None:
+    """Check each JD section on its own, so one real section can't carry a junk one.
+
+    Section headings like "Role overview" are template text added by the form,
+    so they never count as content. Legacy free-form JDs (no headings) are
+    checked as a whole.
+    """
     if value is None or value == "":
         return value
-    if not _description_has_meaningful_text(value):
+    sections = [
+        (_html_text(heading), _html_text(body))
+        for heading, body in _SECTION_RE.findall(value)
+    ]
+    if not sections:
+        sections = [("Job description", _html_text(value))]
+    if not any(body for _, body in sections):
         raise ValueError(
-            "Job description must include letters or numbers — "
-            "special characters alone are not allowed"
+            "Job description must include letters — "
+            "numbers and special characters alone are not allowed"
         )
+    for heading, body in sections:
+        if not body:
+            continue
+        if not _has_letter(body):
+            raise ValueError(
+                f"{heading} must include letters — "
+                "numbers and special characters alone are not allowed"
+            )
+        # A company or team is described in words; mostly digits and symbols
+        # with a stray letter or two is not a real entry.
+        if heading.lower() == _COMPANY_HEADING and not _is_mostly_letters(body):
+            raise ValueError(
+                "Company or team must be mostly letters — "
+                "numbers and special characters alone are not allowed"
+            )
     return value
 
 
@@ -85,10 +123,10 @@ class SkillItem(BaseModel):
     @field_validator("skill")
     @classmethod
     def skill_must_be_meaningful(cls, value: str) -> str:
-        if not any(ch.isalnum() for ch in value):
+        if not _has_letter(value):
             raise ValueError(
-                "Skill name must include letters or numbers — "
-                "special characters alone are not allowed"
+                "Skill name must include letters — "
+                "numbers and special characters alone are not allowed"
             )
         return value
 
@@ -140,10 +178,10 @@ class JobCreate(BaseModel):
     @field_validator("title")
     @classmethod
     def title_must_be_meaningful(cls, value: str) -> str:
-        if not any(ch.isalnum() for ch in value):
+        if not _has_letter(value):
             raise ValueError(
-                "Job title must include letters or numbers — "
-                "special characters alone are not allowed"
+                "Job title must include letters — "
+                "numbers and special characters alone are not allowed"
             )
         return value
 
@@ -157,10 +195,10 @@ class JobCreate(BaseModel):
     def location_must_be_meaningful(cls, value: str | None) -> str | None:
         if value is None or value == "":
             return value
-        if not any(ch.isalnum() for ch in value):
+        if not _has_letter(value):
             raise ValueError(
-                "Location must include letters or numbers — "
-                "special characters alone are not allowed"
+                "Location must include letters — "
+                "numbers and special characters alone are not allowed"
             )
         return value
 
@@ -203,10 +241,10 @@ class JobUpdate(BaseModel):
     def title_must_be_meaningful(cls, value: str | None) -> str | None:
         if value is None or value == "":
             return value
-        if not any(ch.isalnum() for ch in value):
+        if not _has_letter(value):
             raise ValueError(
-                "Job title must include letters or numbers — "
-                "special characters alone are not allowed"
+                "Job title must include letters — "
+                "numbers and special characters alone are not allowed"
             )
         return value
 
@@ -220,10 +258,10 @@ class JobUpdate(BaseModel):
     def location_must_be_meaningful(cls, value: str | None) -> str | None:
         if value is None or value == "":
             return value
-        if not any(ch.isalnum() for ch in value):
+        if not _has_letter(value):
             raise ValueError(
-                "Location must include letters or numbers — "
-                "special characters alone are not allowed"
+                "Location must include letters — "
+                "numbers and special characters alone are not allowed"
             )
         return value
 

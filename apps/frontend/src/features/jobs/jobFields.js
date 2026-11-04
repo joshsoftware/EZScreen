@@ -383,10 +383,22 @@ function parseOptionalExperienceYears(value) {
   return Math.round(parsed * 10) / 10
 }
 
-/** True when the string has at least one letter or digit (Unicode-aware). */
+/**
+ * True when the string has at least one letter (Unicode-aware).
+ * Digits alone don't count: "8900877@#%^" is not a real title or section (Bug-016).
+ */
 export function hasMeaningfulText(value) {
   if (typeof value !== 'string') return false
-  return /[\p{L}\p{N}]/u.test(value)
+  return /\p{L}/u.test(value)
+}
+
+/** True when letters make up at least half of the non-space characters. */
+export function isMostlyLetters(value) {
+  if (typeof value !== 'string') return false
+  const chars = [...value.replace(/\s+/g, '')]
+  if (chars.length === 0) return false
+  const letters = chars.filter((ch) => /\p{L}/u.test(ch)).length
+  return letters * 2 >= chars.length
 }
 
 function assertMeaningfulText(label, value, { required = false } = {}) {
@@ -397,7 +409,7 @@ function assertMeaningfulText(label, value, { required = false } = {}) {
   }
   if (!hasMeaningfulText(text)) {
     throw new Error(
-      `${label} must include letters or numbers — special characters alone are not allowed.`,
+      `${label} must include letters — numbers and special characters alone are not allowed.`,
     )
   }
 }
@@ -419,6 +431,15 @@ export function formValuesToPayload(values) {
 
   for (const [key, label] of Object.entries(SECTION_FIELD_LABELS)) {
     assertMeaningfulText(label, values[key])
+  }
+
+  // A company or team is described in words, so a value that is mostly
+  // digits and symbols (with a stray letter or two) is not a real entry.
+  const company = typeof values.about_company === 'string' ? values.about_company.trim() : ''
+  if (company && !isMostlyLetters(company)) {
+    throw new Error(
+      'Company or team must be mostly letters — numbers and special characters alone are not allowed.',
+    )
   }
 
   const title = values.title.trim()

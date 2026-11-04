@@ -139,3 +139,26 @@ async def test_join_webhook_starts_a_waiting_interview():
 
     assert _spoken(policy) == [GREETING_TEXT]
     await policy.end_interview("test")
+
+
+def test_pipeline_outlives_the_silent_wait_for_a_late_candidate():
+    """Pipecat's default 5-minute idle timeout cancelled the pipeline while
+    the bot waited silently: a no-show after 5 minutes, and a dead bot left
+    sitting in the meeting."""
+    from src.screening_pipeline.pipecat_runtime import PipecatInterviewRuntime
+    from src.screening_pipeline.prompts import CANDIDATE_JOIN_WAIT_SECONDS
+
+    runtime = PipecatInterviewRuntime(MagicMock(), "sess-join")
+
+    assert runtime.task._idle_timeout_secs > CANDIDATE_JOIN_WAIT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_runtime_teardown_takes_the_bot_out_of_the_meeting():
+    policy = _policy()
+    await _start(policy)
+
+    with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()):
+        await policy.cleanup()
+
+    policy._leave_bot_after_close.assert_awaited_once()

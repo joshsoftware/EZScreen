@@ -39,12 +39,15 @@ from src.screening_pipeline.pipecat_transport import (
     SpeechCompleteFrame,
 )
 from src.screening_pipeline.pipecat_tts import KokoroTTSService
+from src.screening_pipeline.prompts import CANDIDATE_JOIN_WAIT_SECONDS
 from src.screening_pipeline.tts_prewarm import tts_prewarm_registry
 
 # Env-overridable via SCREENING_TURN_END_SILENCE_SECONDS (default 1.5s). See
 # docs/architecture/SCREENING_BOT_LATENCY_OPTIMIZATION.md Phase 2 for the tuning
 # rationale and hard floor (1.0s).
 SCREENING_TURN_END_SILENCE_SECONDS = settings.screening_turn_end_silence_seconds
+# Longer than the silent wait for a late candidate (see PipelineTask below).
+PIPELINE_IDLE_TIMEOUT_SECONDS = CANDIDATE_JOIN_WAIT_SECONDS + 300
 
 
 def _build_noise_filter() -> BaseAudioFilter | None:
@@ -209,6 +212,12 @@ class PipecatInterviewRuntime:
                 audio_in_sample_rate=16000,
                 audio_out_sample_rate=24000,
             ),
+            # Pipecat cancels a pipeline with no activity for 5 minutes by
+            # default. The bot waits silently for up to
+            # CANDIDATE_JOIN_WAIT_SECONDS for a late candidate, so the default
+            # killed it halfway: a no-show after 5 minutes and a silent bot
+            # left in the meeting. Keep a safety net beyond the wait.
+            idle_timeout_secs=PIPELINE_IDLE_TIMEOUT_SECONDS,
         )
         self.runner: PipelineRunner | None = None
 

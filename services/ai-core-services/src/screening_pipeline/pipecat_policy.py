@@ -439,8 +439,13 @@ class PipecatInterviewPolicy:
             await self.finalize(reason=reason)
 
     async def cleanup(self):
-        """Teardown connections, persisting the interview first if it ended early."""
-        await self.end_interview("transport_disconnected")
+        """Teardown connections, persisting the interview first if it ended early.
+
+        Also asks the bot to leave: when the pipeline stops on its own (a
+        crash, an idle timeout) the bot is still in the meeting and would sit
+        there silently. If Attendee already dropped the call, the leave
+        request just fails and is logged."""
+        await self.end_interview("transport_disconnected", leave_bot=True)
 
     # ──────────────────────────── BACKGROUND PERSISTENCE ────────────────────────────
 
