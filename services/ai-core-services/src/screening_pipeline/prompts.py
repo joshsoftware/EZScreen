@@ -103,6 +103,10 @@ GREETING_REPLY_TIMEOUT_SECONDS = 15
 # silence. If nobody joins within this window, it's a no-show.
 CANDIDATE_JOIN_WAIT_SECONDS = 600
 START_WITHOUT_REPLY_TEXT = "Let's get started with the first question."
+# Spoken instead of the greeting when the bot reconnects to an interview that
+# was already underway (the service restarted mid-interview), followed by the
+# next unanswered question.
+RESUME_TEXT = "Sorry about that, we got disconnected for a moment. Let's continue where we left off."
 # Prompt twice at 30-second intervals, then close after the final 30-second
 # unanswered interval (90 seconds total).
 MAX_SILENCE_PROMPTS = 2

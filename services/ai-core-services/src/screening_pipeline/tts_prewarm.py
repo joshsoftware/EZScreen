@@ -36,6 +36,7 @@ from src.screening_pipeline.prompts import (
     MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
+    RESUME_TEXT,
     SILENCE_PROMPT_TEXT,
     START_WITHOUT_REPLY_TEXT,
 )
@@ -77,6 +78,7 @@ def known_bot_texts(questions: list[dict]) -> list[str]:
         REPEAT_QUESTION_LIMIT_TEXT,
         MOVE_ON_TEXT,
         START_WITHOUT_REPLY_TEXT,
+        RESUME_TEXT,
     ]
     texts.extend(FILLER_TEXTS)
     texts.extend(q.get("question", "") for q in questions if q.get("question"))

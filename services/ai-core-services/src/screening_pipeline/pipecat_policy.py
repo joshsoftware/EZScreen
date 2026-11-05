@@ -37,13 +37,15 @@ from src.screening_pipeline.prompts import (
     MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
+    RESUME_TEXT,
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
     START_WITHOUT_REPLY_TEXT,
     STT_RESULT_GRACE_SECONDS,
     UNFINISHED_ANSWER_EXTRA_SECONDS,
 )
-from src.screening_pipeline.session_api import SessionApiClient
+from src.screening_pipeline.routing_engine import initialize_queues
+from src.screening_pipeline.session_api import SessionApiClient, normalize_interview_metadata
 from src.screening_pipeline.speech_filter import (
     is_probable_hallucination,
     is_skip_request,
@@ -118,6 +120,7 @@ class PipecatInterviewPolicy:
         self._ending = False
         self.termination_reason: Optional[str] = None
         self._pending_persist_tasks: list[asyncio.Task] = []
+        self._question_save_lock = asyncio.Lock()
         # True from VAD "started speaking" until VAD confirms "stopped
         # speaking" — used to hold off the "Are you there?" inactivity
         # prompt during one long, unbroken candidate answer (see
@@ -189,6 +192,9 @@ class PipecatInterviewPolicy:
         if self.tts_cache_warmer is not None:
             self._tts_warm_task = asyncio.create_task(self._warm_tts_cache())
 
+        if await self._resume_saved_progress():
+            return
+
         if is_candidate_present(self.session_id):
             await self._greet()
             return
@@ -199,6 +205,65 @@ class PipecatInterviewPolicy:
             "Waiting for the candidate to join",
             extra={"session_id": self.session_id, "wait_seconds": CANDIDATE_JOIN_WAIT_SECONDS},
         )
+
+    async def _resume_saved_progress(self) -> bool:
+        """Continue an interview a previous runtime left mid-way.
+
+        The service restarted during an interview: Attendee reconnected the
+        bot, which still sat in the meeting, and the new runtime greeted and
+        asked question 1 again. The re-asked questions ("I already answered
+        this") were saved as skips over the real scores, and the final
+        summary and transcript held only what came after the restart.
+
+        Progress is read from what was saved after each question: the
+        conversation transcript (written per question; a reschedule rebuilds
+        the metadata, so it always belongs to this attempt) and the
+        evaluations of the questions in it. Returns False when there is
+        nothing to resume.
+        """
+        metadata = getattr(self.session, "interview_metadata", None)
+        saved_transcript = (
+            metadata.get("conversation_transcript") if isinstance(metadata, dict) else None
+        )
+        if not isinstance(saved_transcript, list):
+            return False
+        asked_ids = {
+            entry.get("question_id")
+            for entry in saved_transcript
+            if isinstance(entry, dict)
+            and entry.get("interaction_type") == "question"
+            and entry.get("question_id") is not None
+        }
+        if not asked_ids:
+            return False
+        evaluations = [
+            evaluation
+            for evaluation in await interview_session_repo.get_saved_evaluations(self.session_id)
+            if evaluation.get("question_id") in asked_ids
+        ]
+        if not evaluations:
+            return False
+
+        answered_ids = {evaluation.get("question_id") for evaluation in evaluations}
+        self.analysis_evaluations = evaluations
+        self.current_question_idx = len(evaluations)
+        # Routing is deterministic in (queues, evaluations): with the answered
+        # questions removed it picks the question that was interrupted.
+        self.question_queues = {
+            category: [q for q in queue if q.get("id") not in answered_ids]
+            for category, queue in initialize_queues(self.questions).items()
+        }
+        self.transcript_log = [dict(entry) for entry in saved_transcript if isinstance(entry, dict)]
+        self.transcript_log.append(
+            {"interaction_type": "resume", "bot_speech": RESUME_TEXT, "candidate_answer": ""}
+        )
+        logger.info(
+            "Resuming an interview that was already underway",
+            extra={"session_id": self.session_id, "answered_questions": len(evaluations)},
+        )
+        await self.speak(RESUME_TEXT)
+        await self._ask_next_question()
+        return True
 
     async def _greet(self) -> None:
         self.transcript_log.append(
@@ -369,7 +434,7 @@ class PipecatInterviewPolicy:
             follow_ups=_answered_follow_ups(entry.get("follow_ups")),
         )
         self.analysis_evaluations.append(evaluation)
-        self._schedule_persist(persist_qa_and_evaluation(self.api_client, qa_entry, evaluation))
+        self._persist_question(qa_entry, evaluation)
         logger.info(
             "Saved a question whose follow-up was never answered",
             extra={"session_id": self.session_id, "question_id": question_obj.get("id")},
@@ -464,6 +529,26 @@ class PipecatInterviewPolicy:
         await self.end_interview("transport_disconnected", leave_bot=True)
 
     # ──────────────────────────── BACKGROUND PERSISTENCE ────────────────────────────
+
+    def _persist_question(self, qa_entry: dict, evaluation: dict) -> None:
+        """Save a finished question, then the conversation so far.
+
+        The transcript used to be saved only when the interview ended, so a
+        service restart mid-interview lost it, and the next runtime could not
+        tell where the interview was (see _resume_saved_progress). Snapshot it
+        now, before later turns change the entries; saved after the
+        evaluation, so a question in the saved transcript has its score saved.
+        """
+        snapshot = normalize_interview_metadata(self.transcript_log)
+        api_client = self.api_client
+
+        async def save() -> None:
+            # In order: an older snapshot landing last would drop questions.
+            async with self._question_save_lock:
+                await persist_qa_and_evaluation(api_client, qa_entry, evaluation)
+                await api_client.save_interview_metadata(snapshot)
+
+        self._schedule_persist(save())
 
     def _schedule_persist(self, coro: Awaitable[None]) -> None:
         """Run a per-question Core API save in the background.
@@ -956,7 +1041,7 @@ class PipecatInterviewPolicy:
         qa_entry = AnswerEvaluator.build_qa_entry(question_obj, current_q, transcript, self.current_question_idx + 1)
         skip_eval = AnswerEvaluator.build_skip_evaluation(question_obj, transcript, self.current_question_idx + 1)
         self.analysis_evaluations.append(skip_eval)
-        self._schedule_persist(persist_qa_and_evaluation(self.api_client, qa_entry, skip_eval))
+        self._persist_question(qa_entry, skip_eval)
 
         self.current_question_idx += 1
         await self._ask_next_question()
@@ -1099,7 +1184,7 @@ class PipecatInterviewPolicy:
             follow_ups=follow_ups,
         )
         self.analysis_evaluations.append(evaluation)
-        self._schedule_persist(persist_qa_and_evaluation(self.api_client, qa_entry, evaluation))
+        self._persist_question(qa_entry, evaluation)
 
         self.current_question_idx += 1
         await self._ask_next_question()
