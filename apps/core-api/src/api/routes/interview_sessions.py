@@ -13,6 +13,7 @@ from src.models.interview_session import InterviewSession
 from src.models.user import User
 from src.schemas.interview_analysis import (
     InterviewAnalysisResponse,
+    ReEvaluateScreeningRequest,
     SaveEvaluationRequest,
     SaveEvaluationSummaryRequest,
     SaveQaTranscriptRequest,
@@ -351,6 +352,44 @@ def get_interview_analysis(
             detail="Interview analysis not found",
         )
     analysis_session, analysis = loaded
+    return interview_analysis_service.analysis_to_response(analysis_session, analysis)
+
+
+@router.post(
+    "/{session_id}/analysis/re-evaluate",
+    response_model=InterviewAnalysisResponse,
+    summary="Re-score a screening's saved answers, optionally after correcting misheard ones",
+)
+def re_evaluate_interview_analysis(
+    session_id: UUID,
+    body: ReEvaluateScreeningRequest,
+    db: DbSession,
+    current_user: JobActor,
+) -> InterviewAnalysisResponse:
+    session = _get_session_for_org(db, session_id, current_user)
+    loaded = interview_analysis_service.get_analysis_for_session(db, session.id)
+    if loaded is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Interview analysis not found",
+        )
+    analysis_session, analysis = loaded
+    try:
+        actor_name = " ".join(
+            part for part in (current_user.first_name, current_user.last_name) if part
+        ) or current_user.email
+        analysis = interview_analysis_service.re_evaluate_screening(
+            db,
+            analysis_session,
+            analysis,
+            body,
+            actor_id=current_user.id,
+            actor_name=actor_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except interview_analysis_service.ScreeningReEvaluationError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return interview_analysis_service.analysis_to_response(analysis_session, analysis)
 
 

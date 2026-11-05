@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from src.config.settings import settings
 from src.models.application import Application
 from src.models.enums import InterviewType, TimelineActorType, TimelineEventType
 from src.models.interview_analysis import InterviewAnalysis
 from src.models.interview_session import InterviewSession
 from src.schemas.interview_analysis import (
+    CorrectedScreeningAnswer,
     InterviewAnalysisResponse,
+    ReEvaluateScreeningRequest,
     SaveEvaluationRequest,
     SaveEvaluationSummaryRequest,
     SaveQaTranscriptRequest,
@@ -34,6 +39,8 @@ __all__ = [
     "save_evaluation",
     "save_evaluation_summary",
     "save_conversation_transcript",
+    "re_evaluate_screening",
+    "ScreeningReEvaluationError",
 ]
 
 logger = logging.getLogger(__name__)
@@ -194,8 +201,14 @@ def analysis_to_response(
         completed_at=session.completed_at,
         gmeet_link=_gmeet_link(session),
         questions_planned=_planned_question_count(session.generated_questions),
+        re_evaluations=_re_evaluation_history(analysis.analysis_result),
         created_at=analysis.created_at,
     )
+
+
+def _re_evaluation_history(raw: Any) -> list[dict[str, Any]]:
+    history = raw.get("re_evaluations") if isinstance(raw, dict) else None
+    return [item for item in history if isinstance(item, dict)] if isinstance(history, list) else []
 
 
 def _emit_analysis_ready(
@@ -296,3 +309,118 @@ def save_conversation_transcript(
     session.interview_metadata = metadata
     db.add(session)
     db.commit()
+
+
+_RE_EVALUATION_TIMEOUT_SECONDS = 180.0
+
+
+class ScreeningReEvaluationError(RuntimeError):
+    """ai-core could not re-score the answers; nothing was changed."""
+
+
+def _apply_corrections(
+    evaluations: list[dict[str, Any]],
+    corrections: list[CorrectedScreeningAnswer],
+) -> list[int]:
+    """Write HR's corrected answers into the evaluations; return edited question ids."""
+    by_id = {item.get("question_id"): item for item in evaluations}
+    edited: list[int] = []
+    for correction in corrections:
+        item = by_id.get(correction.question_id)
+        if item is None:
+            raise ValueError(f"Question {correction.question_id} was not evaluated in this screening")
+        changed = False
+        if (
+            correction.candidate_answer is not None
+            and correction.candidate_answer.strip() != str(item.get("candidate_answer") or "").strip()
+        ):
+            item["candidate_answer"] = correction.candidate_answer.strip()
+            changed = True
+        follow_ups = item.get("follow_ups") if isinstance(item.get("follow_ups"), list) else []
+        for index, answer in enumerate(correction.follow_up_answers or []):
+            if answer is None or index >= len(follow_ups) or not isinstance(follow_ups[index], dict):
+                continue
+            if answer.strip() != str(follow_ups[index].get("follow_up_answer") or "").strip():
+                follow_ups[index]["follow_up_answer"] = answer.strip()
+                changed = True
+        if changed:
+            edited.append(correction.question_id)
+    return edited
+
+
+def re_evaluate_screening(
+    db: Session,
+    session: InterviewSession,
+    analysis: InterviewAnalysis,
+    body: ReEvaluateScreeningRequest,
+    *,
+    actor_id: UUID,
+    actor_name: str | None = None,
+) -> InterviewAnalysis:
+    """Re-score the saved answers (after HR corrections) the way the live bot
+    scores them, and replace the evaluations and final summary.
+
+    The first re-evaluation keeps the bot's original evaluations and summary;
+    every run is recorded in analysis_result["re_evaluations"].
+    """
+    result = _analysis_result_dict(analysis.analysis_result)
+    evaluations = deepcopy(_evaluations_list(result))
+    if not evaluations:
+        raise ValueError("This screening has no evaluated answers to re-score")
+    edited = _apply_corrections(evaluations, body.answers)
+
+    url = f"{settings.ai_services_base_url.rstrip('/')}/internal/v1/screening/re-evaluate"
+    try:
+        with httpx.Client(timeout=_RE_EVALUATION_TIMEOUT_SECONDS) as client:
+            response = client.post(
+                url,
+                json={
+                    "interview_session_id": str(session.id),
+                    "evaluations": evaluations,
+                    "generated_questions": session.generated_questions,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.error(
+            "Screening re-evaluation failed",
+            extra={"interview_session_id": str(session.id), "error": str(exc)},
+        )
+        raise ScreeningReEvaluationError(
+            "Re-evaluation failed: the AI service did not respond. Nothing was changed; try again."
+        ) from exc
+
+    new_evaluations = payload.get("evaluations") if isinstance(payload, dict) else None
+    new_summary = payload.get("final_summary") if isinstance(payload, dict) else None
+    if not isinstance(new_evaluations, list) or not isinstance(new_summary, dict):
+        raise ScreeningReEvaluationError(
+            "Re-evaluation failed: the AI service returned an invalid result. Nothing was changed."
+        )
+
+    previous_summary = result.get("final_summary") if isinstance(result.get("final_summary"), dict) else {}
+    if "original" not in result:
+        result["original"] = {
+            "evaluations": _evaluations_list(result),
+            "final_summary": previous_summary,
+        }
+    history = result.get("re_evaluations") if isinstance(result.get("re_evaluations"), list) else []
+    history.append(
+        {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "by": str(actor_id),
+            # Shown in the evaluation history; kept as of the re-evaluation.
+            "by_name": actor_name,
+            "previous_overall_score": previous_summary.get("overall_score"),
+            "overall_score": new_summary.get("overall_score"),
+            "edited_question_ids": edited,
+        }
+    )
+    result["re_evaluations"] = history
+    result["evaluations"] = new_evaluations
+    result["final_summary"] = new_summary
+    analysis.analysis_result = result
+    db.add(analysis)
+    db.commit()
+    db.refresh(analysis)
+    return analysis

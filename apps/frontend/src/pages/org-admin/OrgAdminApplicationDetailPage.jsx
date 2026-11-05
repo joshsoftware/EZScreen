@@ -384,6 +384,8 @@ export function OrgAdminApplicationDetailPage() {
       <InterviewAnalysisPanel
         visible={showAnalysis}
         attemptNumber={interviewSession?.attempt_number}
+        sessionId={sessionId}
+        onReEvaluated={() => (sessionId ? invalidateInterviewAnalysis(sessionId) : undefined)}
         analysis={interviewAnalysis}
         loading={Boolean(sessionId) && showAnalysis && analysisLoading}
         error={

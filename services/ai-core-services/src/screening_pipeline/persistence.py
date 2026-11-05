@@ -114,14 +114,34 @@ async def persist_interview_close(
             )
         await api_client.save_interview_metadata(transcript_log)
         return
-        
+
+    final_summary_payload = await build_final_summary(
+        llm_client, evaluations, termination_reason=termination_reason
+    )
+    await api_client.save_final_summary(final_summary_payload)
+    await api_client.save_interview_metadata(transcript_log)
+
+
+async def build_final_summary(
+    llm_client: OllamaClient,
+    evaluations: List[Dict[str, Any]],
+    *,
+    termination_reason: str = "questions_completed",
+) -> Dict[str, Any]:
+    """Weighted scores plus the qualitative summary for scored evaluations.
+
+    Shared by the live interview close and HR's re-evaluation, so both
+    produce the same numbers from the same answers.
+    """
     summary_math = calculate_final_weighted_score(evaluations)
-    
+
     termination_context = "The interview completed successfully after asking the designated questions."
     if termination_reason == "fatal_failure":
         termination_context = "CRITICAL: The interview was terminated early because the candidate failed to recover their score across multiple categories. They struggled significantly."
     elif termination_reason == "candidate_silence":
         termination_context = "CRITICAL: The interview was terminated early because the candidate became completely unresponsive and stopped answering."
+    elif termination_reason == "re_evaluation":
+        termination_context = "HR re-scored the saved answers after the interview. Do not speculate about how or why the interview ended."
 
     prompt = FINAL_QUALITATIVE_SUMMARY_PROMPT.format(
         category_scores=json.dumps(summary_math["category_averages"], indent=2),
@@ -144,7 +164,7 @@ async def persist_interview_close(
 
     formatted_summary = "\n".join(f"• {pt}" for pt in interview_summary_points) if isinstance(interview_summary_points, list) else str(interview_summary_points)
     
-    final_summary_payload = {
+    return {
         "raw_must_have_score": summary_math["raw_scores"].get("must_have_matched", 0.0),
         "raw_domain_expertise_score": summary_math["raw_scores"].get("experience_domain", 0.0),
         "raw_good_to_have_score": summary_math["raw_scores"].get("good_to_have", 0.0),
@@ -154,6 +174,3 @@ async def persist_interview_close(
         "overall_score": summary_math["overall_score"],
         "final_recommendation": formatted_summary
     }
-    
-    await api_client.save_final_summary(final_summary_payload)
-    await api_client.save_interview_metadata(transcript_log)

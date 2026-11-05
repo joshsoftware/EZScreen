@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import { Alert } from '../../components/ui/Alert'
 import { Badge } from '../../components/ui/Badge'
+import { Button } from '../../components/ui/Button'
 import { Panel } from '../../components/ui/PageHeader'
 import { Skeleton } from '../../components/ui/Skeleton'
 import { cn } from '../../lib/cn'
+import { formatDateTime } from './jobFields'
+import { ReEvaluateScreeningModal } from './ReEvaluateScreeningModal'
 
 function asNumber(value) {
   const n = Number(value)
@@ -463,6 +466,62 @@ function Scorecard({
   )
 }
 
+function scoreText(value) {
+  const n = asNumber(value)
+  return n == null ? '—' : `${n.toFixed(1)}/10`
+}
+
+/**
+ * Every scoring of this screening, oldest first: the bot's original result,
+ * then each HR re-evaluation with who, when, and the score it produced.
+ */
+function EvaluationHistory({ reEvaluations }) {
+  const rows = [
+    {
+      key: 'original',
+      label: 'Original screening',
+      detail: 'Scored by the AI interviewer',
+      score: reEvaluations[0]?.previous_overall_score,
+    },
+    ...reEvaluations.map((run, index) => {
+      const edited = Array.isArray(run.edited_question_ids) ? run.edited_question_ids : []
+      return {
+        key: `${run.at}-${index}`,
+        label: `Re-evaluation ${index + 1}`,
+        detail: [
+          `by ${run.by_name || 'HR'} on ${formatDateTime(run.at)}`,
+          `before: ${scoreText(run.previous_overall_score)}`,
+          edited.length ? `corrected Q${edited.join(', Q')}` : 'no answers corrected',
+        ].join(' · '),
+        score: run.overall_score,
+      }
+    }),
+  ]
+
+  return (
+    <SectionToggle title="Evaluation history" count={rows.length} defaultOpen>
+      <ol className="rounded-xl border border-outline-variant/70 divide-y divide-outline-variant/50">
+        {rows.map((row, index) => (
+          <li key={row.key} className="flex flex-wrap items-baseline justify-between gap-xs px-md py-sm">
+            <div className="min-w-0">
+              <p className="text-body-sm font-medium text-on-surface">
+                {row.label}
+                {index === rows.length - 1 ? (
+                  <span className="ml-xs text-label-md font-normal text-primary">· current</span>
+                ) : null}
+              </p>
+              <p className="text-label-md text-on-surface-variant">{row.detail}</p>
+            </div>
+            <span className="text-body-sm font-medium text-on-surface tabular-nums">
+              {scoreText(row.score)}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </SectionToggle>
+  )
+}
+
 /**
  * Post-screening AI analysis report for org-admin applicant detail.
  * Layout: sticky scorecard (left) + evidence (right) on lg+.
@@ -473,7 +532,10 @@ export function InterviewAnalysisPanel({
   error = null,
   visible = false,
   attemptNumber = 1,
+  sessionId = null,
+  onReEvaluated,
 }) {
+  const [showReEvaluate, setShowReEvaluate] = useState(false)
   if (!visible && !loading) return null
   // After a reschedule, name the attempt so it lines up with "Earlier screenings".
   const panelTitle =
@@ -533,9 +595,27 @@ export function InterviewAnalysisPanel({
     { label: 'Skill gaps', value: asNumber(summary?.raw_lacking_skill_score) },
   ].filter((item) => item.value != null)
 
+  const reEvaluations = Array.isArray(analysis.re_evaluations) ? analysis.re_evaluations : []
+  const canReEvaluate = Boolean(sessionId) && evaluations.length > 0
+
   return (
-    <Panel title={panelTitle}>
+    <Panel
+      title={panelTitle}
+      actions={
+        canReEvaluate ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="refresh"
+            onClick={() => setShowReEvaluate(true)}
+          >
+            Re-evaluate
+          </Button>
+        ) : null
+      }
+    >
       <div className="space-y-md">
+        {reEvaluations.length > 0 ? <EvaluationHistory reEvaluations={reEvaluations} /> : null}
         <FinalSummarySection
           summary={summary}
           overall={overall}
@@ -590,6 +670,15 @@ export function InterviewAnalysisPanel({
           </SectionToggle>
         ) : null}
       </div>
+      {canReEvaluate ? (
+        <ReEvaluateScreeningModal
+          open={showReEvaluate}
+          onClose={() => setShowReEvaluate(false)}
+          sessionId={sessionId}
+          evaluations={evaluations}
+          onDone={onReEvaluated}
+        />
+      ) : null}
     </Panel>
   )
 }

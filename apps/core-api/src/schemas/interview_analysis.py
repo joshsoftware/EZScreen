@@ -33,7 +33,22 @@ class InterviewAnalysisResponse(BaseModel):
     completed_at: datetime | None = None
     gmeet_link: str | None = None
     questions_planned: int = 0
+    # HR re-scored the saved answers: newest last.
+    re_evaluations: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
+
+
+class CorrectedScreeningAnswer(BaseModel):
+    """HR's correction of an answer the speech-to-text misheard."""
+
+    question_id: int = Field(..., ge=1)
+    candidate_answer: str | None = Field(default=None, max_length=8000)
+    # By position; None keeps that follow-up answer as saved.
+    follow_up_answers: list[str | None] | None = None
+
+
+class ReEvaluateScreeningRequest(BaseModel):
+    answers: list[CorrectedScreeningAnswer] = Field(default_factory=list)
 
 
 class QaFollowUpItem(BaseModel):
