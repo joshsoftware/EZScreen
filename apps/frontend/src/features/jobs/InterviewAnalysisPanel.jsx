@@ -466,6 +466,62 @@ function Scorecard({
   )
 }
 
+function scoreText(value) {
+  const n = asNumber(value)
+  return n == null ? '—' : `${n.toFixed(1)}/10`
+}
+
+/**
+ * Every scoring of this screening, oldest first: the bot's original result,
+ * then each HR re-evaluation with who, when, and the score it produced.
+ */
+function EvaluationHistory({ reEvaluations }) {
+  const rows = [
+    {
+      key: 'original',
+      label: 'Original screening',
+      detail: 'Scored by the AI interviewer',
+      score: reEvaluations[0]?.previous_overall_score,
+    },
+    ...reEvaluations.map((run, index) => {
+      const edited = Array.isArray(run.edited_question_ids) ? run.edited_question_ids : []
+      return {
+        key: `${run.at}-${index}`,
+        label: `Re-evaluation ${index + 1}`,
+        detail: [
+          `by ${run.by_name || 'HR'} on ${formatDateTime(run.at)}`,
+          `before: ${scoreText(run.previous_overall_score)}`,
+          edited.length ? `corrected Q${edited.join(', Q')}` : 'no answers corrected',
+        ].join(' · '),
+        score: run.overall_score,
+      }
+    }),
+  ]
+
+  return (
+    <SectionToggle title="Evaluation history" count={rows.length} defaultOpen>
+      <ol className="rounded-xl border border-outline-variant/70 divide-y divide-outline-variant/50">
+        {rows.map((row, index) => (
+          <li key={row.key} className="flex flex-wrap items-baseline justify-between gap-xs px-md py-sm">
+            <div className="min-w-0">
+              <p className="text-body-sm font-medium text-on-surface">
+                {row.label}
+                {index === rows.length - 1 ? (
+                  <span className="ml-xs text-label-md font-normal text-primary">· current</span>
+                ) : null}
+              </p>
+              <p className="text-label-md text-on-surface-variant">{row.detail}</p>
+            </div>
+            <span className="text-body-sm font-medium text-on-surface tabular-nums">
+              {scoreText(row.score)}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </SectionToggle>
+  )
+}
+
 /**
  * Post-screening AI analysis report for org-admin applicant detail.
  * Layout: sticky scorecard (left) + evidence (right) on lg+.
@@ -540,8 +596,6 @@ export function InterviewAnalysisPanel({
   ].filter((item) => item.value != null)
 
   const reEvaluations = Array.isArray(analysis.re_evaluations) ? analysis.re_evaluations : []
-  const lastReEvaluation = reEvaluations[reEvaluations.length - 1]
-  const previousScore = asNumber(lastReEvaluation?.previous_overall_score)
   const canReEvaluate = Boolean(sessionId) && evaluations.length > 0
 
   return (
@@ -561,15 +615,7 @@ export function InterviewAnalysisPanel({
       }
     >
       <div className="space-y-md">
-        {lastReEvaluation ? (
-          <p className="text-body-sm text-on-surface-variant">
-            Re-evaluated by HR on {formatDateTime(lastReEvaluation.at)}
-            {previousScore != null ? ` · score before: ${previousScore.toFixed(1)}/10` : ''}
-            {lastReEvaluation.edited_question_ids?.length
-              ? ` · corrected answers: Q${lastReEvaluation.edited_question_ids.join(', Q')}`
-              : ''}
-          </p>
-        ) : null}
+        {reEvaluations.length > 0 ? <EvaluationHistory reEvaluations={reEvaluations} /> : null}
         <FinalSummarySection
           summary={summary}
           overall={overall}

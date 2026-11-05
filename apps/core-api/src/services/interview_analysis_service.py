@@ -355,6 +355,7 @@ def re_evaluate_screening(
     body: ReEvaluateScreeningRequest,
     *,
     actor_id: UUID,
+    actor_name: str | None = None,
 ) -> InterviewAnalysis:
     """Re-score the saved answers (after HR corrections) the way the live bot
     scores them, and replace the evaluations and final summary.
@@ -408,6 +409,8 @@ def re_evaluate_screening(
         {
             "at": datetime.now(timezone.utc).isoformat(),
             "by": str(actor_id),
+            # Shown in the evaluation history; kept as of the re-evaluation.
+            "by_name": actor_name,
             "previous_overall_score": previous_summary.get("overall_score"),
             "overall_score": new_summary.get("overall_score"),
             "edited_question_ids": edited,

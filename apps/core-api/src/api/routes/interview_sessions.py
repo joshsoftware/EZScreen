@@ -375,8 +375,16 @@ def re_evaluate_interview_analysis(
         )
     analysis_session, analysis = loaded
     try:
+        actor_name = " ".join(
+            part for part in (current_user.first_name, current_user.last_name) if part
+        ) or current_user.email
         analysis = interview_analysis_service.re_evaluate_screening(
-            db, analysis_session, analysis, body, actor_id=current_user.id
+            db,
+            analysis_session,
+            analysis,
+            body,
+            actor_id=current_user.id,
+            actor_name=actor_name,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
