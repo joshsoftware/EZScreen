@@ -18,6 +18,7 @@ from src.screening_pipeline.persistence import (
     persist_qa_and_evaluation,
 )
 from src.screening_pipeline.candidate_presence import forget_session, is_candidate_present
+from src.screening_pipeline.finished_interviews import interview_finished, mark_interview_finished
 from src.screening_pipeline.prompts import (
     ANSWER_ACKNOWLEDGEMENT_TEXT,
     CANDIDATE_JOIN_WAIT_SECONDS,
@@ -164,6 +165,16 @@ class PipecatInterviewPolicy:
             )
             return
 
+        if interview_finished(self._session_bot_id()):
+            # Same reconnect, but the ending runtime hasn't written its
+            # status yet. Staying idle keeps api_client unset, so this runtime
+            # never saves a summary or status (Bugs 44-46).
+            logger.info(
+                "Interview for this bot already ended in this process; not starting again",
+                extra={"session_id": self.session_id},
+            )
+            return
+
         if self.api_client is None:
             self.api_client = SessionApiClient(session_id=str(self.session.id))
 
@@ -307,6 +318,9 @@ class PipecatInterviewPolicy:
             self._cancel_filler_schedule()
             self._cancel_tts_warm()
             self._cancel_candidate_wait()
+            # Before any slow work: a runtime Attendee starts for this bot from
+            # here on must not run (or end) the interview a second time.
+            mark_interview_finished(self._session_bot_id())
             # The session row is reused if HR reschedules; start that attempt fresh.
             forget_session(self.session_id)
             self._save_question_awaiting_follow_up()
@@ -391,6 +405,7 @@ class PipecatInterviewPolicy:
             self._cancel_filler_schedule()
             self._cancel_tts_warm()
             self._cancel_candidate_wait()
+            mark_interview_finished(self._session_bot_id())
             # The session row is reused if HR reschedules; start that attempt fresh.
             forget_session(self.session_id)
         logger.info("Interview aborted for reschedule", extra={"session_id": self.session_id})
@@ -426,6 +441,7 @@ class PipecatInterviewPolicy:
                 self.session = await interview_session_repo.get_by_id(self.session_id)
             if self.session is None:
                 return
+            mark_interview_finished(self._session_bot_id())
             if getattr(self.session, "status", None) == "failed":
                 # Attendee reconnects while the bot is already being removed.
                 return
@@ -1168,11 +1184,15 @@ class PipecatInterviewPolicy:
         reason = getattr(self, "termination_reason", "questions_completed")
         await self.end_interview(reason or "questions_completed", leave_bot=True)
 
-    async def _leave_bot_after_close(self):
-        """Ask Attendee to leave after the closing reply has been persisted."""
+    def _session_bot_id(self) -> Optional[str]:
         metadata = getattr(self.session, "interview_metadata", None)
         bot_id = metadata.get("bot_id") if isinstance(metadata, dict) else None
-        if not isinstance(bot_id, str) or not bot_id.strip():
+        return bot_id.strip() if isinstance(bot_id, str) and bot_id.strip() else None
+
+    async def _leave_bot_after_close(self):
+        """Ask Attendee to leave after the closing reply has been persisted."""
+        bot_id = self._session_bot_id()
+        if bot_id is None:
             logger.warning(
                 "Cannot leave meeting because the session has no bot_id",
                 extra={"session_id": self.session_id},

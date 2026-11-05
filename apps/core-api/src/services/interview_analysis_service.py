@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from typing import Any
 from uuid import UUID
@@ -35,6 +36,8 @@ __all__ = [
     "save_conversation_transcript",
 ]
 
+logger = logging.getLogger(__name__)
+
 
 def _question_answer_list(raw: Any) -> list[dict[str, Any]]:
     if isinstance(raw, list):
@@ -53,6 +56,30 @@ def _evaluations_list(analysis_result: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(evaluations, list):
         return [item for item in evaluations if isinstance(item, dict)]
     return []
+
+
+def _score(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _replaces_scored_summary_with_empty(
+    analysis_result: dict[str, Any],
+    incoming: dict[str, Any],
+) -> bool:
+    """True when a zero "nothing was scored" summary would overwrite a real
+    one while scored answers exist. A legitimately all-zero interview still
+    saves: there the stored summary is zero too (or absent)."""
+    if _score(incoming.get("total_score")) > 0 or _score(incoming.get("overall_score")) > 0:
+        return False
+    if not _evaluations_list(analysis_result):
+        return False
+    existing = analysis_result.get("final_summary")
+    if not isinstance(existing, dict):
+        return False
+    return _score(existing.get("total_score")) > 0 or _score(existing.get("overall_score")) > 0
 
 
 def _upsert_by_question_id(
@@ -238,6 +265,14 @@ def save_evaluation_summary(
     analysis = _get_or_create_analysis(db, session)
     result = _analysis_result_dict(analysis.analysis_result)
     summary = body.model_dump(mode="json")
+    if _replaces_scored_summary_with_empty(result, summary):
+        # A second bot runtime that never heard the candidate saved "no
+        # answers were scored" (0.0) over the real summary (Bugs 44-46).
+        logger.warning(
+            "Ignored an empty screening summary over a scored one",
+            extra={"interview_session_id": str(session.id)},
+        )
+        return
     result["final_summary"] = summary
     analysis.analysis_result = result
     db.add(analysis)
