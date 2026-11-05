@@ -2,7 +2,7 @@ from typing import Optional
 from sqlalchemy import select
 from src.core.logger import logger
 from src.db.connection import AsyncSessionLocal
-from src.db.models import DBInterviewSession
+from src.db.models import DBInterviewAnalysis, DBInterviewSession
 from src.meeting_bot.schemas import InterviewSessionDetailResponse
 
 
@@ -36,6 +36,31 @@ class InterviewSessionRepository:
                 extra={"session_id": session_id, "error": str(err)}
             )
             return None
+
+    async def get_saved_evaluations(self, session_id: str) -> list[dict]:
+        """Per-question evaluations core-api has stored for this session.
+
+        Empty when there are none or the read fails: the caller then starts
+        the interview from the beginning, as before.
+        """
+        try:
+            analysis_result = await self._scalar_one_or_none(
+                select(DBInterviewAnalysis.analysis_result).where(
+                    DBInterviewAnalysis.interview_session_id == session_id
+                )
+            )
+        except Exception as err:
+            logger.warning(
+                "Repository failed to fetch saved evaluations",
+                extra={"session_id": session_id, "error": str(err)},
+            )
+            return []
+        evaluations = (
+            analysis_result.get("evaluations") if isinstance(analysis_result, dict) else None
+        )
+        if not isinstance(evaluations, list):
+            return []
+        return [item for item in evaluations if isinstance(item, dict)]
 
     async def get_by_bot_id(self, bot_id: str) -> Optional[InterviewSessionDetailResponse]:
         """Fetch session by bot_id inside interview_metadata."""
