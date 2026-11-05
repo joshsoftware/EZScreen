@@ -119,6 +119,14 @@ export function getInterviewAnalysisRequest(sessionId) {
   return apiRequest(`/api/v1/interview-sessions/${sessionId}/analysis`)
 }
 
+/** Re-score the screening's saved answers; `answers` carries HR's corrections. */
+export function reEvaluateScreeningRequest(sessionId, answers = []) {
+  return apiRequest(`/api/v1/interview-sessions/${sessionId}/analysis/re-evaluate`, {
+    method: 'POST',
+    body: { answers },
+  })
+}
+
 export function rescheduleInterviewSessionRequest(sessionId, body) {
   return apiRequest(`/api/v1/interview-sessions/${sessionId}/reschedule`, {
     method: 'POST',

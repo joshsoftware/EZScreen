@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import { Alert } from '../../components/ui/Alert'
 import { Badge } from '../../components/ui/Badge'
+import { Button } from '../../components/ui/Button'
 import { Panel } from '../../components/ui/PageHeader'
 import { Skeleton } from '../../components/ui/Skeleton'
 import { cn } from '../../lib/cn'
+import { formatDateTime } from './jobFields'
+import { ReEvaluateScreeningModal } from './ReEvaluateScreeningModal'
 
 function asNumber(value) {
   const n = Number(value)
@@ -473,7 +476,10 @@ export function InterviewAnalysisPanel({
   error = null,
   visible = false,
   attemptNumber = 1,
+  sessionId = null,
+  onReEvaluated,
 }) {
+  const [showReEvaluate, setShowReEvaluate] = useState(false)
   if (!visible && !loading) return null
   // After a reschedule, name the attempt so it lines up with "Earlier screenings".
   const panelTitle =
@@ -533,9 +539,37 @@ export function InterviewAnalysisPanel({
     { label: 'Skill gaps', value: asNumber(summary?.raw_lacking_skill_score) },
   ].filter((item) => item.value != null)
 
+  const reEvaluations = Array.isArray(analysis.re_evaluations) ? analysis.re_evaluations : []
+  const lastReEvaluation = reEvaluations[reEvaluations.length - 1]
+  const previousScore = asNumber(lastReEvaluation?.previous_overall_score)
+  const canReEvaluate = Boolean(sessionId) && evaluations.length > 0
+
   return (
-    <Panel title={panelTitle}>
+    <Panel
+      title={panelTitle}
+      actions={
+        canReEvaluate ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="refresh"
+            onClick={() => setShowReEvaluate(true)}
+          >
+            Re-evaluate
+          </Button>
+        ) : null
+      }
+    >
       <div className="space-y-md">
+        {lastReEvaluation ? (
+          <p className="text-body-sm text-on-surface-variant">
+            Re-evaluated by HR on {formatDateTime(lastReEvaluation.at)}
+            {previousScore != null ? ` · score before: ${previousScore.toFixed(1)}/10` : ''}
+            {lastReEvaluation.edited_question_ids?.length
+              ? ` · corrected answers: Q${lastReEvaluation.edited_question_ids.join(', Q')}`
+              : ''}
+          </p>
+        ) : null}
         <FinalSummarySection
           summary={summary}
           overall={overall}
@@ -590,6 +624,15 @@ export function InterviewAnalysisPanel({
           </SectionToggle>
         ) : null}
       </div>
+      {canReEvaluate ? (
+        <ReEvaluateScreeningModal
+          open={showReEvaluate}
+          onClose={() => setShowReEvaluate(false)}
+          sessionId={sessionId}
+          evaluations={evaluations}
+          onDone={onReEvaluated}
+        />
+      ) : null}
     </Panel>
   )
 }

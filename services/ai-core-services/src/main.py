@@ -4,6 +4,7 @@ from src.core.config import settings
 from src.api.v1 import parsing
 from src.api.v1 import matching
 from src.api.v1 import question_generation
+from src.api.v1 import screening_re_evaluation
 from src.api.v1.meeting_bot import router as meeting_bot_router
 from src.screening_pipeline.webhook_handler import router as webhook_router
 from src.screening_pipeline.audio_websocket import router as websocket_router
@@ -85,6 +86,7 @@ def health_check():
 app.include_router(parsing.router, prefix="/internal/v1/parse")
 app.include_router(matching.router, prefix="/internal/v1/match")
 app.include_router(question_generation.router, prefix="/internal/v1/screening/questions")
+app.include_router(screening_re_evaluation.router, prefix="/internal/v1/screening")
 app.include_router(meeting_bot_router)
 app.include_router(webhook_router)
 app.include_router(websocket_router)
