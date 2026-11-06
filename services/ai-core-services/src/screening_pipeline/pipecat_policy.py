@@ -295,6 +295,8 @@ class PipecatInterviewPolicy:
                 self.analysis_evaluations,
                 self.transcript_log,
                 termination_reason=reason,
+                # Questions planned but never asked score 0.
+                planned_questions=getattr(self, "questions", None),
             )
         except Exception as err:
             logger.error(

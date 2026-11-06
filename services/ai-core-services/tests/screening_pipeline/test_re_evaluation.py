@@ -101,3 +101,26 @@ async def test_empty_or_non_answers_score_zero():
     assert evaluate.await_count == 1  # the empty answer never reaches the AI
     assert [e["score"] for e in result["evaluations"]] == [0, 0]
     assert result["evaluations"][1]["keywords_missing"] == QUESTIONS[0]["expected_keywords"]
+
+
+@pytest.mark.asyncio
+async def test_only_corrected_answers_are_marked_again():
+    """Re-marking unchanged text moved a borderline answer from 4 to 3."""
+    evaluate = AsyncMock(return_value=_scored(7))
+    saved = [
+        {"question_id": 1, "question": "HashMap vs ConcurrentHashMap?", "candidate_answer": "kept", "score": 4},
+        {"question_id": 2, "question": "HashMap vs ConcurrentHashMap?", "candidate_answer": "corrected", "score": 1},
+    ]
+    summary = {"overall_score": 5.0}
+    with patch(
+        "src.screening_pipeline.re_evaluation.AnswerEvaluator.classify_and_evaluate", evaluate
+    ), patch(
+        "src.screening_pipeline.re_evaluation.build_final_summary", AsyncMock(return_value=summary)
+    ) as build:
+        result = await re_evaluate_screening(MagicMock(), saved, QUESTIONS, rescore_question_ids=[2])
+
+    assert evaluate.await_count == 1
+    assert evaluate.await_args.kwargs["transcript"] == "corrected"
+    assert [e["score"] for e in result["evaluations"]] == [4, 7]
+    # Totals are still rebuilt from every question, with the plan.
+    assert build.await_args.kwargs["planned_questions"] == QUESTIONS

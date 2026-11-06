@@ -97,6 +97,7 @@ async def test_finalization_is_idempotent_for_disconnect_and_normal_close():
         policy.analysis_evaluations,
         policy.transcript_log,
         termination_reason="questions_completed",
+        planned_questions=policy.questions,
     )
     assert policy.is_finalized is True
 

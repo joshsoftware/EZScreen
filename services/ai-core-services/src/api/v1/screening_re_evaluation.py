@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -15,6 +15,9 @@ class ReEvaluateScreeningRequest(BaseModel):
     # analysis_result.evaluations as saved, with any answers HR corrected.
     evaluations: List[Dict[str, Any]] = Field(..., min_length=1)
     generated_questions: Any = None
+    # Questions whose answer HR corrected; only these are marked again.
+    # None (older callers) re-marks every question.
+    rescore_question_ids: Optional[List[int]] = None
 
 
 class ReEvaluateScreeningResponse(BaseModel):
@@ -30,5 +33,8 @@ async def re_evaluate_screening_endpoint(request: ReEvaluateScreeningRequest):
         extra={"session_id": request.interview_session_id, "questions": len(request.evaluations)},
     )
     return await re_evaluate_screening(
-        llm_client, request.evaluations, request.generated_questions
+        llm_client,
+        request.evaluations,
+        request.generated_questions,
+        request.rescore_question_ids,
     )

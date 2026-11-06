@@ -6,7 +6,7 @@ and backward recovery after downgrades.
 
 from typing import Any, Dict, List, Tuple, Optional
 
-from src.screening_pipeline.summary_calculator import _score
+from src.screening_pipeline.summary_calculator import topic_score
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 CHUNK_SIZE = 3            # Evaluate every N questions per category
@@ -30,75 +30,96 @@ def calculate_rolling_average(evaluations: List[Dict[str, Any]]) -> float:
 
     total_score = 0.0
     for evaluation in persisted_evaluations:
-        primary_score = _score(evaluation.get("score"))
-        follow_ups = evaluation.get("follow_ups", [])
-        first_follow_up = follow_ups[0] if isinstance(follow_ups, list) and follow_ups else None
-
-        if isinstance(first_follow_up, dict) and first_follow_up.get("score") is not None:
-            topic_score = (primary_score + _score(first_follow_up["score"])) / 2
-        else:
-            topic_score = primary_score
-
-        total_score += topic_score
+        total_score += topic_score(evaluation)
 
     return round(total_score / persisted_question_count, 1)
 
 
-def calculate_final_weighted_score(evaluations: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calculate the 50/20/20/10 weighted score based on category averages."""
-    categories = {
-        "must_have_matched": {"weight": 50, "total": 0.0, "count": 0},
-        "experience_domain": {"weight": 20, "total": 0.0, "count": 0},
-        "good_to_have": {"weight": 20, "total": 0.0, "count": 0},
-        "lacking_skill": {"weight": 10, "total": 0.0, "count": 0},
-    }
+# Points each category is worth out of 100 (agreed with the team, Nov 2026).
+CATEGORY_WEIGHTS = {
+    "must_have_matched": 60,
+    "experience_domain": 20,
+    "good_to_have": 10,
+    "lacking_skill": 10,
+}
 
-    # Sum up topic scores by category
+
+def _planned_counts(planned_questions: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str, int]]:
+    """Planned questions per category, or None when the plan is unknown."""
+    if not planned_questions:
+        return None
+    counts = {cat: 0 for cat in CATEGORY_WEIGHTS}
+    for question in planned_questions:
+        if not isinstance(question, dict):
+            continue
+        category = question.get("category", "must_have_matched")
+        if category in counts:
+            counts[category] += 1
+    return counts
+
+
+def calculate_final_weighted_score(
+    evaluations: List[Dict[str, Any]],
+    planned_questions: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Weighted score: Must-have 60, Domain 20, Good to have 10, Skill gaps 10.
+
+    Every planned question counts: one that was never asked (the screening
+    ended early) scores 0, so a category's average is taken over all its
+    planned questions. Each category earns (average / 10) x its weight. A
+    category the screening had no questions for at all is left out of the
+    maximum, since it could not be asked. Without a plan, each category is
+    averaged over its answered questions.
+    """
+    totals = {cat: {"total": 0.0, "count": 0} for cat in CATEGORY_WEIGHTS}
+
     for evaluation in evaluations:
         category = evaluation.get("category")
-        if category not in categories:
+        if category not in totals:
             continue
 
-        primary_score = _score(evaluation.get("score"))
-        follow_ups = evaluation.get("follow_ups", [])
-        first_follow_up = follow_ups[0] if isinstance(follow_ups, list) and follow_ups else None
+        totals[category]["total"] += topic_score(evaluation)
+        totals[category]["count"] += 1
 
-        if isinstance(first_follow_up, dict) and first_follow_up.get("score") is not None:
-            topic_score = (primary_score + _score(first_follow_up["score"])) / 2
-        else:
-            topic_score = primary_score
+    planned = _planned_counts(planned_questions)
+    question_counts = {
+        cat: {
+            "answered": data["count"],
+            # Never fewer than answered (a plan may be incomplete).
+            "planned": max(planned[cat], data["count"]) if planned else data["count"],
+        }
+        for cat, data in totals.items()
+    }
+    asked = [cat for cat in CATEGORY_WEIGHTS if totals[cat]["count"] > 0]
+    available = [cat for cat in CATEGORY_WEIGHTS if question_counts[cat]["planned"] > 0]
 
-        categories[category]["total"] += topic_score
-        categories[category]["count"] += 1
+    # Category averages (0-10) over all planned questions, unasked ones as 0.
+    category_avgs = {
+        cat: (totals[cat]["total"] / question_counts[cat]["planned"])
+        if question_counts[cat]["planned"]
+        else 0.0
+        for cat in CATEGORY_WEIGHTS
+    }
 
-    # Calculate category averages (0-10)
-    category_avgs = {}
-    for cat, data in categories.items():
-        if data["count"] > 0:
-            category_avgs[cat] = data["total"] / data["count"]
-        else:
-            category_avgs[cat] = 0.0
-
-    # Redistribute weights for unasked categories to must_have_matched
-    effective_weights = {cat: data["weight"] for cat, data in categories.items()}
-    for cat in ["experience_domain", "good_to_have", "lacking_skill"]:
-        if categories[cat]["count"] == 0:
-            effective_weights["must_have_matched"] += effective_weights[cat]
-            effective_weights[cat] = 0
-
-    # Calculate raw scaled scores (out of 100)
-    raw_scores = {}
-    for cat in categories:
-        # avg (0-10) / 10 = (0-1.0) * weight
-        raw_scores[cat] = (category_avgs[cat] / 10.0) * effective_weights[cat]
+    # Points earned per category, out of its weight.
+    raw_scores = {
+        cat: (category_avgs[cat] / 10.0) * CATEGORY_WEIGHTS[cat] for cat in CATEGORY_WEIGHTS
+    }
 
     total_raw_score = sum(raw_scores.values())
-    overall_score = round(total_raw_score / 10.0, 1)
+    max_possible_score = sum(CATEGORY_WEIGHTS[cat] for cat in available)
+    overall_score = (
+        round(total_raw_score / max_possible_score * 10.0, 1) if max_possible_score else 0.0
+    )
 
     return {
         "category_averages": {cat: round(avg, 1) for cat, avg in category_avgs.items()},
         "raw_scores": {cat: round(score, 1) for cat, score in raw_scores.items()},
+        "category_max_scores": dict(CATEGORY_WEIGHTS),
+        "categories_asked": asked,
+        "category_question_counts": question_counts,
         "total_raw_score": round(total_raw_score, 1),
+        "max_possible_score": max_possible_score,
         "overall_score": overall_score,
     }
 

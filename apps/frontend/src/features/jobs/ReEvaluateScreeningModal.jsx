@@ -93,9 +93,10 @@ export function ReEvaluateScreeningModal({ open, onClose, sessionId, evaluations
     <Modal open={open} onClose={() => !submitting && onClose()} title="Re-evaluate screening">
       <div className="flex min-h-0 flex-col gap-md">
         <p className="text-body-sm text-on-surface-variant">
-          Every answer is scored again with the same AI scoring as the live screening, and the
-          total and summary are recalculated. If the transcript misheard an answer, correct it
-          below first (check the recording). The original scores are kept.
+          The total and summary are recalculated with the current scoring rules. If the
+          transcript misheard an answer, correct it below (check the recording): only answers
+          you change are marked again by the AI; the others keep their marks. The original
+          result is kept in the evaluation history.
         </p>
         <div className="min-h-0 space-y-md overflow-y-auto pr-xs" style={{ maxHeight: '50vh' }}>
           {drafts.map((draft, index) => (

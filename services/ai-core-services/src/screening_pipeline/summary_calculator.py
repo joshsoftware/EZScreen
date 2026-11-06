@@ -15,6 +15,24 @@ def _score(value: Any) -> float:
         return 0.0
 
 
+def topic_score(evaluation: Dict[str, Any]) -> float:
+    """A question's score with its follow-up: the higher of the two.
+
+    A follow-up is asked only after a weak main answer, about the keywords it
+    missed: a second chance. A question scores the better of its main answer
+    and its best follow-up, so a failed follow-up never lowers it and a good
+    one counts in full (not averaged).
+    """
+    primary_score = _score(evaluation.get("score"))
+    follow_ups = evaluation.get("follow_ups")
+    follow_up_scores = [
+        _score(fu["score"])
+        for fu in follow_ups
+        if isinstance(fu, dict) and fu.get("score") is not None
+    ] if isinstance(follow_ups, list) else []
+    return max([primary_score, *follow_up_scores])
+
+
 def compute_final_summary(
     evaluations: List[Dict[str, Any]],
     *,
@@ -33,14 +51,7 @@ def compute_final_summary(
 
     total_score = 0.0
     for evaluation in persisted_evaluations:
-        primary_score = _score(evaluation.get("score"))
-        follow_ups = evaluation.get("follow_ups", [])
-        first_follow_up = follow_ups[0] if isinstance(follow_ups, list) and follow_ups else None
-        if isinstance(first_follow_up, dict) and first_follow_up.get("score") is not None:
-            topic_score = (primary_score + _score(first_follow_up["score"])) / 2
-        else:
-            topic_score = primary_score
-        total_score += topic_score
+        total_score += topic_score(evaluation)
 
     max_possible_score = persisted_question_count * 10
     overall_score = round((total_score / max_possible_score) * 10, 1)

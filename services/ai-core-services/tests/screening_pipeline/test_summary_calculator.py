@@ -48,9 +48,25 @@ def test_compute_final_summary_counts_only_persisted_questions_and_zero_scores()
 
     result = compute_final_summary(evaluations)
 
+    # Each question counts as max(main, follow-up):
+    # 6 + 4 + 0 + 7 + 6 + 0 + 6 + 0 + 0 + 6 + 0 + 0 + 0 + 0 = 35 of 140
     assert result == {
-        "total_score": 25.5,
+        "total_score": 35.0,
         "max_possible_score": 140,
-        "overall_score": 1.8,
+        "overall_score": 2.5,
         "final_recommendation": "reject",
     }
+
+
+def test_question_counts_as_the_higher_of_main_answer_and_follow_up():
+    from src.screening_pipeline.summary_calculator import topic_score
+
+    # A failed follow-up keeps the main answer's score (was averaged to 1.5).
+    assert topic_score({"score": 3, "follow_ups": [{"score": 0}]}) == 3.0
+    # A good follow-up counts in full (not averaged).
+    assert topic_score({"score": 3, "follow_ups": [{"score": 8}]}) == 8.0
+    # No follow-up, or an unscored one: the main answer stands.
+    assert topic_score({"score": 6}) == 6.0
+    assert topic_score({"score": 6, "follow_ups": [{"follow_up_answer": "x"}]}) == 6.0
+    # More than one follow-up: the best one counts.
+    assert topic_score({"score": 2, "follow_ups": [{"score": 4}, {"score": 8}]}) == 8.0

@@ -97,6 +97,12 @@ class SaveEvaluationSummaryRequest(BaseModel):
     max_possible_score: float = Field(..., gt=0)
     overall_score: float = Field(..., ge=0, le=10)
     final_recommendation: str
+    # Each category's maximum points (e.g. Must-have 60) and the categories
+    # that were asked; absent on summaries saved before the 60/20/10/10 split.
+    category_max_scores: dict[str, float] | None = None
+    categories_asked: list[str] | None = None
+    # Per category: {"planned": n, "answered": n}; unasked planned questions score 0.
+    category_question_counts: dict[str, dict[str, int]] | None = None
 
 
 class TranscriptFollowUpItem(BaseModel):

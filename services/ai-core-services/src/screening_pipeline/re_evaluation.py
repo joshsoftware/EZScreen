@@ -1,9 +1,10 @@
 """Re-score a finished screening from its saved answers (HR "Re-evaluate").
 
-Each answer goes through the same evaluator and evaluation builder the live
-interview uses, then the same weighted total and summary. HR may first
-correct an answer the speech-to-text misheard; the request then carries the
-corrected text.
+Answers HR corrected (the speech-to-text misheard them) are marked again
+with the same evaluator and evaluation builder the live interview uses; the
+others keep their marks, since re-marking unchanged text only adds drift.
+The weighted total and summary are then rebuilt from all of them with the
+current scoring rules.
 """
 
 from __future__ import annotations
@@ -128,24 +129,43 @@ async def _re_evaluate_one(
     )
 
 
+async def _keep(saved: Dict[str, Any]) -> Dict[str, Any]:
+    return dict(saved)
+
+
 async def re_evaluate_screening(
     llm_client: OllamaClient,
     saved_evaluations: List[Dict[str, Any]],
     generated_questions: Any,
+    rescore_question_ids: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
-    """New evaluations (same order and question ids) and the final summary."""
+    """New evaluations (same order and question ids) and the final summary.
+
+    Only questions in `rescore_question_ids` are marked again; None re-marks
+    every question.
+    """
     evaluator = AnswerEvaluator(llm_client)
     questions = coerce_questions_list(generated_questions)
+    rescore = None if rescore_question_ids is None else set(rescore_question_ids)
     evaluations = await asyncio.gather(
-        *(_re_evaluate_one(evaluator, saved, questions) for saved in saved_evaluations)
+        *(
+            _re_evaluate_one(evaluator, saved, questions)
+            if rescore is None or saved.get("question_id") in rescore
+            else _keep(saved)
+            for saved in saved_evaluations
+        )
     )
     final_summary = await build_final_summary(
-        llm_client, list(evaluations), termination_reason="re_evaluation"
+        llm_client,
+        list(evaluations),
+        termination_reason="re_evaluation",
+        planned_questions=questions,
     )
     logger.info(
         "Re-evaluated screening answers",
         extra={
             "questions": len(evaluations),
+            "re_marked": len(evaluations) if rescore is None else len(rescore),
             "overall_score": final_summary.get("overall_score"),
         },
     )

@@ -97,7 +97,9 @@ class AnswerEvaluator:
             res = await self.llm_client.openai_chat_generate(
                 prompt=prompt,
                 system=UNIFIED_SCREENING_SYSTEM,
-                temperature=0.2,
+                # No sampling randomness: the same answer should get the same
+                # mark (0.2 moved a borderline answer between 3 and 4).
+                temperature=0.0,
             )
             data = parse_llm_json(res.response)
             if not isinstance(data, dict):

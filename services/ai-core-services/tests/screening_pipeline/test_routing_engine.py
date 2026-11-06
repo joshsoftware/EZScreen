@@ -117,10 +117,10 @@ def test_rolling_average_simple():
 
 def test_rolling_average_with_follow_up():
     evals = [
-        {"score": 4, "follow_ups": [{"score": 8}]},  # topic avg = 6
-        {"score": 6, "follow_ups": []},                # topic avg = 6
+        {"score": 4, "follow_ups": [{"score": 8}]},  # topic = max(4, 8) = 8
+        {"score": 6, "follow_ups": []},                # topic = 6
     ]
-    assert calculate_rolling_average(evals) == 6.0
+    assert calculate_rolling_average(evals) == 7.0
 
 
 def test_rolling_average_ignores_non_dict():
@@ -396,7 +396,7 @@ def test_all_queues_empty_returns_completed():
 # ─── calculate_final_weighted_score Tests ─────────────────────────────────────
 
 def test_weighted_score_basic():
-    """Verify the 50/20/20/10 math."""
+    """Verify the 60/20/10/10 math when every category was asked."""
     evaluations = [
         {"category": "must_have_matched", "score": 8},
         {"category": "must_have_matched", "score": 6},
@@ -410,13 +410,26 @@ def test_weighted_score_basic():
     assert result["category_averages"]["experience_domain"] == 7.0
     assert result["category_averages"]["good_to_have"] == 5.0
     assert result["category_averages"]["lacking_skill"] == 4.0
-    # MH: 7/10*50=35, DOM: 7/10*20=14, GTH: 5/10*20=10, LACK: 4/10*10=4
-    assert result["total_raw_score"] == 63.0
-    assert result["overall_score"] == 6.3
+    # MH: 7/10*60=42, DOM: 7/10*20=14, GTH: 5/10*10=5, LACK: 4/10*10=4
+    assert result["raw_scores"] == {
+        "must_have_matched": 42.0,
+        "experience_domain": 14.0,
+        "good_to_have": 5.0,
+        "lacking_skill": 4.0,
+    }
+    assert result["total_raw_score"] == 65.0
+    assert result["max_possible_score"] == 100
+    assert result["overall_score"] == 6.5
+    assert result["category_max_scores"] == {
+        "must_have_matched": 60,
+        "experience_domain": 20,
+        "good_to_have": 10,
+        "lacking_skill": 10,
+    }
 
 
-def test_weighted_score_empty_category_redistributes():
-    """Unasked category weight goes to must_have."""
+def test_weighted_score_unasked_category_is_not_counted():
+    """An unasked category neither scores nor counts toward the maximum."""
     evaluations = [
         {"category": "must_have_matched", "score": 10},
         {"category": "good_to_have", "score": 10},
@@ -425,11 +438,40 @@ def test_weighted_score_empty_category_redistributes():
     ]
     result = calculate_final_weighted_score(evaluations)
 
-    # DOM weight (20) redistributed to MH (50→70)
     assert result["raw_scores"]["experience_domain"] == 0.0
-    # MH: 10/10*70=70, GTH: 10/10*20=20, LACK: 10/10*10=10
-    assert result["total_raw_score"] == 100.0
+    assert result["categories_asked"] == ["must_have_matched", "good_to_have", "lacking_skill"]
+    # MH 60 + GTH 10 + LACK 10 = 80 earned, out of the 80 those categories are worth
+    assert result["total_raw_score"] == 80.0
+    assert result["max_possible_score"] == 80
     assert result["overall_score"] == 10.0
+
+
+def test_weighted_score_only_must_have_asked():
+    """A screening that ended in Must-have is scored out of Must-have's 60."""
+    evaluations = [
+        {"category": "must_have_matched", "score": 9},
+        {"category": "must_have_matched", "score": 8},
+        {"category": "must_have_matched", "score": 8},
+    ]
+    result = calculate_final_weighted_score(evaluations)
+
+    # avg 8.33 -> 8.33/10*60 = 50 of 60 -> 50/60*10 = 8.3
+    assert result["raw_scores"]["must_have_matched"] == 50.0
+    assert result["max_possible_score"] == 60
+    assert result["overall_score"] == 8.3
+
+
+def test_weighted_score_better_skill_gap_answer_never_lowers_the_score():
+    base = [
+        {"category": "must_have_matched", "score": 8},
+        {"category": "experience_domain", "score": 8},
+        {"category": "good_to_have", "score": 8},
+    ]
+    overall = [
+        calculate_final_weighted_score(base + [{"category": "lacking_skill", "score": s}])["overall_score"]
+        for s in (0, 2, 6, 10)
+    ]
+    assert overall == sorted(overall)
 
 
 def test_weighted_score_all_zeros():
@@ -446,14 +488,14 @@ def test_weighted_score_all_zeros():
 
 
 def test_weighted_score_with_follow_ups():
-    """Follow-up scores are averaged with the primary score."""
+    """A question counts as the higher of its main answer and follow-up."""
     evaluations = [
         {"category": "must_have_matched", "score": 4, "follow_ups": [{"score": 8}]},
-        # topic avg = (4 + 8) / 2 = 6
+        # topic = max(4, 8) = 8
     ]
     result = calculate_final_weighted_score(evaluations)
 
-    assert result["category_averages"]["must_have_matched"] == 6.0
+    assert result["category_averages"]["must_have_matched"] == 8.0
 
 
 def test_weighted_score_empty_evaluations():
@@ -462,3 +504,63 @@ def test_weighted_score_empty_evaluations():
 
     assert result["overall_score"] == 0.0
     assert result["total_raw_score"] == 0.0
+
+
+def _plan(must=8, domain=3, good=2, lacking=2):
+    return (
+        [{"category": "must_have_matched"}] * must
+        + [{"category": "experience_domain"}] * domain
+        + [{"category": "good_to_have"}] * good
+        + [{"category": "lacking_skill"}] * lacking
+    )
+
+
+def test_unasked_planned_questions_score_zero():
+    """Ended after 3 Must-have answers (9, 8, 8) of a 15-question plan."""
+    evaluations = [
+        {"category": "must_have_matched", "score": 9},
+        {"category": "must_have_matched", "score": 8},
+        {"category": "must_have_matched", "score": 8},
+    ]
+    result = calculate_final_weighted_score(evaluations, _plan())
+
+    # Must-have averaged over all 8 planned: 25/8 = 3.125 -> 3.125/10*60 = 18.75
+    assert result["raw_scores"]["must_have_matched"] == 18.8
+    assert result["raw_scores"]["experience_domain"] == 0.0
+    assert result["max_possible_score"] == 100
+    assert result["total_raw_score"] == 18.8
+    assert result["overall_score"] == 1.9
+    assert result["category_question_counts"]["must_have_matched"] == {"answered": 3, "planned": 8}
+    assert result["category_question_counts"]["experience_domain"] == {"answered": 0, "planned": 3}
+
+
+def test_answering_every_planned_question_well_scores_full_marks():
+    evaluations = [{"category": q["category"], "score": 10} for q in _plan()]
+    result = calculate_final_weighted_score(evaluations, _plan())
+
+    assert result["total_raw_score"] == 100.0
+    assert result["overall_score"] == 10.0
+
+
+def test_category_with_no_planned_questions_is_left_out():
+    """No Skill-gap questions existed (the resume covered every skill)."""
+    plan = _plan(lacking=0)
+    evaluations = [{"category": q["category"], "score": 10} for q in plan]
+    result = calculate_final_weighted_score(evaluations, plan)
+
+    assert result["max_possible_score"] == 90
+    assert result["overall_score"] == 10.0
+
+
+def test_pooja_must_have_with_a_failed_follow_up():
+    """6, 4, and 3 with a follow-up scored 0, of 8 planned Must-have questions."""
+    evaluations = [
+        {"category": "must_have_matched", "score": 6},
+        {"category": "must_have_matched", "score": 4},
+        {"category": "must_have_matched", "score": 3, "follow_ups": [{"score": 0}]},
+    ]
+    result = calculate_final_weighted_score(evaluations, _plan(must=8, domain=2, good=3, lacking=2))
+
+    # 13 of 80 Must-have marks -> 13/80*60 = 9.75 (was 8.6 when the 0 halved Q3)
+    assert result["raw_scores"]["must_have_matched"] == 9.8
+    assert result["total_raw_score"] == 9.8

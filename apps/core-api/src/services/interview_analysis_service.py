@@ -357,8 +357,9 @@ def re_evaluate_screening(
     actor_id: UUID,
     actor_name: str | None = None,
 ) -> InterviewAnalysis:
-    """Re-score the saved answers (after HR corrections) the way the live bot
-    scores them, and replace the evaluations and final summary.
+    """Re-mark the answers HR corrected the way the live bot marks them, keep
+    the other answers' marks, and recalculate the totals and summary with the
+    current scoring rules.
 
     The first re-evaluation keeps the bot's original evaluations and summary;
     every run is recorded in analysis_result["re_evaluations"].
@@ -378,6 +379,9 @@ def re_evaluate_screening(
                     "interview_session_id": str(session.id),
                     "evaluations": evaluations,
                     "generated_questions": session.generated_questions,
+                    # Only corrected answers are marked again; the rest keep
+                    # their marks and are re-totalled with the current rules.
+                    "rescore_question_ids": edited,
                 },
             )
             response.raise_for_status()

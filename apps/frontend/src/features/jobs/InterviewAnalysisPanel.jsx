@@ -187,6 +187,9 @@ function EvaluationRow({ evaluation, defaultOpen = false }) {
     if (best == null || next > best) return next
     return best
   }, null)
+  // Same rule as the scoring: a question counts as the higher of its main
+  // answer and its follow-up.
+  const countsAs = score == null || bestFollowUp == null ? score : Math.max(score, bestFollowUp)
   const tone = interviewScoreTone(score)
 
   return (
@@ -225,6 +228,9 @@ function EvaluationRow({ evaluation, defaultOpen = false }) {
             {bestFollowUp != null && bestFollowUp !== score ? (
               <span className="text-label-md text-on-surface-variant">
                 Follow-up · {bestFollowUp.toFixed(1)}
+                {countsAs != null && countsAs > score
+                  ? ` → counts as ${countsAs.toFixed(1)}`
+                  : ' · doesn’t lower the score'}
               </span>
             ) : null}
           </div>
@@ -379,6 +385,7 @@ function Scorecard({
   summary,
   recordingUrl,
 }) {
+  const usesNewSplit = Boolean(summary?.category_max_scores)
   const toneBox =
     tone === 'success'
       ? 'border-success-container/50 bg-success-container/15'
@@ -417,6 +424,9 @@ function Scorecard({
         <p className="text-label-md text-on-surface-variant">
           Raw score · {asNumber(summary.total_score) ?? '—'} /{' '}
           {asNumber(summary.max_possible_score) ?? '—'}
+          {percentOf(summary.total_score, summary.max_possible_score) != null
+            ? ` · ${percentOf(summary.total_score, summary.max_possible_score)}`
+            : ''}
         </p>
       ) : null}
 
@@ -425,17 +435,77 @@ function Scorecard({
           <p className="font-label-md text-label-md text-on-surface-variant tracking-wide">
             Category totals
           </p>
-          {breakdown.map((item) => (
+          {breakdown.map((item) =>
+            usesNewSplit ? (
+              // Every planned question counts; unasked ones score 0.
+              <div key={item.label} className="flex items-baseline justify-between gap-sm text-body-sm">
+                <span className="min-w-0 text-on-surface-variant">
+                  {item.label}
+                  <span className="block text-label-md">
+                    {item.planned === 0
+                      ? 'no questions in this screening'
+                      : item.planned != null
+                        ? item.answered
+                          ? `${item.answered} of ${item.planned} answered`
+                          : `not asked · 0 of ${item.planned} answered`
+                        : null}
+                  </span>
+                </span>
+                <span className="shrink-0 font-medium text-on-surface tabular-nums">
+                  {item.planned === 0 ? (
+                    <span className="text-on-surface-variant font-normal italic">—</span>
+                  ) : (
+                    <>
+                      {item.value.toFixed(1)}
+                      {item.max != null ? (
+                        <span className="text-on-surface-variant font-normal"> / {item.max}</span>
+                      ) : null}
+                      {percentOf(item.value, item.max) != null ? (
+                        <span className="ml-xs text-on-surface-variant font-normal">
+                          · {percentOf(item.value, item.max)}
+                        </span>
+                      ) : null}
+                    </>
+                  )}
+                </span>
+              </div>
+            ) : (
             <div
               key={item.label}
               className="flex items-baseline justify-between gap-sm text-body-sm"
             >
               <span className="text-on-surface-variant">{item.label}</span>
-              <span className="font-medium text-on-surface tabular-nums">
-                {item.value.toFixed(1)}
-              </span>
+              {item.asked ? (
+                <span className="font-medium text-on-surface tabular-nums">
+                  {item.value.toFixed(1)}
+                  {item.max != null ? (
+                    <span className="text-on-surface-variant font-normal"> / {item.max}</span>
+                  ) : null}
+                </span>
+              ) : (
+                <span className="text-on-surface-variant italic">Not asked</span>
+              )}
             </div>
-          ))}
+            ),
+          )}
+          {usesNewSplit ? (
+            <p className="text-label-md text-on-surface-variant">
+              Each category adds up its question scores out of 10 marks per planned question
+              (e.g. 12 / 80 for 8 questions), scaled to the category&apos;s maximum. A question
+              that was never asked scores 0.
+            </p>
+          ) : breakdown.some((item) => !item.asked) ? (
+            <p className="text-label-md text-on-surface-variant">
+              Not asked: no question in that category was answered; its weight counts toward
+              Must-have.
+            </p>
+          ) : null}
+          {/* Only for scored screenings: a no-show's zero summary has nothing to re-weigh. */}
+          {!usesNewSplit && breakdown.some((item) => item.asked) ? (
+            <p className="text-label-md text-on-surface-variant">
+              Scored with the earlier 50/20/20/10 split. Re-evaluate to apply 60/20/10/10.
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -464,6 +534,15 @@ function Scorecard({
       ) : null}
     </aside>
   )
+}
+
+/** "15%" for 9 of 60; one decimal only when needed ("16.3%" for 9.75 of 60). */
+function percentOf(value, max) {
+  const earned = asNumber(value)
+  const total = asNumber(max)
+  if (earned == null || total == null || total <= 0) return null
+  const percent = Math.round((earned / total) * 1000) / 10
+  return `${Number.isInteger(percent) ? percent : percent.toFixed(1)}%`
 }
 
 function scoreText(value) {
@@ -588,12 +667,39 @@ export function InterviewAnalysisPanel({
   const evaluated = evaluations.length
   const tone = interviewScoreTone(overall)
 
+  // A category with no answered question shows 0.0 in the summary, but its
+  // weight moved to Must-have: label it "Not asked" so it isn't read as a
+  // zero score (a lower Skill gaps total then looked like a higher overall).
+  // Summaries scored with the 60/20/10/10 split carry each category's maximum
+  // and which categories were asked; older ones (50/20/20/10, unasked weight
+  // moved to Must-have) don't, until HR re-evaluates them.
+  const categoryMax =
+    summary?.category_max_scores && typeof summary.category_max_scores === 'object'
+      ? summary.category_max_scores
+      : null
+  const askedCategories = new Set(
+    Array.isArray(summary?.categories_asked)
+      ? summary.categories_asked
+      : // Scoring files an evaluation without a category under Must-have.
+        evaluations.map((evaluation) => evaluation?.category || 'must_have_matched'),
+  )
   const breakdown = [
-    { label: 'Must-have', value: asNumber(summary?.raw_must_have_score) },
-    { label: 'Domain', value: asNumber(summary?.raw_domain_expertise_score) },
-    { label: 'Good to have', value: asNumber(summary?.raw_good_to_have_score) },
-    { label: 'Skill gaps', value: asNumber(summary?.raw_lacking_skill_score) },
-  ].filter((item) => item.value != null)
+    { label: 'Must-have', category: 'must_have_matched', value: asNumber(summary?.raw_must_have_score) },
+    { label: 'Domain', category: 'experience_domain', value: asNumber(summary?.raw_domain_expertise_score) },
+    { label: 'Good to have', category: 'good_to_have', value: asNumber(summary?.raw_good_to_have_score) },
+    { label: 'Skill gaps', category: 'lacking_skill', value: asNumber(summary?.raw_lacking_skill_score) },
+  ]
+    .filter((item) => item.value != null)
+    .map((item) => {
+      const counts = summary?.category_question_counts?.[item.category]
+      return {
+        ...item,
+        asked: askedCategories.has(item.category),
+        max: asNumber(categoryMax?.[item.category]),
+        planned: asNumber(counts?.planned),
+        answered: asNumber(counts?.answered),
+      }
+    })
 
   const reEvaluations = Array.isArray(analysis.re_evaluations) ? analysis.re_evaluations : []
   const canReEvaluate = Boolean(sessionId) && evaluations.length > 0

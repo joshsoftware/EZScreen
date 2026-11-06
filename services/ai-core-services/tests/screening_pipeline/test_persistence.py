@@ -101,3 +101,21 @@ async def test_our_own_failure_is_not_recorded_as_the_candidates_result(reason):
 
     api_client.save_final_summary.assert_not_awaited()
     api_client.save_interview_metadata.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_final_summary_carries_the_category_maximums():
+    from src.screening_pipeline.persistence import build_final_summary
+
+    llm = MagicMock()
+    llm.openai_chat_generate = AsyncMock(
+        return_value=MagicMock(response='{"interview_summary": ["ok"]}')
+    )
+    summary = await build_final_summary(
+        llm, [{"category": "must_have_matched", "score": 5}]
+    )
+
+    assert summary["raw_must_have_score"] == 30.0
+    assert summary["max_possible_score"] == 60.0
+    assert summary["overall_score"] == 5.0
+    assert summary["category_max_scores"]["must_have_matched"] == 60
+    assert summary["categories_asked"] == ["must_have_matched"]

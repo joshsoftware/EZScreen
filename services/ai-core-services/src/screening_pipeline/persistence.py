@@ -99,6 +99,7 @@ async def persist_interview_close(
     evaluations: List[Dict[str, Any]],
     transcript_log: List[Dict[str, Any]],
     termination_reason: str = "questions_completed",
+    planned_questions: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Persist final summary and full conversational transcript."""
     # The conversation itself is valuable audit data even if the candidate
@@ -116,7 +117,10 @@ async def persist_interview_close(
         return
 
     final_summary_payload = await build_final_summary(
-        llm_client, evaluations, termination_reason=termination_reason
+        llm_client,
+        evaluations,
+        termination_reason=termination_reason,
+        planned_questions=planned_questions,
     )
     await api_client.save_final_summary(final_summary_payload)
     await api_client.save_interview_metadata(transcript_log)
@@ -127,13 +131,15 @@ async def build_final_summary(
     evaluations: List[Dict[str, Any]],
     *,
     termination_reason: str = "questions_completed",
+    planned_questions: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Weighted scores plus the qualitative summary for scored evaluations.
 
     Shared by the live interview close and HR's re-evaluation, so both
     produce the same numbers from the same answers.
     """
-    summary_math = calculate_final_weighted_score(evaluations)
+    # Unasked planned questions score 0 (see calculate_final_weighted_score).
+    summary_math = calculate_final_weighted_score(evaluations, planned_questions)
 
     termination_context = "The interview completed successfully after asking the designated questions."
     if termination_reason == "fatal_failure":
@@ -170,7 +176,12 @@ async def build_final_summary(
         "raw_good_to_have_score": summary_math["raw_scores"].get("good_to_have", 0.0),
         "raw_lacking_skill_score": summary_math["raw_scores"].get("lacking_skill", 0.0),
         "total_score": summary_math["total_raw_score"],
-        "max_possible_score": 100.0,
+        # Points the asked categories are worth (e.g. 60 when only
+        # Must-have was asked); core-api requires it to be positive.
+        "max_possible_score": float(summary_math["max_possible_score"] or 100.0),
         "overall_score": summary_math["overall_score"],
+        "category_max_scores": summary_math["category_max_scores"],
+        "categories_asked": summary_math["categories_asked"],
+        "category_question_counts": summary_math["category_question_counts"],
         "final_recommendation": formatted_summary
     }
