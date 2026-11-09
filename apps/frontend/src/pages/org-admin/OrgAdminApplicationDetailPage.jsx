@@ -429,6 +429,7 @@ export function OrgAdminApplicationDetailPage() {
       <CandidateScreeningQuestionsPanel
         scheduled={Boolean(sessionId)}
         questions={interviewSession?.generated_questions}
+        evaluations={analysisEvaluations}
         loading={Boolean(sessionId) && sessionLoading}
         error={
           sessionError
