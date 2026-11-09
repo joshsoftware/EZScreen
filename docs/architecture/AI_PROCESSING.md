@@ -794,9 +794,19 @@ else:
 ```
 
 **Aggregate Scoring:**
-*   **Total Score:** The sum of all resolved `topic_score` values.
-*   **Max Possible Score:** `{total_questions} * 10` points (e.g., 150 for a 15-question set).
-*   **Overall Score:** `(total_score / max_possible_score) * 10`
+Category averages (0–10) are scaled by fixed weights that sum to 100:
+
+| Category | Weight |
+| :--- | :--- |
+| `must_have_matched` | 60 |
+| `experience_domain` | 20 |
+| `good_to_have` | 10 |
+| `lacking_skill` | 10 |
+
+*   **Category total:** `(category_average / 10) × weight`.
+*   **Unasked categories:** a category with no scored answers contributes 0, and its weight is added to `must_have_matched`.
+*   **Total Score:** sum of the four category totals, out of 100.
+*   **Overall Score:** `total_score / 10`, rounded to one decimal.
 
 **Recommendation Threshold:**
 The system enforces a strict, deterministic pass/fail threshold at **6.0 / 10**:

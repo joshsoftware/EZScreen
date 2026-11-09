@@ -69,7 +69,16 @@ async def test_persist_interview_close_calls_summary_and_metadata():
     llm_client.openai_chat_generate = AsyncMock(return_value=MagicMock(response='{"interview_summary": ["point 1"]}'))
     await persist_interview_close(api_client, llm_client, [{"score": 7, "category": "must_have_matched"}], [{"bot_speech": "hi"}])
 
-    api_client.save_final_summary.assert_awaited_once()
+    summary = api_client.save_final_summary.await_args.args[0]
+    # Only Must-have was scored, so Domain, Good to have, and Skill gaps
+    # add their weights to it: 7/10 × 100 = 70, overall 7.0.
+    assert summary["overall_score"] == 7.0
+    assert summary["raw_must_have_score"] == 70.0
+    assert summary["total_score"] == 70.0
+    assert summary["max_possible_score"] == 100.0
+    prompt = llm_client.openai_chat_generate.await_args.kwargs["prompt"]
+    assert "Must-have 60, Domain 20, Good to have 10, Skill gaps 10" in prompt
+    assert "7.0 / 10" in prompt
     api_client.save_interview_metadata.assert_awaited_once()
 
 
