@@ -31,6 +31,36 @@ function normalizeQuestions(raw) {
   return []
 }
 
+function questionKey(text) {
+  return String(text || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function ordinal(n) {
+  const mod100 = n % 100
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`
+  return `${n}${{ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'}`
+}
+
+/**
+ * Which planned questions the bot has asked, and in what order. The bot picks
+ * questions by category, not in list order; each saved evaluation stores the
+ * planned question's exact text, so it is matched on that.
+ */
+function askedOrderByQuestion(questions, evaluations) {
+  const order = new Map()
+  if (!Array.isArray(evaluations)) return order
+  const byText = new Map()
+  questions.forEach((q, i) => {
+    const key = questionKey(q.question)
+    if (!byText.has(key)) byText.set(key, q.id ?? `idx-${i}`)
+  })
+  evaluations.forEach((evaluation, i) => {
+    const id = byText.get(questionKey(evaluation?.question))
+    if (id != null && !order.has(id)) order.set(id, i + 1)
+  })
+  return order
+}
+
 /**
  * Read-only list of per-candidate screening questions from the interview session.
  */
@@ -39,6 +69,7 @@ export function CandidateScreeningQuestionsPanel({
   loading = false,
   error = null,
   scheduled = false,
+  evaluations = null,
 }) {
   const [filter, setFilter] = useState('all')
 
@@ -46,6 +77,11 @@ export function CandidateScreeningQuestionsPanel({
     const list = normalizeQuestions(rawQuestions)
     return [...list].sort((a, b) => (a.id ?? 0) - (b.id ?? 0))
   }, [rawQuestions])
+
+  const askedOrder = useMemo(
+    () => askedOrderByQuestion(questions, evaluations),
+    [questions, evaluations],
+  )
 
   const filtered = useMemo(() => {
     if (filter === 'all') return questions
@@ -107,6 +143,14 @@ export function CandidateScreeningQuestionsPanel({
       <p className="text-body-sm text-on-surface-variant mb-md">
         {questions.length} questions tailored to this candidate&apos;s resume and the job
         description. The AI interviewer will ask from this set.
+        {askedOrder.size > 0 ? (
+          <span className="ml-1 inline-flex items-center gap-1 font-medium text-emerald-700">
+            <span className="material-symbols-outlined text-[16px]" aria-hidden>
+              check_circle
+            </span>
+            {askedOrder.size} of {questions.length} asked
+          </span>
+        ) : null}
       </p>
 
       <div className="mb-md flex flex-wrap gap-xs">
@@ -129,12 +173,23 @@ export function CandidateScreeningQuestionsPanel({
       </div>
 
       <ul className="max-h-[28rem] space-y-1 overflow-y-auto rounded-xl border border-outline-variant/60 bg-surface-container-lowest/50 p-sm">
-        {filtered.map((question, idx) => (
+        {filtered.map((question, idx) => {
+          const askedAs = askedOrder.get(question.id ?? `idx-${questions.indexOf(question)}`)
+          return (
           <li
             key={question.id ?? idx}
             className="rounded-lg px-sm py-sm hover:bg-surface-container-low/80"
           >
             <div className="flex flex-wrap items-baseline gap-xs mb-xs">
+              {askedAs ? (
+                <span
+                  className="material-symbols-outlined self-center text-[18px] text-emerald-600"
+                  title={`Asked ${ordinal(askedAs)} in the screening`}
+                  aria-label="Asked"
+                >
+                  check_circle
+                </span>
+              ) : null}
               <span className="text-label-sm text-on-surface-variant">
                 {question.id ?? idx + 1}.
               </span>
@@ -146,10 +201,16 @@ export function CandidateScreeningQuestionsPanel({
                   · {DEPTH_LABELS[question.answer_depth]}
                 </span>
               ) : null}
+              {askedAs ? (
+                <span className="text-label-sm font-medium text-emerald-700">
+                  · Asked {ordinal(askedAs)}
+                </span>
+              ) : null}
             </div>
             <p className="text-body-sm text-on-surface">{question.question}</p>
           </li>
-        ))}
+          )
+        })}
       </ul>
     </Panel>
   )
