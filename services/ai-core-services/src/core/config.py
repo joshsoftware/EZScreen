@@ -107,6 +107,9 @@ class Settings(BaseSettings):
     screening_bot_connect_max_wait_seconds: float = 1800.0
     screening_bot_connect_poll_seconds: float = 30.0
     screening_bot_connect_confirm_seconds: float = 60.0
+    # How long the bot waits in the meeting for the candidate to join before
+    # leaving and marking the screening a no-show (3 minutes by default).
+    screening_candidate_join_wait_seconds: float = 180.0
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),

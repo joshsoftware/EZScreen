@@ -27,7 +27,6 @@ from src.screening_pipeline.candidate_presence import (
 from src.screening_pipeline.finished_interviews import interview_finished, mark_interview_finished
 from src.screening_pipeline.prompts import (
     ANSWER_ACKNOWLEDGEMENT_TEXT,
-    CANDIDATE_DID_NOT_JOIN_NOTE,
     CANDIDATE_JOIN_POLL_SECONDS,
     CANDIDATE_JOIN_WAIT_SECONDS,
     ANSWER_SETTLE_SECONDS,
@@ -49,6 +48,7 @@ from src.screening_pipeline.prompts import (
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
     START_WITHOUT_REPLY_TEXT,
+    candidate_did_not_join_note,
     STT_RESULT_GRACE_SECONDS,
     UNFINISHED_ANSWER_EXTRA_SECONDS,
 )
@@ -330,7 +330,7 @@ class PipecatInterviewPolicy:
                 "Candidate didn't join; leaving the meeting as a no-show",
                 extra={"session_id": self.session_id, "wait_seconds": CANDIDATE_JOIN_WAIT_SECONDS},
             )
-            self._status_note = CANDIDATE_DID_NOT_JOIN_NOTE
+            self._status_note = candidate_did_not_join_note(CANDIDATE_JOIN_WAIT_SECONDS)
             self._candidate_wait_task = None
             await self.end_interview("candidate_absent", leave_bot=True)
 

@@ -103,10 +103,22 @@ GREETING_REPLY_TIMEOUT_SECONDS = 15
 # silence. While waiting it asks Attendee who is in the meeting every
 # CANDIDATE_JOIN_POLL_SECONDS; if the candidate hasn't joined within
 # CANDIDATE_JOIN_WAIT_SECONDS, the bot leaves and it's a no-show.
-CANDIDATE_JOIN_WAIT_SECONDS = 180
+# The wait is set by SCREENING_CANDIDATE_JOIN_WAIT_SECONDS in .env.
+CANDIDATE_JOIN_WAIT_SECONDS = settings.screening_candidate_join_wait_seconds
 CANDIDATE_JOIN_POLL_SECONDS = 10
-# Shown to HR on the application timeline next to "No-show".
-CANDIDATE_DID_NOT_JOIN_NOTE = "Candidate didn't join the meeting within 3 minutes."
+
+
+def candidate_did_not_join_note(wait_seconds: float) -> str:
+    """Shown to HR on the application timeline next to "No-show"."""
+    seconds = int(round(wait_seconds))
+    if seconds >= 60 and seconds % 60 == 0:
+        minutes = seconds // 60
+        span = f"{minutes} minute" if minutes == 1 else f"{minutes} minutes"
+    else:
+        span = f"{seconds} seconds"
+    return f"Candidate didn't join the meeting within {span}."
+
+
 START_WITHOUT_REPLY_TEXT = "Let's get started with the first question."
 # Spoken instead of the greeting when the bot reconnects to an interview that
 # was already underway (the service restarted mid-interview), followed by the

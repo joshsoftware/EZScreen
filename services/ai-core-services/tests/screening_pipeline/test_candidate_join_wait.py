@@ -16,7 +16,7 @@ from src.screening_pipeline.candidate_presence import (
     mark_candidate_joined,
 )
 from src.screening_pipeline.pipecat_policy import PipecatInterviewPolicy
-from src.screening_pipeline.prompts import CANDIDATE_DID_NOT_JOIN_NOTE, GREETING_TEXT
+from src.screening_pipeline.prompts import GREETING_TEXT, candidate_did_not_join_note
 from src.screening_pipeline.webhook_handler import process_participant_event
 
 
@@ -106,7 +106,7 @@ async def test_nobody_joins_within_the_wait_is_a_no_show(monkeypatch):
     assert _spoken(policy) == []
     assert policy.termination_reason == "candidate_absent"
     policy.api_client.update_status.assert_awaited_once_with(
-        "no_show", note=CANDIDATE_DID_NOT_JOIN_NOTE
+        "no_show", note=candidate_did_not_join_note(0)
     )
     policy._leave_bot_after_close.assert_awaited_once()
 
@@ -305,11 +305,26 @@ def _event(event_type, uuid, name, *, host=False, at=0):
     }
 
 
-def test_the_bot_waits_three_minutes_checking_every_ten_seconds():
-    from src.screening_pipeline.prompts import CANDIDATE_JOIN_POLL_SECONDS, CANDIDATE_JOIN_WAIT_SECONDS
+def test_the_bot_waits_three_minutes_by_default_checking_every_ten_seconds():
+    from src.core.config import Settings
+    from src.screening_pipeline.prompts import CANDIDATE_JOIN_POLL_SECONDS
 
-    assert CANDIDATE_JOIN_WAIT_SECONDS == 180
+    assert Settings.model_fields["screening_candidate_join_wait_seconds"].default == 180
     assert CANDIDATE_JOIN_POLL_SECONDS == 10
+
+
+def test_the_wait_is_set_from_the_env(monkeypatch):
+    from src.core.config import Settings
+
+    monkeypatch.setenv("SCREENING_CANDIDATE_JOIN_WAIT_SECONDS", "300")
+    assert Settings().screening_candidate_join_wait_seconds == 300
+
+
+def test_the_no_show_note_states_the_configured_wait():
+    assert candidate_did_not_join_note(180) == "Candidate didn't join the meeting within 3 minutes."
+    assert candidate_did_not_join_note(60) == "Candidate didn't join the meeting within 1 minute."
+    assert candidate_did_not_join_note(300.0) == "Candidate didn't join the meeting within 5 minutes."
+    assert candidate_did_not_join_note(90) == "Candidate didn't join the meeting within 90 seconds."
 
 
 @pytest.mark.asyncio
@@ -349,7 +364,7 @@ async def test_candidate_who_joined_and_left_does_not_count(monkeypatch):
 
     assert _spoken(policy) == []
     policy.api_client.update_status.assert_awaited_once_with(
-        "no_show", note=CANDIDATE_DID_NOT_JOIN_NOTE
+        "no_show", note=candidate_did_not_join_note(0)
     )
 
 
@@ -367,7 +382,7 @@ async def test_only_hr_in_the_meeting_after_the_wait_is_a_no_show_and_the_bot_le
     assert _spoken(policy) == []
     assert policy.termination_reason == "candidate_absent"
     policy.api_client.update_status.assert_awaited_once_with(
-        "no_show", note=CANDIDATE_DID_NOT_JOIN_NOTE
+        "no_show", note=candidate_did_not_join_note(0)
     )
     policy._leave_bot_after_close.assert_awaited_once()
 
