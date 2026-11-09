@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import select, text
 from src.core.logger import logger
 from src.db.connection import AsyncSessionLocal
 from src.db.models import DBInterviewAnalysis, DBInterviewSession
@@ -76,6 +76,36 @@ class InterviewSessionRepository:
         except Exception as err:
             logger.error("Repository failed to fetch session by bot_id", extra={"bot_id": bot_id, "error": str(err)})
             return None
+
+
+    async def get_candidate_name(self, application_id: str) -> tuple[str | None, str | None]:
+        """The candidate's (first_name, last_name) for an application.
+
+        (None, None) when it can't be read: the bot then cannot recognise the
+        candidate by name and relies on its speech fallback.
+        """
+        query = text(
+            "SELECT u.first_name, u.last_name FROM applications a "
+            "JOIN users u ON u.id = a.candidate_id WHERE a.id = :application_id"
+        )
+        params = {"application_id": str(application_id)}
+        try:
+            session = AsyncSessionLocal()
+            if hasattr(session, "__aenter__"):
+                async with session:
+                    row = (await session.execute(query, params)).first()
+            else:
+                with session:
+                    row = session.execute(query, params).first()
+        except Exception as err:
+            logger.warning(
+                "Repository failed to fetch the candidate's name",
+                extra={"application_id": str(application_id), "error": str(err)},
+            )
+            return None, None
+        if not row:
+            return None, None
+        return row[0], row[1]
 
 
 interview_session_repo = InterviewSessionRepository()

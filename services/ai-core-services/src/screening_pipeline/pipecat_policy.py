@@ -17,7 +17,11 @@ from src.screening_pipeline.persistence import (
     persist_interview_close,
     persist_qa_and_evaluation,
 )
-from src.screening_pipeline.candidate_presence import forget_session, is_candidate_present
+from src.screening_pipeline.candidate_presence import (
+    forget_session,
+    is_candidate_present,
+    speech_may_start_interview,
+)
 from src.screening_pipeline.finished_interviews import interview_finished, mark_interview_finished
 from src.screening_pipeline.prompts import (
     ANSWER_ACKNOWLEDGEMENT_TEXT,
@@ -277,7 +281,7 @@ class PipecatInterviewPolicy:
         self._begin_listening()
 
     async def candidate_joined(self) -> None:
-        """A participant joined (or spoke): start the interview if waiting."""
+        """The candidate joined (or spoke): start the interview if waiting."""
         if not self.is_active or self.current_interaction_state != "waiting_for_candidate":
             return
         self._cancel_candidate_wait()
@@ -641,9 +645,12 @@ class PipecatInterviewPolicy:
         if not self.is_active:
             return
         if self.current_interaction_state == "waiting_for_candidate":
-            # Someone is talking, so the candidate is here even if the join
-            # webhook never arrived.
-            asyncio.create_task(self.candidate_joined())
+            # Someone is talking. That starts the interview only if Attendee's
+            # join events were missed, or the one non-host person present is
+            # likely the candidate under another display name; never when only
+            # the host / HR are in the meeting.
+            if speech_may_start_interview(self.session_id):
+                asyncio.create_task(self.candidate_joined())
             return
         now = asyncio.get_running_loop().time()
         self._last_candidate_activity_at = now

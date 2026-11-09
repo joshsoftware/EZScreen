@@ -121,24 +121,133 @@ async def test_a_rescheduled_attempt_does_not_inherit_presence():
     assert not is_candidate_present("sess-join")
 
 
+async def _join(policy, data, candidate=("Pooja", "Sharma")):
+    """Deliver an Attendee join webhook for the policy's session."""
+    runtime = MagicMock()
+    runtime.policy = policy
+    session = MagicMock(id=policy.session_id, application_id="app-1")
+    repo = "src.screening_pipeline.webhook_handler.interview_session_repo"
+    with patch(f"{repo}.get_by_bot_id", AsyncMock(return_value=session)), patch(
+        f"{repo}.get_candidate_name", AsyncMock(return_value=candidate)
+    ), patch("src.screening_pipeline.audio_websocket.active_sessions", {policy.session_id: runtime}):
+        await process_participant_event({"bot_id": "bot-1", "data": {"event_type": "join", **data}})
+
+
+async def _speak(policy):
+    policy.handle_candidate_activity()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+
 @pytest.mark.asyncio
 async def test_join_webhook_starts_a_waiting_interview():
     policy = _policy()
     await _start(policy)
-    runtime = MagicMock()
-    runtime.policy = policy
-    session = MagicMock(id="sess-join")
 
-    with patch(
-        "src.screening_pipeline.webhook_handler.interview_session_repo.get_by_bot_id",
-        AsyncMock(return_value=session),
-    ), patch("src.screening_pipeline.audio_websocket.active_sessions", {"sess-join": runtime}):
-        await process_participant_event(
-            {"bot_id": "bot-1", "data": {"event_type": "join", "participant_uuid": "p-1"}}
-        )
+    await _join(policy, {"participant_uuid": "p-1", "participant_name": "Pooja Sharma"})
 
     assert _spoken(policy) == [GREETING_TEXT]
     await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_candidate_recognised_by_first_or_last_name_only():
+    policy = _policy()
+    await _start(policy)
+
+    await _join(policy, {"participant_uuid": "p-1", "participant_name": "sharma.p"})
+
+    assert _spoken(policy) == [GREETING_TEXT]
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_host_joining_does_not_start_the_interview():
+    """HR hosting the meeting joins first: the bot keeps waiting, and HR
+    talking doesn't start it either."""
+    policy = _policy()
+    await _start(policy)
+
+    await _join(
+        policy,
+        {"participant_uuid": "hr", "participant_name": "Pooja Recruiter", "participant_is_host": True},
+    )
+    await _speak(policy)
+
+    assert _spoken(policy) == []
+    assert policy.current_interaction_state == "waiting_for_candidate"
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_note_taker_bot_joining_does_not_start_the_interview():
+    policy = _policy()
+    await _start(policy)
+
+    await _join(policy, {"participant_uuid": "b", "participant_name": "Read.ai meeting notes"})
+    await _join(policy, {"participant_uuid": "o", "participant_name": "Otter.ai"})
+    await _join(policy, {"participant_uuid": "f", "participant_name": "Pooja's Notetaker"})
+
+    assert _spoken(policy) == []
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_other_person_joining_does_not_start_the_interview():
+    policy = _policy()
+    await _start(policy)
+
+    await _join(policy, {"participant_uuid": "hr", "participant_name": "Rahul Mehta"})
+
+    assert _spoken(policy) == []
+    assert policy.current_interaction_state == "waiting_for_candidate"
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_candidate_under_another_name_starts_it_by_speaking():
+    """Only the host and one other person are there and they speak: that is
+    most likely the candidate with a different display name."""
+    policy = _policy()
+    await _start(policy)
+    await _join(policy, {"participant_uuid": "hr", "participant_name": "HR", "participant_is_host": True})
+    await _join(policy, {"participant_uuid": "c", "participant_name": "PS Laptop"})
+
+    await _speak(policy)
+
+    assert _spoken(policy) == [GREETING_TEXT]
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_speech_does_not_start_it_when_several_unrecognised_people_are_there():
+    policy = _policy()
+    await _start(policy)
+    await _join(policy, {"participant_uuid": "a", "participant_name": "Rahul Mehta"})
+    await _join(policy, {"participant_uuid": "b", "participant_name": "Anita Desai"})
+
+    await _speak(policy)
+
+    assert _spoken(policy) == []
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_candidate_leaving_before_the_bot_runs_is_no_longer_present():
+    policy = _policy()
+    await _join(policy, {"participant_uuid": "c", "participant_name": "Pooja Sharma"})
+    assert is_candidate_present("sess-join")
+
+    session = MagicMock(id="sess-join", interview_metadata={})
+    with patch(
+        "src.screening_pipeline.webhook_handler.interview_session_repo.get_by_bot_id",
+        AsyncMock(return_value=session),
+    ):
+        await process_participant_event(
+            {"bot_id": "bot-1", "data": {"event_type": "leave", "participant_uuid": "c"}}
+        )
+
+    assert not is_candidate_present("sess-join")
 
 
 def test_pipeline_outlives_the_silent_wait_for_a_late_candidate():
