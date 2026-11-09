@@ -12,13 +12,15 @@ from src.screening_pipeline.summary_calculator import _score
 CHUNK_SIZE = 3            # Evaluate every N questions per category
 DOWNGRADE_THRESHOLD = 3.0  # Rolling average at or below this triggers a downgrade
 
-# Priority order: must-have first, then domain, good-to-have, lacking last
-CATEGORIES_ORDER = [
-    "must_have_matched",
-    "experience_domain",
-    "good_to_have",
-    "lacking_skill",
-]
+# Priority order: must-have first, then domain, good-to-have, lacking last.
+# Weights are out of 100 and are the single source for the final summary.
+CATEGORY_WEIGHTS = {
+    "must_have_matched": 60,
+    "experience_domain": 20,
+    "good_to_have": 10,
+    "lacking_skill": 10,
+}
+CATEGORIES_ORDER = list(CATEGORY_WEIGHTS)
 
 
 def calculate_rolling_average(evaluations: List[Dict[str, Any]]) -> float:
@@ -45,12 +47,10 @@ def calculate_rolling_average(evaluations: List[Dict[str, Any]]) -> float:
 
 
 def calculate_final_weighted_score(evaluations: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calculate the 50/20/20/10 weighted score based on category averages."""
+    """Calculate the 60/20/10/10 weighted score based on category averages."""
     categories = {
-        "must_have_matched": {"weight": 50, "total": 0.0, "count": 0},
-        "experience_domain": {"weight": 20, "total": 0.0, "count": 0},
-        "good_to_have": {"weight": 20, "total": 0.0, "count": 0},
-        "lacking_skill": {"weight": 10, "total": 0.0, "count": 0},
+        cat: {"weight": weight, "total": 0.0, "count": 0}
+        for cat, weight in CATEGORY_WEIGHTS.items()
     }
 
     # Sum up topic scores by category

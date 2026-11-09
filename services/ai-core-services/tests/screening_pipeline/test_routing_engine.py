@@ -396,7 +396,7 @@ def test_all_queues_empty_returns_completed():
 # ─── calculate_final_weighted_score Tests ─────────────────────────────────────
 
 def test_weighted_score_basic():
-    """Verify the 50/20/20/10 math."""
+    """Verify the 60/20/10/10 math."""
     evaluations = [
         {"category": "must_have_matched", "score": 8},
         {"category": "must_have_matched", "score": 6},
@@ -410,9 +410,13 @@ def test_weighted_score_basic():
     assert result["category_averages"]["experience_domain"] == 7.0
     assert result["category_averages"]["good_to_have"] == 5.0
     assert result["category_averages"]["lacking_skill"] == 4.0
-    # MH: 7/10*50=35, DOM: 7/10*20=14, GTH: 5/10*20=10, LACK: 4/10*10=4
-    assert result["total_raw_score"] == 63.0
-    assert result["overall_score"] == 6.3
+    # MH: 7/10*60=42, DOM: 7/10*20=14, GTH: 5/10*10=5, LACK: 4/10*10=4
+    assert result["raw_scores"]["must_have_matched"] == 42.0
+    assert result["raw_scores"]["experience_domain"] == 14.0
+    assert result["raw_scores"]["good_to_have"] == 5.0
+    assert result["raw_scores"]["lacking_skill"] == 4.0
+    assert result["total_raw_score"] == 65.0
+    assert result["overall_score"] == 6.5
 
 
 def test_weighted_score_empty_category_redistributes():
@@ -425,9 +429,11 @@ def test_weighted_score_empty_category_redistributes():
     ]
     result = calculate_final_weighted_score(evaluations)
 
-    # DOM weight (20) redistributed to MH (50→70)
+    # DOM weight (20) redistributed to MH (60→80)
     assert result["raw_scores"]["experience_domain"] == 0.0
-    # MH: 10/10*70=70, GTH: 10/10*20=20, LACK: 10/10*10=10
+    # MH: 10/10*80=80, GTH: 10/10*10=10, LACK: 10/10*10=10
+    assert result["raw_scores"]["must_have_matched"] == 80.0
+    assert result["raw_scores"]["good_to_have"] == 10.0
     assert result["total_raw_score"] == 100.0
     assert result["overall_score"] == 10.0
 

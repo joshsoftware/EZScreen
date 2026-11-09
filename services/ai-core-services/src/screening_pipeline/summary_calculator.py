@@ -22,37 +22,28 @@ def compute_final_summary(
 ) -> Dict[str, Any] | None:
     """Calculate a summary from persisted question evaluations only.
 
-    Every persisted evaluation—including a zero-score skip—is one main topic
-    worth 10 points. A follow-up is part of that topic, so its score is
-    averaged with the main score instead of increasing the maximum score.
+    Topic scores average a follow-up with its main answer. The overall score
+    then applies the screening weights (Must-have 60, Domain 20, Good to have
+    10, Skill gaps 10). A category that was not asked gives its weight to
+    Must-have. The result is out of 100, shown out of 10.
     """
     persisted_evaluations = [item for item in evaluations if isinstance(item, dict)]
-    persisted_question_count = len(persisted_evaluations)
-    if persisted_question_count == 0:
+    if not persisted_evaluations:
         return None
 
-    total_score = 0.0
-    for evaluation in persisted_evaluations:
-        primary_score = _score(evaluation.get("score"))
-        follow_ups = evaluation.get("follow_ups", [])
-        first_follow_up = follow_ups[0] if isinstance(follow_ups, list) and follow_ups else None
-        if isinstance(first_follow_up, dict) and first_follow_up.get("score") is not None:
-            topic_score = (primary_score + _score(first_follow_up["score"])) / 2
-        else:
-            topic_score = primary_score
-        total_score += topic_score
+    # Imported lazily: routing_engine imports _score from this module.
+    from src.screening_pipeline.routing_engine import calculate_final_weighted_score
 
-    max_possible_score = persisted_question_count * 10
-    overall_score = round((total_score / max_possible_score) * 10, 1)
-
+    summary = calculate_final_weighted_score(persisted_evaluations)
+    overall_score = summary["overall_score"]
     if overall_score >= recommendation_threshold:
         final_recommendation = "shortlist_for_l1"
     else:
         final_recommendation = "reject"
 
     return {
-        "total_score": round(total_score, 1),
-        "max_possible_score": max_possible_score,
+        "total_score": summary["total_raw_score"],
+        "max_possible_score": 100.0,
         "overall_score": overall_score,
         "final_recommendation": final_recommendation,
     }
