@@ -5,6 +5,7 @@ empty meeting, asked the first question and left after ~2 minutes of silence.
 """
 
 import asyncio
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,7 +16,7 @@ from src.screening_pipeline.candidate_presence import (
     mark_candidate_joined,
 )
 from src.screening_pipeline.pipecat_policy import PipecatInterviewPolicy
-from src.screening_pipeline.prompts import GREETING_TEXT
+from src.screening_pipeline.prompts import CANDIDATE_DID_NOT_JOIN_NOTE, GREETING_TEXT
 from src.screening_pipeline.webhook_handler import process_participant_event
 
 
@@ -104,7 +105,9 @@ async def test_nobody_joins_within_the_wait_is_a_no_show(monkeypatch):
 
     assert _spoken(policy) == []
     assert policy.termination_reason == "candidate_absent"
-    policy.api_client.update_status.assert_awaited_once_with("no_show")
+    policy.api_client.update_status.assert_awaited_once_with(
+        "no_show", note=CANDIDATE_DID_NOT_JOIN_NOTE
+    )
     policy._leave_bot_after_close.assert_awaited_once()
 
 
@@ -271,3 +274,124 @@ async def test_runtime_teardown_takes_the_bot_out_of_the_meeting():
         await policy.cleanup()
 
     policy._leave_bot_after_close.assert_awaited_once()
+
+
+# --- Polling Attendee's participant list (senior: every 10 s, for 3 minutes) ---
+
+ATTENDEE = "src.screening_pipeline.pipecat_policy.attendee_client.list_participant_events"
+REPO = "src.screening_pipeline.pipecat_policy.interview_session_repo"
+
+
+async def _start_with_bot(policy):
+    session = MagicMock(
+        id=policy.session_id,
+        status="in_progress",
+        generated_questions=[],
+        application_id="app-1",
+        # A fresh bot per test: an ended interview marks its bot finished.
+        interview_metadata={"bot_id": f"bot-{uuid.uuid4().hex}"},
+    )
+    with patch(f"{REPO}.get_by_id", AsyncMock(return_value=session)):
+        await policy.start()
+
+
+def _event(event_type, uuid, name, *, host=False, at=0):
+    return {
+        "event_type": event_type,
+        "participant_uuid": uuid,
+        "participant_name": name,
+        "participant_is_host": host,
+        "timestamp_ms": at,
+    }
+
+
+def test_the_bot_waits_three_minutes_checking_every_ten_seconds():
+    from src.screening_pipeline.prompts import CANDIDATE_JOIN_POLL_SECONDS, CANDIDATE_JOIN_WAIT_SECONDS
+
+    assert CANDIDATE_JOIN_WAIT_SECONDS == 180
+    assert CANDIDATE_JOIN_POLL_SECONDS == 10
+
+
+@pytest.mark.asyncio
+async def test_polling_finds_the_candidate_when_the_webhook_was_missed(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.CANDIDATE_JOIN_POLL_SECONDS", 0)
+    replies = [
+        [],  # first check: nobody yet
+        [_event("join", "hr", "Rahul Mehta", at=1)],  # someone else
+        [_event("join", "hr", "Rahul Mehta", at=1), _event("join", "c", "Pooja Sharma", at=2)],
+    ]
+    calls = AsyncMock(side_effect=lambda bot_id: replies.pop(0) if len(replies) > 1 else replies[0])
+    policy = _policy()
+    with patch(ATTENDEE, calls), patch(
+        f"{REPO}.get_candidate_name", AsyncMock(return_value=("Pooja", "Sharma"))
+    ):
+        await _start_with_bot(policy)
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if _spoken(policy):
+                break
+
+    assert _spoken(policy) == [GREETING_TEXT]
+    assert calls.await_args.args[0].startswith("bot-")
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_candidate_who_joined_and_left_does_not_count(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.CANDIDATE_JOIN_WAIT_SECONDS", 0)
+    events = [_event("join", "c", "Pooja Sharma", at=1), _event("leave", "c", "Pooja Sharma", at=2)]
+    policy = _policy()
+    with patch(ATTENDEE, AsyncMock(return_value=events)), patch(
+        f"{REPO}.get_candidate_name", AsyncMock(return_value=("Pooja", "Sharma"))
+    ), patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()):
+        await _start_with_bot(policy)
+        await policy._candidate_wait_task
+
+    assert _spoken(policy) == []
+    policy.api_client.update_status.assert_awaited_once_with(
+        "no_show", note=CANDIDATE_DID_NOT_JOIN_NOTE
+    )
+
+
+@pytest.mark.asyncio
+async def test_only_hr_in_the_meeting_after_the_wait_is_a_no_show_and_the_bot_leaves(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.CANDIDATE_JOIN_WAIT_SECONDS", 0)
+    events = [_event("join", "hr", "Rahul Mehta", host=True), _event("join", "n", "Otter.ai")]
+    policy = _policy()
+    with patch(ATTENDEE, AsyncMock(return_value=events)), patch(
+        f"{REPO}.get_candidate_name", AsyncMock(return_value=("Pooja", "Sharma"))
+    ), patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()):
+        await _start_with_bot(policy)
+        await policy._candidate_wait_task
+
+    assert _spoken(policy) == []
+    assert policy.termination_reason == "candidate_absent"
+    policy.api_client.update_status.assert_awaited_once_with(
+        "no_show", note=CANDIDATE_DID_NOT_JOIN_NOTE
+    )
+    policy._leave_bot_after_close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_attendee_api_errors_do_not_end_the_wait_early(monkeypatch):
+    monkeypatch.setattr("src.screening_pipeline.pipecat_policy.CANDIDATE_JOIN_POLL_SECONDS", 0)
+    policy = _policy()
+    with patch(ATTENDEE, AsyncMock(side_effect=RuntimeError("attendee down"))):
+        await _start_with_bot(policy)
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+    assert policy.current_interaction_state == "waiting_for_candidate"
+    policy.api_client.update_status.assert_not_awaited()
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_who_spoke_but_never_joined_by_name_gets_no_note():
+    """A no-show for silence (joined, never answered) is not 'didn't join'."""
+    policy = _policy()
+    await _start(policy)
+    with patch("src.screening_pipeline.pipecat_policy.persist_interview_close", AsyncMock()):
+        await policy.end_interview("candidate_silence")
+
+    policy.api_client.update_status.assert_awaited_once_with("no_show")

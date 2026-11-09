@@ -764,8 +764,11 @@ def update_interview_session_status(
     *,
     session: InterviewSession,
     new_status: InterviewStatus,
+    note: str | None = None,
 ) -> InterviewSession:
     """Transition a session's status from an internal caller such as a bot webhook.
+
+    `note` (why, e.g. the candidate never joined) is kept on the timeline event.
 
     Webhooks can arrive out of order and be redelivered, so a session that
     already reached a terminal status is never moved backwards.
@@ -800,7 +803,10 @@ def update_interview_session_status(
             actor_type=TimelineActorType.system,
             from_status=from_status,
             to_status=application.status,
-            metadata={"interview_session_id": str(session.id)},
+            metadata={
+                "interview_session_id": str(session.id),
+                **({"note": note.strip()} if note and note.strip() else {}),
+            },
         )
 
     db.commit()

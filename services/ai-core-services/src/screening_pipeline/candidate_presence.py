@@ -7,7 +7,9 @@ remembered here and read when the runtime starts.
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Any, Dict
+
+from src.screening_pipeline.candidate_identity import looks_like_bot, name_matches_candidate
 
 # Sessions where the candidate (recognised by name) is in the meeting.
 _present_sessions: set[str] = set()
@@ -38,6 +40,8 @@ def record_participant(
         "is_bot": is_bot,
         "is_candidate": is_candidate,
     }
+    if is_candidate:
+        mark_candidate_joined(session_id)
 
 
 def remove_participant(session_id: str, participant_uuid: str | None) -> None:
@@ -47,6 +51,41 @@ def remove_participant(session_id: str, participant_uuid: str | None) -> None:
     left = people.pop(str(participant_uuid), None)
     if left and left["is_candidate"] and not any(p["is_candidate"] for p in people.values()):
         _present_sessions.discard(str(session_id))
+
+
+def apply_participant_event(
+    session_id: str,
+    event: Dict[str, Any],
+    candidate_first_name: str | None,
+    candidate_last_name: str | None,
+) -> bool:
+    """Update who is in the meeting from one Attendee participant event (from
+    the webhook or the participant_events API). True when it is the candidate
+    joining."""
+    event_type = str(event.get("event_type") or event.get("event") or "").lower()
+    participant_uuid = event.get("participant_uuid")
+    if event_type in {"leave", "left", "participant_left", "participant_leave"}:
+        remove_participant(session_id, participant_uuid)
+        return False
+    if event_type not in {"join", "joined", "participant_join", "participant_joined"}:
+        return False
+    name = str(event.get("participant_name") or "")
+    is_host = event.get("participant_is_host") is True
+    is_bot = looks_like_bot(name)
+    is_candidate = (
+        not is_host
+        and not is_bot
+        and name_matches_candidate(name, candidate_first_name, candidate_last_name)
+    )
+    record_participant(
+        session_id,
+        str(participant_uuid or name),
+        name=name,
+        is_host=is_host,
+        is_bot=is_bot,
+        is_candidate=is_candidate,
+    )
+    return is_candidate
 
 
 def speech_may_start_interview(session_id: str) -> bool:

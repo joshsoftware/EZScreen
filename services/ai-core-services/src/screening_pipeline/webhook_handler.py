@@ -90,28 +90,13 @@ async def _handle_participant_join(bot_id: str, data: Dict[str, Any]) -> None:
     if not session:
         return
     from src.screening_pipeline.audio_websocket import active_sessions
-    from src.screening_pipeline.candidate_identity import looks_like_bot, name_matches_candidate
-    from src.screening_pipeline.candidate_presence import mark_candidate_joined, record_participant
+    from src.screening_pipeline.candidate_presence import apply_participant_event
 
     session_id = str(session.id)
     name = str(data.get("participant_name") or "")
-    participant_uuid = str(data.get("participant_uuid") or name)
     is_host = data.get("participant_is_host") is True
-    is_bot = looks_like_bot(name)
-    is_candidate = False
-    if not is_host and not is_bot:
-        first_name, last_name = await interview_session_repo.get_candidate_name(
-            session.application_id
-        )
-        is_candidate = name_matches_candidate(name, first_name, last_name)
-    record_participant(
-        session_id,
-        participant_uuid,
-        name=name,
-        is_host=is_host,
-        is_bot=is_bot,
-        is_candidate=is_candidate,
-    )
+    first_name, last_name = await interview_session_repo.get_candidate_name(session.application_id)
+    is_candidate = apply_participant_event(session_id, data, first_name, last_name)
     if not is_candidate:
         logger.info(
             "Participant joined who is not the candidate; still waiting",
@@ -119,7 +104,6 @@ async def _handle_participant_join(bot_id: str, data: Dict[str, Any]) -> None:
                 "session_id": session_id,
                 "participant_name": name,
                 "is_host": is_host,
-                "is_bot": is_bot,
             },
         )
         return
@@ -128,7 +112,6 @@ async def _handle_participant_join(bot_id: str, data: Dict[str, Any]) -> None:
         "Candidate joined the meeting",
         extra={"session_id": session_id, "participant_name": name},
     )
-    mark_candidate_joined(session_id)
     runtime = active_sessions.get(session_id)
     if runtime:
         await runtime.policy.candidate_joined()
@@ -146,7 +129,7 @@ async def process_participant_event(payload: Dict[str, Any]):
         logger.debug("Barge-in detected via webhook", extra={"bot_id": bot_id})
 
     if event in {"join", "participant_join", "participant_joined", "joined"} and bot_id:
-        await _handle_participant_join(bot_id, data)
+        await _handle_participant_join(bot_id, {**data, "event_type": "join"})
         return
 
     # Provider event spelling varies by meeting platform, so accept the

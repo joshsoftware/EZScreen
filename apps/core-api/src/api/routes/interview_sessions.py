@@ -246,6 +246,7 @@ def update_interview_session_status(
         db,
         session=session,
         new_status=body.status,
+        note=body.note,
     )
     return interview_session_service.interview_session_to_response(updated)
 
