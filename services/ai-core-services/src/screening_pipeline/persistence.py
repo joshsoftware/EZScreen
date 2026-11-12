@@ -145,7 +145,10 @@ async def build_final_summary(
 
     prompt = FINAL_QUALITATIVE_SUMMARY_PROMPT.format(
         category_scores=json.dumps(summary_math["category_averages"], indent=2),
-        transcript=json.dumps(evaluations, indent=2)
+        weighted_scores=json.dumps(summary_math["raw_scores"], indent=2),
+        overall_score=summary_math["overall_score"],
+        total_raw_score=summary_math["total_raw_score"],
+        transcript=json.dumps(evaluations, indent=2),
     )
     prompt += f"\n\n═══ INTERVIEW TERMINATION REASON ═══\n{termination_context}\nIf the interview was terminated early, explicitly state why in the final bullet point."
     

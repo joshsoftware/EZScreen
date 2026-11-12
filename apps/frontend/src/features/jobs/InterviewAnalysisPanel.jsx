@@ -46,6 +46,48 @@ export function interviewAnalysisHeader(analysis) {
   }
 }
 
+// Same weights as the screening summary. An unasked category gives its
+// weight to Must-have, matching calculate_final_weighted_score.
+const SCREENING_CATEGORIES = [
+  { key: 'must_have_matched', label: 'Must-have', field: 'raw_must_have_score', weight: 60 },
+  { key: 'experience_domain', label: 'Domain', field: 'raw_domain_expertise_score', weight: 20 },
+  { key: 'good_to_have', label: 'Good to have', field: 'raw_good_to_have_score', weight: 10 },
+  { key: 'lacking_skill', label: 'Skill gaps', field: 'raw_lacking_skill_score', weight: 10 },
+]
+
+function formatShare(percent) {
+  if (percent == null || !Number.isFinite(percent)) return '—'
+  const rounded = Math.round(percent * 10) / 10
+  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`
+}
+
+function screeningCategoryBreakdown(summary, evaluations) {
+  const counts = Object.fromEntries(SCREENING_CATEGORIES.map((item) => [item.key, 0]))
+  for (const evaluation of evaluations) {
+    const key = evaluation?.category
+    if (key in counts) counts[key] += 1
+  }
+  const knowsWhatWasAsked = Object.values(counts).some((count) => count > 0)
+
+  const weights = Object.fromEntries(SCREENING_CATEGORIES.map((item) => [item.key, item.weight]))
+  if (knowsWhatWasAsked) {
+    for (const item of SCREENING_CATEGORIES) {
+      if (item.key === 'must_have_matched' || counts[item.key] > 0) continue
+      weights.must_have_matched += weights[item.key]
+      weights[item.key] = 0
+    }
+  }
+
+  return SCREENING_CATEGORIES.flatMap((item) => {
+    const value = asNumber(summary?.[item.field])
+    const weight = weights[item.key]
+    const asked = knowsWhatWasAsked ? counts[item.key] > 0 : weight > 0 && value != null
+    if (value == null && !asked) return []
+    const percent = weight > 0 && value != null ? (value / weight) * 100 : null
+    return [{ label: item.label, value, weight, percent, asked }]
+  })
+}
+
 function categoryLabel(category) {
   const map = {
     must_have_matched: 'Must-have',
@@ -426,14 +468,18 @@ function Scorecard({
             Category totals
           </p>
           {breakdown.map((item) => (
-            <div
-              key={item.label}
-              className="flex items-baseline justify-between gap-sm text-body-sm"
-            >
-              <span className="text-on-surface-variant">{item.label}</span>
-              <span className="font-medium text-on-surface tabular-nums">
-                {item.value.toFixed(1)}
-              </span>
+            <div key={item.label} className="space-y-0.5">
+              <div className="flex items-baseline justify-between gap-sm text-body-sm">
+                <span className="text-on-surface-variant">{item.label}</span>
+                <span className="font-medium text-on-surface tabular-nums">
+                  {item.asked ? formatShare(item.percent) : 'Not asked'}
+                </span>
+              </div>
+              {item.weight > 0 && item.value != null ? (
+                <p className="text-label-md text-on-surface-variant tabular-nums">
+                  Weight {item.weight} · {item.value.toFixed(1)} pts
+                </p>
+              ) : null}
             </div>
           ))}
         </div>
@@ -588,12 +634,7 @@ export function InterviewAnalysisPanel({
   const evaluated = evaluations.length
   const tone = interviewScoreTone(overall)
 
-  const breakdown = [
-    { label: 'Must-have', value: asNumber(summary?.raw_must_have_score) },
-    { label: 'Domain', value: asNumber(summary?.raw_domain_expertise_score) },
-    { label: 'Good to have', value: asNumber(summary?.raw_good_to_have_score) },
-    { label: 'Skill gaps', value: asNumber(summary?.raw_lacking_skill_score) },
-  ].filter((item) => item.value != null)
+  const breakdown = screeningCategoryBreakdown(summary, evaluations)
 
   const reEvaluations = Array.isArray(analysis.re_evaluations) ? analysis.re_evaluations : []
   const canReEvaluate = Boolean(sessionId) && evaluations.length > 0
