@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from src.models.application import Application
+from src.models.interview_analysis import InterviewAnalysis
 from src.schemas.application import (
     ApplicationDetailResponse,
     ApplicationResumeResponse,
@@ -44,6 +45,7 @@ def list_applicants(
         .limit(min(limit, 50))
     )
     applications = list(db.scalars(stmt).all())
+    interview_scores = _latest_interview_scores(db, [application.id for application in applications])
     return [
         ApplicantListItem(
             id=application.id,
@@ -53,6 +55,7 @@ def list_applicants(
             source=application.source.value,
             candidate_yoe=application.candidate_yoe,
             resume_score=application.resume_score,
+            interview_score=interview_scores.get(application.id),
             first_name=application.candidate.first_name if application.candidate else None,
             last_name=application.candidate.last_name if application.candidate else None,
             email=application.candidate.email if application.candidate else None,
@@ -61,6 +64,29 @@ def list_applicants(
         )
         for application in applications
     ]
+
+
+def _latest_interview_scores(db: Session, application_ids: list[UUID]) -> dict[UUID, float | None]:
+    """Overall screening score from each application's newest interview analysis."""
+    if not application_ids:
+        return {}
+    score_text = InterviewAnalysis.analysis_result["final_summary"]["overall_score"].astext
+    stmt = (
+        select(InterviewAnalysis.application_id, score_text)
+        .where(InterviewAnalysis.application_id.in_(application_ids))
+        .distinct(InterviewAnalysis.application_id)
+        .order_by(InterviewAnalysis.application_id, InterviewAnalysis.created_at.desc())
+    )
+    scores: dict[UUID, float | None] = {}
+    for application_id, raw_score in db.execute(stmt):
+        if raw_score is None or raw_score == "":
+            scores[application_id] = None
+            continue
+        try:
+            scores[application_id] = float(raw_score)
+        except (TypeError, ValueError):
+            scores[application_id] = None
+    return scores
 
 
 def get_application(db: Session, application_id: UUID) -> Application | None:
