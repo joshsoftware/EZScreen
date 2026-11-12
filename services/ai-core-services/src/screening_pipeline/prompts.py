@@ -69,6 +69,57 @@ UNIFIED_SCREENING_SYSTEM = (
 # Greeting and closing messages
 GREETING_TEXT = "Hi! I am your interviewer for today's interview. We’ll begin with a few technical questions. Let me know when you’re ready."
 CLOSING_TEXT = "Thank you for your time today. Our HR team will be in touch shortly."
+GREETING_CLOSING_TEXT = "We’ll begin with a few technical questions. Let me know when you’re ready."
+# HR's company / role text is read aloud as written; capped so the opening
+# stays short even if more was saved.
+INTRO_TEXT_MAX_CHARS = 500
+
+
+def _intro_sentence(text: str | None) -> str:
+    """HR's text as one spoken passage: whitespace collapsed, capped, and
+    ending in punctuation so the next sentence doesn't run into it."""
+    cleaned = " ".join(str(text or "").split())
+    if len(cleaned) > INTRO_TEXT_MAX_CHARS:
+        cut = cleaned[:INTRO_TEXT_MAX_CHARS]
+        end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+        cleaned = cut[: end + 1] if end > 0 else cut.rsplit(" ", 1)[0]
+    if cleaned and cleaned[-1] not in ".!?":
+        cleaned += "."
+    return cleaned
+
+
+def build_greeting(
+    *,
+    candidate_first_name: str | None = None,
+    company_name: str | None = None,
+    company_details: str | None = None,
+    job_title: str | None = None,
+    role_intro: str | None = None,
+) -> str:
+    """The bot's opening: the company and role details HR wrote, as written.
+
+    Without any of them it is the standard GREETING_TEXT.
+    """
+    first_name = " ".join(str(candidate_first_name or "").split())
+    company = " ".join(str(company_name or "").split())
+    title = " ".join(str(job_title or "").split())
+    details = _intro_sentence(company_details)
+    role = _intro_sentence(role_intro)
+    if not (first_name or company or title or details or role):
+        return GREETING_TEXT
+    parts = [f"Hi {first_name}!" if first_name else "Hi!"]
+    parts.append(
+        f"I am the AI interviewer from {company}." if company
+        else "I am your interviewer for today's interview."
+    )
+    if details:
+        parts.append(details)
+    if title:
+        parts.append(f"This screening is for the {title} role.")
+    if role:
+        parts.append(role)
+    parts.append(GREETING_CLOSING_TEXT)
+    return " ".join(parts)
 SILENCE_PROMPT_TEXT = "Are you there?"
 # Spoken after every completed question (except REPEAT_QUESTION). Named as a
 # constant, not an inline literal, so the TTS warm cache (see

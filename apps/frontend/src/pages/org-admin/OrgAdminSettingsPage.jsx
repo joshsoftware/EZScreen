@@ -4,6 +4,7 @@ import { useAuth } from '../../features/auth/AuthContext'
 import { changePasswordRequest } from '../../features/auth/api'
 import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import { updateOrganizationRequest } from '../../features/org-admin/api'
+import { CompanyDetailsPanel } from '../../features/org-admin/CompanyDetailsPanel'
 import {
   useOrganizationQuery,
   useOrganizationQueryClient,
@@ -238,7 +239,7 @@ export function OrgAdminSettingsPage() {
     <div className="max-w-3xl space-y-2xl">
       <PageHeader
         title="Settings"
-        description="Manage your account password, service status, and organization screening labels."
+        description="Manage your account password, service status, company details for the AI interviewer, and organization screening labels."
       />
 
       <div id="system-status">
@@ -285,6 +286,14 @@ export function OrgAdminSettingsPage() {
           </Button>
         </form>
       </Panel>
+
+      {orgId ? (
+        <CompanyDetailsPanel
+          orgId={orgId}
+          org={org}
+          onSaved={(updated) => setOrganizationData(orgId, updated)}
+        />
+      ) : null}
 
       {error ? (
         <div>

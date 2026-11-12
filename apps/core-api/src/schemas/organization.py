@@ -131,12 +131,32 @@ class OrganizationCreate(BaseModel):
         return domain
 
 
+# The AI interviewer reads this aloud, so it stays a few sentences.
+COMPANY_DETAILS_MAX_LENGTH = 500
+
+
+def company_details_from_settings(settings: dict[str, Any] | None) -> str | None:
+    value = (settings or {}).get("company_details")
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
 class OrganizationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     domain: str | None = Field(default=None, max_length=255)
     logo_url: str | None = None
     is_active: bool | None = None
     fit_labels: list[FitLabel] | None = Field(default=None, min_length=1, max_length=12)
+    # Read aloud by the AI interviewer at the start of every screening.
+    company_details: str | None = Field(default=None, max_length=COMPANY_DETAILS_MAX_LENGTH)
+
+    @field_validator("company_details", mode="before")
+    @classmethod
+    def strip_company_details(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
 
     @field_validator("name", "domain", mode="before")
     @classmethod
@@ -176,6 +196,7 @@ class OrganizationResponse(BaseModel):
     fit_labels: list[FitLabel] = Field(
         default_factory=lambda: [FitLabel.model_validate(item) for item in DEFAULT_FIT_LABELS]
     )
+    company_details: str | None = None
     created_at: datetime | None = None
     user_count: int = 0
     job_count: int = 0

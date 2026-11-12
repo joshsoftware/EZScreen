@@ -109,6 +109,10 @@ def _validate_description(value: str | None) -> str | None:
     return value
 
 
+# The AI interviewer reads this aloud, so it stays a few sentences.
+ROLE_INTRO_MAX_LENGTH = 500
+
+
 class SkillItem(BaseModel):
     skill: str = Field(min_length=1, max_length=255)
     required_years: float | None = Field(default=None, ge=0, le=50)
@@ -157,13 +161,14 @@ class JobCreate(BaseModel):
     job_type: JobType | None = None
     work_type: WorkType | None = None
     location: str | None = Field(default=None, max_length=255)
+    role_intro: str | None = Field(default=None, max_length=ROLE_INTRO_MAX_LENGTH)
     experience_min: float | None = None
     experience_max: float | None = None
     skills: JobSkills | None = None
     status: JobStatus = JobStatus.draft
     organization_id: UUID | None = None
 
-    @field_validator("title", "description", "location", mode="before")
+    @field_validator("title", "description", "location", "role_intro", mode="before")
     @classmethod
     def strip_strings(cls, value: object) -> object:
         if isinstance(value, str):
@@ -219,12 +224,13 @@ class JobUpdate(BaseModel):
     job_type: JobType | None = None
     work_type: WorkType | None = None
     location: str | None = Field(default=None, max_length=255)
+    role_intro: str | None = Field(default=None, max_length=ROLE_INTRO_MAX_LENGTH)
     experience_min: float | None = None
     experience_max: float | None = None
     skills: JobSkills | None = None
     status: JobStatus | None = None
 
-    @field_validator("title", "description", "location", mode="before")
+    @field_validator("title", "description", "location", "role_intro", mode="before")
     @classmethod
     def strip_strings(cls, value: object) -> object:
         if isinstance(value, str):
@@ -307,6 +313,7 @@ class JobResponse(BaseModel):
     job_type: JobType | None
     work_type: WorkType | None
     location: str | None
+    role_intro: str | None = None
     experience_min: float | None
     experience_max: float | None
     skills: JobSkills | None = None
