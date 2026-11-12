@@ -69,6 +69,10 @@ UNIFIED_SCREENING_SYSTEM = (
 # Greeting and closing messages
 GREETING_TEXT = "Hi! I am your interviewer for today's interview. We’ll begin with a few technical questions. Let me know when you’re ready."
 CLOSING_TEXT = "Thank you for your time today. Our HR team will be in touch shortly."
+# Interview length when the booking doesn't say (minutes), and how close to
+# the end the bot stops starting new questions, so it closes on time.
+DEFAULT_INTERVIEW_MINUTES = 30
+NO_NEW_QUESTION_IN_LAST_SECONDS = 120
 SILENCE_PROMPT_TEXT = "Are you there?"
 # Spoken after every completed question (except REPEAT_QUESTION). Named as a
 # constant, not an inline literal, so the TTS warm cache (see

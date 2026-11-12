@@ -13,7 +13,7 @@ from src.screening_pipeline.routing_engine import (
     DOWNGRADE_THRESHOLD,
     calculate_final_weighted_score,
     calculate_rolling_average,
-    get_next_question,
+    get_adaptive_next_question as get_next_question,
     initialize_queues,
 )
 

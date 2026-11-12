@@ -138,6 +138,12 @@ async def build_final_summary(
     termination_context = "The interview completed successfully after asking the designated questions."
     if termination_reason == "fatal_failure":
         termination_context = "CRITICAL: The interview was terminated early because the candidate failed to recover their score across multiple categories. They struggled significantly."
+    elif termination_reason == "not_eligible_early":
+        termination_context = "The interview was ended early: the candidate's answers to the first 4 compulsory questions (must-have and domain) scored below 3 out of 10, so the remaining questions were not asked."
+    elif termination_reason == "time_limit":
+        termination_context = "The interview reached the end of its booked time after the compulsory questions, so the remaining questions were not asked. This is not a judgement on the candidate."
+    elif termination_reason == "not_eligible":
+        termination_context = "The interview was ended early: the candidate's answers to the 8 compulsory questions (must-have, domain, good-to-have and skill-gap) scored below 5 out of 10, so the remaining questions were not asked."
     elif termination_reason == "candidate_silence":
         termination_context = "CRITICAL: The interview was terminated early because the candidate became completely unresponsive and stopped answering."
     elif termination_reason == "re_evaluation":
@@ -166,7 +172,21 @@ async def build_final_summary(
         interview_summary_points = ["Evaluation complete, but failed to generate qualitative summary."]
 
     formatted_summary = "\n".join(f"• {pt}" for pt in interview_summary_points) if isinstance(interview_summary_points, list) else str(interview_summary_points)
-    
+    # Stated by us, not left to the AI summary (which may be unavailable).
+    ended_early = {
+        "not_eligible_early": (
+            f"• Ended early: the first {len(evaluations)} compulsory questions scored "
+            f"{summary_math['overall_score']}/10, below 3, so the remaining questions were not asked."
+        ),
+        "not_eligible": (
+            f"• Ended early: the 8 compulsory questions scored {summary_math['overall_score']}/10, "
+            "below 5, so the remaining questions were not asked."
+        ),
+        "time_limit": "• Ended at the booked interview time; the remaining questions were not asked.",
+    }.get(termination_reason)
+    if ended_early:
+        formatted_summary = f"{ended_early}\n{formatted_summary}" if formatted_summary else ended_early
+
     return {
         "raw_must_have_score": summary_math["raw_scores"].get("must_have_matched", 0.0),
         "raw_domain_expertise_score": summary_math["raw_scores"].get("experience_domain", 0.0),
