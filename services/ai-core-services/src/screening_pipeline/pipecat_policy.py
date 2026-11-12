@@ -121,6 +121,8 @@ class PipecatInterviewPolicy:
         self._end_lock = asyncio.Lock()
         self._ending = False
         self.termination_reason: Optional[str] = None
+        # "Let's move on…" waiting to be said before the next question.
+        self._pending_transition_text: Optional[str] = None
         # When the candidate first heard the bot (greeting / resume): the
         # booked interview time is counted from here.
         self._interview_started_at: Optional[float] = None
@@ -1043,7 +1045,10 @@ class PipecatInterviewPolicy:
             "Moving on to the next question",
             extra={"session_id": self.session_id, "reason": reason},
         )
-        await self.speak(MOVE_ON_TEXT)
+        # Said just before the next question, not here: if this answer ends
+        # the interview (early stop, time limit) the bot goes straight to
+        # the closing instead of promising a next question.
+        self._pending_transition_text = MOVE_ON_TEXT
         if primary_eval_data is not None:
             # The follow-up went unanswered; _complete_question leaves it out
             # of the Q&A save but it stays in the transcript.
@@ -1232,6 +1237,7 @@ class PipecatInterviewPolicy:
                 extra={"session_id": self.session_id, "minutes": self._interview_minutes()},
             )
             self.termination_reason = "time_limit"
+            self._pending_transition_text = None
             await self._close_interview()
             return
 
@@ -1252,8 +1258,14 @@ class PipecatInterviewPolicy:
                     },
                 )
                 self.termination_reason = termination_reason
+            self._pending_transition_text = None
             await self._close_interview()
             return
+
+        transition = self._pending_transition_text
+        self._pending_transition_text = None
+        if transition:
+            await self.speak(transition)
 
         self.current_question_obj = question_obj
         q_text = question_obj.get("question", "")

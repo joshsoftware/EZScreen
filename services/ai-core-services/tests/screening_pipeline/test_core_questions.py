@@ -223,3 +223,40 @@ async def test_the_clock_starts_when_the_bot_greets_the_candidate():
 
     assert policy._interview_started_at is not None
     assert policy._interview_started_at >= before
+
+
+# --- No "let's move on" when the answer ends the interview ---
+
+from src.screening_pipeline.prompts import MOVE_ON_TEXT  # noqa: E402
+
+
+def _spoken_texts(policy):
+    return [call.args[0] for call in policy.speech_output.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_skipping_the_deciding_question_goes_straight_to_the_closing():
+    """Test 1: the 4th skip ends it; the bot must not promise a next question."""
+    policy = _policy_mid_interview(answered=3, minutes_ago=5)
+    for evaluation in policy.analysis_evaluations:
+        evaluation["score"] = 0  # 3 skips so far
+    question = policy.question_queues["must_have_matched"][0]
+
+    await policy._move_on(question, question["question"], "skip", None, reason="skip")
+
+    assert MOVE_ON_TEXT not in _spoken_texts(policy)
+    policy._close_interview.assert_awaited_once()
+    assert policy.termination_reason == "not_eligible_early"
+
+
+@pytest.mark.asyncio
+async def test_skipping_mid_interview_still_says_move_on_before_the_next_question():
+    policy = _policy_mid_interview(answered=1, minutes_ago=5)
+    question = policy.question_queues["must_have_matched"][0]
+
+    await policy._move_on(question, question["question"], "skip", None, reason="skip")
+
+    spoken = _spoken_texts(policy)
+    assert spoken[0] == MOVE_ON_TEXT
+    assert len(spoken) == 2  # then the next question itself
+    policy._close_interview.assert_not_awaited()
