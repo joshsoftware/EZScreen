@@ -8,9 +8,26 @@ import {
   rescheduleInterviewSessionRequest,
   scheduleInterviewSessionRequest,
 } from './api'
+import { MIN_LEAD_MINUTES } from './screeningSchedule'
 
 function pad(n) {
   return String(n).padStart(2, '0')
+}
+
+
+function toLocalInputValue(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/** Field error for the date & time, or null when it is fine. */
+export function scheduledAtError(value, now = new Date()) {
+  const date = new Date(value)
+  if (!value || Number.isNaN(date.getTime())) return 'Pick a valid date and time.'
+  const earliest = new Date(now.getTime() + MIN_LEAD_MINUTES * 60_000)
+  if (date.getTime() < earliest.getTime()) {
+    return `Pick a time at least ${MIN_LEAD_MINUTES} minutes from now (${pad(earliest.getHours())}:${pad(earliest.getMinutes())} or later).`
+  }
+  return null
 }
 
 /** Default: tomorrow at 10:00 local, as datetime-local value. */
@@ -71,6 +88,19 @@ export function ScheduleScreeningModal({
   const [additionalEmails, setAdditionalEmails] = useState('')
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // Re-checked as time passes, so a slot that was fine when the window
+  // opened can't be submitted once it is less than 5 minutes away.
+  const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    if (!open) return undefined
+    setNow(new Date())
+    const timer = setInterval(() => setNow(new Date()), 15_000)
+    return () => clearInterval(timer)
+  }, [open])
+
+  const timeError = scheduledAtError(scheduledLocal, now)
+  const earliestLocal = toLocalInputValue(new Date(now.getTime() + MIN_LEAD_MINUTES * 60_000))
 
   useEffect(() => {
     if (!open) return
@@ -94,15 +124,12 @@ export function ScheduleScreeningModal({
 
   async function onSubmit() {
     if (submitting) return
+    const error = scheduledAtError(scheduledLocal, new Date())
+    if (error) {
+      toast.error(error)
+      return
+    }
     const scheduledAt = localDatetimeToIso(scheduledLocal)
-    if (!scheduledAt) {
-      toast.error('Pick a valid date and time')
-      return
-    }
-    if (new Date(scheduledAt).getTime() <= Date.now()) {
-      toast.error('Screening time must be in the future')
-      return
-    }
 
     const emails = parseEmailList(additionalEmails)
     if (emails.length > 20) {
@@ -190,14 +217,27 @@ export function ScheduleScreeningModal({
       </p>
 
       <div className="space-y-md">
-        <Input
-          id="screening-scheduled-at"
-          label="Date & time"
-          type="datetime-local"
-          value={scheduledLocal}
-          onChange={(event) => setScheduledLocal(event.target.value)}
-          required
-        />
+        <div className="space-y-xs">
+          <Input
+            id="screening-scheduled-at"
+            label="Date & time"
+            type="datetime-local"
+            value={scheduledLocal}
+            min={earliestLocal}
+            onChange={(event) => setScheduledLocal(event.target.value)}
+            aria-invalid={timeError ? 'true' : undefined}
+            aria-describedby="screening-scheduled-at-help"
+            className={timeError ? 'border-error' : undefined}
+            required
+          />
+          <p
+            id="screening-scheduled-at-help"
+            role={timeError ? 'alert' : undefined}
+            className={timeError ? 'text-label-md text-error' : 'text-label-md text-on-surface-variant'}
+          >
+            {timeError ?? `At least ${MIN_LEAD_MINUTES} minutes from now.`}
+          </p>
+        </div>
         <Select
           id="screening-duration"
           label="Duration"
@@ -236,6 +276,7 @@ export function ScheduleScreeningModal({
         <Button
           icon="event"
           loading={submitting}
+          disabled={Boolean(timeError)}
           onClick={() => void onSubmit()}
         >
           {submitting
@@ -247,6 +288,10 @@ export function ScheduleScreeningModal({
               : 'Schedule screening'}
         </Button>
       </div>
+      <p className="mt-sm text-right text-label-md text-on-surface-variant">
+        Book at least {MIN_LEAD_MINUTES} minutes ahead so the AI interviewer is ready
+        when the candidate joins.
+      </p>
     </Modal>
   )
 }

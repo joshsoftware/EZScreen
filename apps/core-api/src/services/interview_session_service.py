@@ -77,6 +77,21 @@ _RETRYABLE_SESSION_STATUSES = frozenset(
 )
 
 
+# A screening must start at least this far ahead: the AI interviewer prepares
+# its spoken greeting before it joins, and a last-minute booking leaves the
+# candidate in silence while that happens.
+SCREENING_MIN_LEAD_MINUTES = 5
+
+
+def _assert_enough_lead_time(scheduled_at: datetime) -> None:
+    earliest = datetime.now(timezone.utc) + timedelta(minutes=SCREENING_MIN_LEAD_MINUTES)
+    if scheduled_at.astimezone(timezone.utc) < earliest:
+        raise ValueError(
+            f"Book the screening at least {SCREENING_MIN_LEAD_MINUTES} minutes from now, "
+            "so the AI interviewer is ready when the candidate joins."
+        )
+
+
 def _scored_answer_count(session: InterviewSession) -> int:
     analysis = session.analysis
     result = analysis.analysis_result if analysis is not None else None
@@ -307,8 +322,7 @@ def _assert_schedulable(
     if "screening_scheduled" in types or _has_active_session(db, application.id):
         raise ValueError("Screening is already scheduled for this application")
 
-    if scheduled_at.astimezone(timezone.utc) <= datetime.now(timezone.utc):
-        raise ValueError("scheduled_at must be in the future")
+    _assert_enough_lead_time(scheduled_at)
 
     return types
 
@@ -347,8 +361,7 @@ def _assert_reschedulable(
     if application.status not in allowed_statuses:
         raise ValueError("Application is not in a scheduled screening state")
 
-    if scheduled_at.astimezone(timezone.utc) <= datetime.now(timezone.utc):
-        raise ValueError("scheduled_at must be in the future")
+    _assert_enough_lead_time(scheduled_at)
 
 
 def _resolve_meet(
