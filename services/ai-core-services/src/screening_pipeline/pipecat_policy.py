@@ -41,6 +41,8 @@ from src.screening_pipeline.prompts import (
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
     START_WITHOUT_REPLY_TEXT,
+    DEFAULT_INTERVIEW_MINUTES,
+    NO_NEW_QUESTION_IN_LAST_SECONDS,
     build_greeting,
     STT_RESULT_GRACE_SECONDS,
     UNFINISHED_ANSWER_EXTRA_SECONDS,
@@ -124,6 +126,11 @@ class PipecatInterviewPolicy:
         self._end_lock = asyncio.Lock()
         self._ending = False
         self.termination_reason: Optional[str] = None
+        # "Let's move on…" waiting to be said before the next question.
+        self._pending_transition_text: Optional[str] = None
+        # When the candidate first heard the bot (greeting / resume): the
+        # booked interview time is counted from here.
+        self._interview_started_at: Optional[float] = None
         self._pending_persist_tasks: list[asyncio.Task] = []
         self._question_save_lock = asyncio.Lock()
         # True from VAD "started speaking" until VAD confirms "stopped
@@ -267,9 +274,28 @@ class PipecatInterviewPolicy:
             "Resuming an interview that was already underway",
             extra={"session_id": self.session_id, "answered_questions": len(evaluations)},
         )
+        self._mark_interview_started()
         await self.speak(RESUME_TEXT)
         await self._ask_next_question()
         return True
+
+    def _mark_interview_started(self) -> None:
+        if self._interview_started_at is None:
+            self._interview_started_at = asyncio.get_running_loop().time()
+
+    def _interview_minutes(self) -> float:
+        metadata = getattr(self.session, "interview_metadata", None)
+        minutes = metadata.get("duration_minutes") if isinstance(metadata, dict) else None
+        if isinstance(minutes, (int, float)) and not isinstance(minutes, bool) and minutes > 0:
+            return float(minutes)
+        return float(DEFAULT_INTERVIEW_MINUTES)
+
+    def _out_of_time(self) -> bool:
+        """True in the last NO_NEW_QUESTION_IN_LAST_SECONDS of the booked time."""
+        if self._interview_started_at is None:
+            return False
+        elapsed = asyncio.get_running_loop().time() - self._interview_started_at
+        return elapsed >= self._interview_minutes() * 60 - NO_NEW_QUESTION_IN_LAST_SECONDS
 
     async def _personal_greeting(self) -> str:
         """Opening with the company and role details HR wrote; the standard
@@ -295,6 +321,9 @@ class PipecatInterviewPolicy:
                     "Could not prepare the greeting audio; speaking it as it is made",
                     extra={"session_id": self.session_id, "error": str(err)},
                 )
+        # The booked time counts from when the candidate hears the bot, not
+        # from while the greeting audio was still being prepared.
+        self._mark_interview_started()
         self.transcript_log.append(
             {
                 "interaction_type": "greeting",
@@ -1047,7 +1076,10 @@ class PipecatInterviewPolicy:
             "Moving on to the next question",
             extra={"session_id": self.session_id, "reason": reason},
         )
-        await self.speak(MOVE_ON_TEXT)
+        # Said just before the next question, not here: if this answer ends
+        # the interview (early stop, time limit) the bot goes straight to
+        # the closing instead of promising a next question.
+        self._pending_transition_text = MOVE_ON_TEXT
         if primary_eval_data is not None:
             # The follow-up went unanswered; _complete_question leaves it out
             # of the Q&A save but it stays in the transcript.
@@ -1226,17 +1258,45 @@ class PipecatInterviewPolicy:
             from src.screening_pipeline.routing_engine import initialize_queues
             self.question_queues = initialize_queues(self.questions)
             
-        from src.screening_pipeline.routing_engine import get_next_question
-        
+        from src.screening_pipeline.routing_engine import CORE_SEQUENCE, get_next_question
+
+        # After the compulsory questions, no new question near the end of the
+        # booked time: close on time instead of running over.
+        if len(self.analysis_evaluations) >= len(CORE_SEQUENCE) and self._out_of_time():
+            logger.info(
+                "Booked interview time is up; closing",
+                extra={"session_id": self.session_id, "minutes": self._interview_minutes()},
+            )
+            self.termination_reason = "time_limit"
+            self._pending_transition_text = None
+            await self._close_interview()
+            return
+
         question_obj, termination_reason = get_next_question(self.question_queues, self.analysis_evaluations)
         
         if not question_obj:
             if termination_reason == "fatal_failure":
-                from src.core.logger import logger
                 logger.info("Candidate failed to recover. Terminating early.", extra={"session_id": self.session_id})
                 self.termination_reason = "fatal_failure"
+            elif termination_reason in ("not_eligible", "not_eligible_early"):
+                from src.screening_pipeline.routing_engine import core_phase_score
+
+                logger.info(
+                    "Compulsory questions scored below the bar; ending early",
+                    extra={
+                        "session_id": self.session_id,
+                        "core_score": core_phase_score(self.analysis_evaluations),
+                    },
+                )
+                self.termination_reason = termination_reason
+            self._pending_transition_text = None
             await self._close_interview()
             return
+
+        transition = self._pending_transition_text
+        self._pending_transition_text = None
+        if transition:
+            await self.speak(transition)
 
         self.current_question_obj = question_obj
         q_text = question_obj.get("question", "")
