@@ -7,8 +7,16 @@ class AttendeeAudioSettings(BaseModel):
     sample_rate: int = 24000
 
 
+class AttendeeVideoSettings(BaseModel):
+    """Per-participant webcam frames, used only to see whose camera is on."""
+    url: str
+    webcam_resolution: str = "360p"  # the lowest Attendee offers (2 frames a second)
+    screenshare_resolution: str = "none"
+
+
 class AttendeeWebsocketSettings(BaseModel):
     audio: AttendeeAudioSettings
+    per_participant_video: Optional[AttendeeVideoSettings] = None
 
 
 class AttendeeWebhookConfig(BaseModel):

@@ -43,15 +43,16 @@ from src.screening_pipeline.prompts import (
     SILENCE_PROMPT_TEXT,
     START_WITHOUT_REPLY_TEXT,
     RESUME_TEXT,
+    CAMERA_PROMPT_TEXT,
 )
 
 
 def test_interview_timing_and_prompt_contract_is_explicit():
-    # The greeting invites a reply ("Let me know when you're ready") and the
-    # first question follows it (START_WITHOUT_REPLY_TEXT if none comes).
+    # The greeting no longer asks "let me know when you're ready": the first
+    # question follows it straight away.
     assert GREETING_TEXT == (
         "Hi! I am your interviewer for today's interview. We’ll begin with a few "
-        "technical questions. Let me know when you’re ready."
+        "technical questions."
     )
     assert CLOSING_TEXT == (
         "Thank you for your time today. Our HR team will be in touch shortly."
@@ -727,6 +728,7 @@ async def test_start_warms_tts_cache_with_greeting_closing_and_all_questions():
             MOVE_ON_TEXT,
             START_WITHOUT_REPLY_TEXT,
             RESUME_TEXT,
+            CAMERA_PROMPT_TEXT,
             *FILLER_TEXTS,
             "What is a closure?",
             "Explain event loops.",

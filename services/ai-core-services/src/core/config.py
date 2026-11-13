@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     # joining or speaking starts it, as before. A switch, so the feature can
     # be turned off without a code change if it ever blocks interviews.
     screening_require_real_candidate: bool = True
+    # Start the interview only when the candidate's camera is on (Attendee
+    # streams each participant's webcam to us). false = no camera check and
+    # the webcam stream isn't requested. A switch, like the one above.
+    screening_require_camera_on: bool = True
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),

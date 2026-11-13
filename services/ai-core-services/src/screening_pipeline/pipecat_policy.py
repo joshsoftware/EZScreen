@@ -20,6 +20,7 @@ from src.screening_pipeline.persistence import (
 )
 from src.screening_pipeline.candidate_presence import (
     apply_participant_event,
+    candidate_camera_on,
     forget_session,
     is_candidate_present,
     speech_may_start_interview,
@@ -49,6 +50,9 @@ from src.screening_pipeline.prompts import (
     SILENCE_PROMPT_TEXT,
     START_WITHOUT_REPLY_TEXT,
     candidate_did_not_join_note,
+    camera_not_on_note,
+    CAMERA_PROMPT_INTERVAL_SECONDS,
+    CAMERA_PROMPT_TEXT,
     DEFAULT_INTERVIEW_MINUTES,
     FINAL_QUESTION_CATEGORIES,
     NO_NEW_QUESTION_IN_LAST_SECONDS,
@@ -138,6 +142,10 @@ class PipecatInterviewPolicy:
         # Shown to HR with the final status (e.g. why it's a no-show).
         self._status_note: Optional[str] = None
         self._candidate_name: Optional[tuple] = None
+        # The candidate is in the meeting (the camera may still be off), and
+        # the "please turn on your camera" reminder loop.
+        self._candidate_seen = False
+        self._camera_prompt_task: Optional[asyncio.Task] = None
         # "Let's move on…" waiting to be said before the next question.
         self._pending_transition_text: Optional[str] = None
         # When the candidate first heard the bot (greeting / resume): the
@@ -223,10 +231,11 @@ class PipecatInterviewPolicy:
         if await self._resume_saved_progress():
             return
 
-        if is_candidate_present(self.session_id):
+        if is_candidate_present(self.session_id) and candidate_camera_on(self.session_id):
             await self._greet()
             return
-        # Don't talk to an empty meeting: greet when the candidate joins.
+        # Don't talk to an empty meeting: greet when the candidate joins
+        # (with the camera on).
         self.current_interaction_state = "waiting_for_candidate"
         self._candidate_wait_task = asyncio.create_task(self._wait_for_candidate())
         logger.info(
@@ -237,6 +246,8 @@ class PipecatInterviewPolicy:
                 "poll_seconds": CANDIDATE_JOIN_POLL_SECONDS,
             },
         )
+        if is_candidate_present(self.session_id):
+            await self.candidate_joined()  # here, camera off: ask for it
 
     async def _resume_saved_progress(self) -> bool:
         """Continue an interview a previous runtime left mid-way.
@@ -370,16 +381,57 @@ class PipecatInterviewPolicy:
             }
         )
         await self.speak(greeting)
-        self._begin_listening()
+        # No "let me know when you're ready": the candidate is already here
+        # (and on camera), so the first question follows the greeting.
+        await self._ask_next_question()
 
     async def candidate_joined(self) -> None:
-        """The candidate joined (or spoke): start the interview if waiting."""
+        """The candidate joined (or spoke): start the interview if waiting and
+        their camera is on; otherwise ask them to turn it on and keep waiting."""
         if not self.is_active or self.current_interaction_state != "waiting_for_candidate":
+            return
+        self._candidate_seen = True
+        if not candidate_camera_on(self.session_id):
+            self._start_camera_prompts()
             return
         self._cancel_candidate_wait()
         self.current_interaction_state = "idle"
         logger.info("Candidate joined; starting the interview", extra={"session_id": self.session_id})
         await self._greet()
+
+    async def camera_frame_seen(self) -> None:
+        """A participant's camera came on: start if it is the candidate's."""
+        if (
+            self._candidate_seen
+            and self.current_interaction_state == "waiting_for_candidate"
+            and candidate_camera_on(self.session_id)
+        ):
+            logger.info("Candidate's camera is on", extra={"session_id": self.session_id})
+            await self.candidate_joined()
+
+    def _start_camera_prompts(self) -> None:
+        if self._camera_prompt_task is None or self._camera_prompt_task.done():
+            logger.info(
+                "Candidate is here but the camera is off; asking for it",
+                extra={"session_id": self.session_id},
+            )
+            self._camera_prompt_task = asyncio.create_task(self._prompt_for_camera())
+
+    async def _prompt_for_camera(self) -> None:
+        while self.is_active and self.current_interaction_state == "waiting_for_candidate":
+            # Not speak(): that switches the state to "speaking", and the bot
+            # must stay "waiting_for_candidate" so the camera coming on (or the
+            # wait running out) is still handled.
+            logger.info("AI speaking", extra={"text": CAMERA_PROMPT_TEXT})
+            if self.speech_output is not None:
+                await self.speech_output(CAMERA_PROMPT_TEXT)
+            await asyncio.sleep(CAMERA_PROMPT_INTERVAL_SECONDS)
+
+    def _cancel_camera_prompts(self) -> None:
+        task = self._camera_prompt_task
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+        self._camera_prompt_task = None
 
     async def _wait_for_candidate(self) -> None:
         """Ask Attendee who is in the meeting every CANDIDATE_JOIN_POLL_SECONDS
@@ -393,25 +445,33 @@ class PipecatInterviewPolicy:
         deadline = loop.time() + CANDIDATE_JOIN_WAIT_SECONDS
         while self.current_interaction_state == "waiting_for_candidate":
             if await self._candidate_in_meeting_per_attendee():
-                if self.current_interaction_state == "waiting_for_candidate":
+                if not self._candidate_seen:
                     logger.info(
                         "Attendee lists the candidate in the meeting",
                         extra={"session_id": self.session_id},
                     )
-                    # Detach first so candidate_joined() doesn't cancel this task.
-                    self._candidate_wait_task = None
-                    await self.candidate_joined()
-                return
+                # Starts the interview, or (camera off) keeps asking for it.
+                await self.candidate_joined()
+                if self.current_interaction_state != "waiting_for_candidate":
+                    return
             remaining = deadline - loop.time()
             if remaining <= 0:
                 break
             await asyncio.sleep(min(CANDIDATE_JOIN_POLL_SECONDS, remaining))
         if self.current_interaction_state == "waiting_for_candidate":
+            self._cancel_camera_prompts()
+            camera_off = self._candidate_seen
             logger.info(
-                "Candidate didn't join; leaving the meeting as a no-show",
+                "Candidate's camera stayed off; leaving the meeting as a no-show"
+                if camera_off
+                else "Candidate didn't join; leaving the meeting as a no-show",
                 extra={"session_id": self.session_id, "wait_seconds": CANDIDATE_JOIN_WAIT_SECONDS},
             )
-            self._status_note = candidate_did_not_join_note(CANDIDATE_JOIN_WAIT_SECONDS)
+            self._status_note = (
+                camera_not_on_note(CANDIDATE_JOIN_WAIT_SECONDS)
+                if camera_off
+                else candidate_did_not_join_note(CANDIDATE_JOIN_WAIT_SECONDS)
+            )
             self._candidate_wait_task = None
             await self.end_interview("candidate_absent", leave_bot=True)
 
@@ -442,6 +502,7 @@ class PipecatInterviewPolicy:
         return is_candidate_present(self.session_id)
 
     def _cancel_candidate_wait(self):
+        self._cancel_camera_prompts()
         task = self._candidate_wait_task
         if task and not task.done() and task is not asyncio.current_task():
             task.cancel()

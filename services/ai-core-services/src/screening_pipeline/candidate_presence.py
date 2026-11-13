@@ -7,6 +7,7 @@ remembered here and read when the runtime starts.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict
 
 from src.core.config import settings
@@ -16,10 +17,55 @@ from src.screening_pipeline.candidate_identity import looks_like_bot, name_match
 def _require_real_candidate() -> bool:
     return bool(getattr(settings, "screening_require_real_candidate", True))
 
+
+def camera_required() -> bool:
+    return bool(getattr(settings, "screening_require_camera_on", True))
+
 # Sessions where the candidate (recognised by name) is in the meeting.
 _present_sessions: set[str] = set()
 # session id -> participant uuid -> {"name", "is_host", "is_bot", "is_candidate"}
 _participants: Dict[str, Dict[str, dict]] = {}
+# session id -> participant uuid -> when their last webcam frame arrived
+_webcam_seen_at: Dict[str, Dict[str, float]] = {}
+
+
+def _camera_fresh_seconds() -> float:
+    from src.screening_pipeline.prompts import CAMERA_FRAME_FRESH_SECONDS
+
+    return CAMERA_FRAME_FRESH_SECONDS
+
+
+def record_webcam_frame(session_id: str, participant_uuid: str, now: float | None = None) -> bool:
+    """A webcam frame arrived from this participant. True when their camera
+    has just come on (no fresh frame from them before)."""
+    now = time.monotonic() if now is None else now
+    seen = _webcam_seen_at.setdefault(str(session_id), {})
+    previous = seen.get(str(participant_uuid))
+    seen[str(participant_uuid)] = now
+    return previous is None or now - previous > _camera_fresh_seconds()
+
+
+def _camera_on(session_id: str, participant_uuid: str, now: float) -> bool:
+    seen_at = _webcam_seen_at.get(str(session_id), {}).get(str(participant_uuid))
+    return seen_at is not None and now - seen_at <= _camera_fresh_seconds()
+
+
+def candidate_camera_on(session_id: str, now: float | None = None) -> bool:
+    """Is the candidate's camera on? Always True when the check is off.
+
+    The candidate is the participant recognised by name; failing that, the
+    only non-host person in the meeting (a candidate with a nickname).
+    Someone else's camera (HR, an observer) doesn't count.
+    """
+    if not camera_required():
+        return True
+    now = time.monotonic() if now is None else now
+    people = _participants.get(str(session_id)) or {}
+    for uuid, person in people.items():
+        if person["is_candidate"] and _camera_on(session_id, uuid, now):
+            return True
+    others = [uuid for uuid, p in people.items() if not p["is_host"] and not p["is_bot"]]
+    return len(others) == 1 and _camera_on(session_id, others[0], now)
 
 
 def mark_candidate_joined(session_id: str) -> None:
@@ -53,6 +99,7 @@ def remove_participant(session_id: str, participant_uuid: str | None) -> None:
     people = _participants.get(str(session_id))
     if not people or participant_uuid is None:
         return
+    _webcam_seen_at.get(str(session_id), {}).pop(str(participant_uuid), None)
     left = people.pop(str(participant_uuid), None)
     if left and left["is_candidate"] and not any(p["is_candidate"] for p in people.values()):
         _present_sessions.discard(str(session_id))
@@ -117,3 +164,4 @@ def speech_may_start_interview(session_id: str) -> bool:
 def forget_session(session_id: str) -> None:
     _present_sessions.discard(str(session_id))
     _participants.pop(str(session_id), None)
+    _webcam_seen_at.pop(str(session_id), None)
