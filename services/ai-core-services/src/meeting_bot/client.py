@@ -8,6 +8,7 @@ from src.screening_pipeline.prompts import build_greeting
 from src.screening_pipeline.tts_prewarm import coerce_questions_list, tts_prewarm_registry
 from src.meeting_bot.schemas import (
     AttendeeAudioSettings,
+    AttendeeVideoSettings,
     AttendeeWebsocketSettings,
     AttendeeScheduleBotRequest,
     DispatchBotRequest,
@@ -56,8 +57,16 @@ class AttendeeBotClient:
         if not meeting_url:
             meeting_url = "https://meet.google.com/ezs-screener-demo"
 
+        camera_check = getattr(settings, "screening_require_camera_on", True)
         attendee_req = AttendeeScheduleBotRequest(
             meeting_url=meeting_url,
+            # Gallery view while the camera check is on: in Google Meet the bot
+            # only gets video it renders, and speaker view renders just the
+            # active speaker, so the candidate's camera could go unseen while
+            # someone else talks. (This also makes the recording a grid.)
+            recording_settings=(
+                {"format": "mp4", "view": "gallery_view"} if camera_check else {"format": "mp4"}
+            ),
             bot_name="ezscreener",
             join_at=scheduled_at,
             transcription_settings={
@@ -67,7 +76,15 @@ class AttendeeBotClient:
                 audio=AttendeeAudioSettings(
                     url=f"{settings.websocket_url.rstrip('/')}/{request.interview_session_id}",
                     sample_rate=24000
-                )
+                ),
+                # Only to check the candidate's camera is on before starting.
+                per_participant_video=(
+                    AttendeeVideoSettings(
+                        url=f"{settings.websocket_url.rstrip('/')}/video/{request.interview_session_id}"
+                    )
+                    if camera_check
+                    else None
+                ),
             )
         )
 

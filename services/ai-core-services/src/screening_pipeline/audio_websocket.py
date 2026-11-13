@@ -195,6 +195,47 @@ async def _run_pipecat_session(websocket: WebSocket, session_id: str):
             # Already logged and handled (session failed, bot removed) by the runtime.
             pass
 
+@router.websocket("/attendee-websocket/video/{session_id}")
+async def attendee_video_ws(websocket: WebSocket, session_id: str):
+    """Per-participant webcam frames from Attendee.
+
+    Used only to tell whose camera is on before the interview starts; the
+    pictures themselves are not decoded or stored.
+    """
+    from src.screening_pipeline.candidate_presence import record_webcam_frame
+
+    await websocket.accept()
+    logger.info("Attendee connected the video WebSocket", extra={"session_id": session_id})
+    try:
+        while True:
+            raw = await websocket.receive()
+            if raw.get("type") == "websocket.disconnect":
+                break
+            text = raw.get("text")
+            if not text:
+                continue
+            try:
+                message = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            data = message.get("data") if isinstance(message, dict) else None
+            if not isinstance(data, dict) or data.get("source") != "webcam":
+                continue
+            participant_uuid = data.get("participant_uuid")
+            if not participant_uuid:
+                continue
+            if record_webcam_frame(session_id, participant_uuid):
+                logger.info(
+                    "Participant camera is on",
+                    extra={"session_id": session_id, "participant_uuid": participant_uuid},
+                )
+                runtime = active_sessions.get(session_id)
+                if runtime:
+                    await runtime.policy.camera_frame_seen()
+    except WebSocketDisconnect:
+        pass
+
+
 @router.websocket("/attendee-websocket/{session_id}")
 async def attendee_audio_ws(websocket: WebSocket, session_id: str):
     """

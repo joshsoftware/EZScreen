@@ -188,6 +188,9 @@ export function ApplicationTimelinePanel({
             <p key={branch.id} className="text-label-md text-on-surface-variant">
               {branch.title}
               {branch.at ? ` · ${formatDateTime(branch.at)}` : ''}
+              {branch.note ? (
+                <span className="block text-body-sm text-on-surface-variant">{branch.note}</span>
+              ) : null}
             </p>
           ))}
         </div>

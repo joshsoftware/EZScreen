@@ -39,6 +39,7 @@ from src.screening_pipeline.prompts import (
     RESUME_TEXT,
     SILENCE_PROMPT_TEXT,
     START_WITHOUT_REPLY_TEXT,
+    CAMERA_PROMPT_TEXT,
 )
 
 # Finish warming this long before the bot is scheduled to join.
@@ -85,6 +86,7 @@ def known_bot_texts(questions: list[dict], extra_texts: list[str] | tuple = ()) 
         MOVE_ON_TEXT,
         START_WITHOUT_REPLY_TEXT,
         RESUME_TEXT,
+        CAMERA_PROMPT_TEXT,
     ]
     texts.extend(FILLER_TEXTS)
     texts.extend(q.get("question", "") for q in questions if q.get("question"))

@@ -16,6 +16,7 @@ from src.screening_pipeline.prompts import (
     SILENCE_PROMPT_TEXT,
     START_WITHOUT_REPLY_TEXT,
     RESUME_TEXT,
+    CAMERA_PROMPT_TEXT,
 )
 from src.screening_pipeline.tts_prewarm import (
     TtsPrewarmRegistry,
@@ -48,6 +49,7 @@ def test_known_bot_texts_includes_constants_and_question_text():
         MOVE_ON_TEXT,
         START_WITHOUT_REPLY_TEXT,
         RESUME_TEXT,
+        CAMERA_PROMPT_TEXT,
         *FILLER_TEXTS,
         "What is Docker?",
     ]
@@ -101,6 +103,7 @@ async def test_schedule_warms_and_claim_returns_the_finished_synthesizer():
             MOVE_ON_TEXT,
             START_WITHOUT_REPLY_TEXT,
             RESUME_TEXT,
+            CAMERA_PROMPT_TEXT,
             *FILLER_TEXTS,
             "What is Docker?",
         ]

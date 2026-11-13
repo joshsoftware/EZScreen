@@ -67,7 +67,7 @@ UNIFIED_SCREENING_SYSTEM = (
 )
 
 # Greeting and closing messages
-GREETING_TEXT = "Hi! I am your interviewer for today's interview. We’ll begin with a few technical questions. Let me know when you’re ready."
+GREETING_TEXT = "Hi! I am your interviewer for today's interview. We’ll begin with a few technical questions."
 CLOSING_TEXT = "Thank you for your time today. Our HR team will be in touch shortly."
 # Interview length when the booking doesn't say (minutes), and how close to
 # the end the bot stops starting new questions, so it closes on time.
@@ -77,7 +77,7 @@ NO_NEW_QUESTION_IN_LAST_SECONDS = 120
 # categories (first that has one left), without a follow-up; running 1-2
 # minutes over the booked time for it is fine.
 FINAL_QUESTION_CATEGORIES = ("good_to_have", "lacking_skill")
-GREETING_CLOSING_TEXT = "We’ll begin with a few technical questions. Let me know when you’re ready."
+GREETING_CLOSING_TEXT = "We’ll begin with a few technical questions."
 # HR's company / role text is read aloud as written; capped so the opening
 # stays short even if more was saved.
 INTRO_TEXT_MAX_CHARS = 500
@@ -159,8 +159,39 @@ GREETING_REPLY_TIMEOUT_SECONDS = 15
 # The bot joins at the booked time but waits for the candidate before
 # greeting. A candidate who joined a few minutes late used to find the bot
 # already gone: it greeted an empty meeting and left after ~2 minutes of
-# silence. If nobody joins within this window, it's a no-show.
-CANDIDATE_JOIN_WAIT_SECONDS = 600
+# silence. While waiting it asks Attendee who is in the meeting every
+# CANDIDATE_JOIN_POLL_SECONDS; if the candidate hasn't joined within
+# CANDIDATE_JOIN_WAIT_SECONDS, the bot leaves and it's a no-show.
+# The wait is set by SCREENING_CANDIDATE_JOIN_WAIT_SECONDS in .env.
+CANDIDATE_JOIN_WAIT_SECONDS = settings.screening_candidate_join_wait_seconds
+CANDIDATE_JOIN_POLL_SECONDS = 10
+
+
+def _wait_span(wait_seconds: float) -> str:
+    seconds = int(round(wait_seconds))
+    if seconds >= 60 and seconds % 60 == 0:
+        minutes = seconds // 60
+        return f"{minutes} minute" if minutes == 1 else f"{minutes} minutes"
+    return f"{seconds} seconds"
+
+
+def candidate_did_not_join_note(wait_seconds: float) -> str:
+    """Shown to HR on the application timeline next to "No-show"."""
+    return f"Candidate didn't join the meeting within {_wait_span(wait_seconds)}."
+
+
+def camera_not_on_note(wait_seconds: float) -> str:
+    """No-show note when the candidate joined but kept the camera off."""
+    return f"Candidate's camera was not turned on within {_wait_span(wait_seconds)}."
+
+
+# Said (and repeated) when the candidate is in the meeting with the camera off.
+CAMERA_PROMPT_TEXT = "Please turn on your camera so we can begin the interview."
+CAMERA_PROMPT_INTERVAL_SECONDS = 30
+# The camera counts as on while its webcam frames (2 a second) keep arriving.
+CAMERA_FRAME_FRESH_SECONDS = 5.0
+
+
 START_WITHOUT_REPLY_TEXT = "Let's get started with the first question."
 # Spoken instead of the greeting when the bot reconnects to an interview that
 # was already underway (the service restarted mid-interview), followed by the

@@ -107,6 +107,18 @@ class Settings(BaseSettings):
     screening_bot_connect_max_wait_seconds: float = 1800.0
     screening_bot_connect_poll_seconds: float = 30.0
     screening_bot_connect_confirm_seconds: float = 60.0
+    # How long the bot waits in the meeting for the candidate to join before
+    # leaving and marking the screening a no-show (3 minutes by default).
+    screening_candidate_join_wait_seconds: float = 180.0
+    # Start the interview only when the real candidate joins (recognised by
+    # name; the host, HR and note-taker bots don't count). false = anyone
+    # joining or speaking starts it, as before. A switch, so the feature can
+    # be turned off without a code change if it ever blocks interviews.
+    screening_require_real_candidate: bool = True
+    # Start the interview only when the candidate's camera is on (Attendee
+    # streams each participant's webcam to us). false = no camera check and
+    # the webcam stream isn't requested. A switch, like the one above.
+    screening_require_camera_on: bool = True
 
     model_config = SettingsConfigDict(
         env_file=(str(BASE_DIR / ".env"), str(BASE_DIR.parent.parent / ".env")),

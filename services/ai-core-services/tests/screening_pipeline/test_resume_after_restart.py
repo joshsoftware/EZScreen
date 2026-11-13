@@ -147,7 +147,7 @@ async def test_nothing_saved_yet_starts_with_the_greeting():
     policy = _policy()
     await _start(policy, _session(), [])
 
-    assert _spoken(policy) == [GREETING_TEXT]
+    assert _spoken(policy)[:1] == [GREETING_TEXT]
 
 
 @pytest.mark.asyncio
@@ -156,7 +156,7 @@ async def test_saved_transcript_without_scores_starts_with_the_greeting():
     policy = _policy()
     await _start(policy, _session(_saved_transcript()), [])
 
-    assert _spoken(policy) == [GREETING_TEXT]
+    assert _spoken(policy)[:1] == [GREETING_TEXT]
 
 
 @pytest.mark.asyncio

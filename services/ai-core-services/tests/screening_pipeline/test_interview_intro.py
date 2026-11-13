@@ -98,7 +98,7 @@ async def test_bot_opens_with_the_company_and_role_intro():
     await _start(policy, INTRO)
 
     spoken = [call.args[0] for call in policy.speech_output.await_args_list]
-    assert spoken == [build_greeting(**INTRO)]
+    assert spoken[:1] == [build_greeting(**INTRO)]
     assert policy.transcript_log[0]["bot_speech"] == build_greeting(**INTRO)
     await policy.end_interview("test")
 
@@ -109,7 +109,7 @@ async def test_bot_uses_the_standard_greeting_when_details_cannot_be_read():
     await _start(policy, None)
 
     spoken = [call.args[0] for call in policy.speech_output.await_args_list]
-    assert spoken == [GREETING_TEXT]
+    assert spoken[:1] == [GREETING_TEXT]
     await policy.end_interview("test")
 
 
@@ -131,7 +131,7 @@ async def test_greeting_audio_is_finished_before_it_is_spoken():
     await _start(policy, INTRO)
 
     greeting = build_greeting(**INTRO)
-    assert order == [("prepare", greeting), ("speak", greeting)]
+    assert order[:2] == [("prepare", greeting), ("speak", greeting)]
     await policy.end_interview("test")
 
 
@@ -142,5 +142,31 @@ async def test_greeting_is_still_spoken_if_preparing_it_fails():
     await _start(policy, INTRO)
 
     spoken = [call.args[0] for call in policy.speech_output.await_args_list]
-    assert spoken == [build_greeting(**INTRO)]
+    assert spoken[:1] == [build_greeting(**INTRO)]
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_first_question_follows_the_greeting_without_waiting_for_a_reply():
+    """No "let me know when you're ready" and no 15-second wait: the bot asks
+    the first question straight after the greeting."""
+    policy = _policy()
+    session = MagicMock(
+        id=policy.session_id,
+        status="in_progress",
+        generated_questions=[{"id": 1, "category": "must_have_matched", "question": "What is Docker?"}],
+        application_id="app-1",
+        interview_metadata={},
+    )
+    repo = "src.screening_pipeline.pipecat_policy.interview_session_repo"
+    with patch(f"{repo}.get_by_id", AsyncMock(return_value=session)), patch(
+        f"{repo}.get_interview_intro", AsyncMock(return_value=INTRO)
+    ):
+        await policy.start()
+    await policy.candidate_joined()
+
+    spoken = [call.args[0] for call in policy.speech_output.await_args_list]
+    assert spoken == [build_greeting(**INTRO), "What is Docker?"]
+    assert "Let me know when you" not in spoken[0]
+    assert policy.current_interaction_state == "listening"
     await policy.end_interview("test")

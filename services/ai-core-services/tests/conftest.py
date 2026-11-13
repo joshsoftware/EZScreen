@@ -26,6 +26,8 @@ _TEST_ENV_DEFAULTS = {
     "MINIO_ACCESS_KEY": "minio",
     "MINIO_SECRET_KEY": "minio",
     "MINIO_BUCKET_NAME": "resumes",
+    # Unit tests send no webcam frames; the camera tests switch the check on.
+    "SCREENING_REQUIRE_CAMERA_ON": "false",
 }
 
 for _key, _value in _TEST_ENV_DEFAULTS.items():
