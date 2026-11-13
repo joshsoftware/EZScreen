@@ -203,6 +203,7 @@ class PipecatInterviewRuntime:
         )
         self.policy.speech_output = self.policy_processor.speak
         self.policy.tts_cache_warmer = self.tts.warm_cache
+        self.policy.speech_preparer = self.tts.prepare_speech
         self.pipeline = Pipeline(
             [self.input, self.vad, self.stt, self.policy_processor, self.tts, self.output]
         )

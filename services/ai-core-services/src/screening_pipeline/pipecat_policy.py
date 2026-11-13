@@ -49,6 +49,9 @@ from src.screening_pipeline.prompts import (
     SILENCE_PROMPT_TEXT,
     START_WITHOUT_REPLY_TEXT,
     candidate_did_not_join_note,
+    DEFAULT_INTERVIEW_MINUTES,
+    NO_NEW_QUESTION_IN_LAST_SECONDS,
+    build_greeting,
     STT_RESULT_GRACE_SECONDS,
     UNFINISHED_ANSWER_EXTRA_SECONDS,
 )
@@ -98,9 +101,13 @@ class PipecatInterviewPolicy:
         self.session_id = session_id
         self.session: Any = None
         self.questions: list = []
+        # Opening line with the company / role details HR wrote (set on start).
+        self.greeting_text: str = GREETING_TEXT
         self.current_question_idx = 0
         self.is_active = False
         self.tts_cache_warmer = tts_cache_warmer
+        # Fully synthesizes a line before it is spoken (set by the runtime).
+        self.speech_preparer: Optional[Callable[[str], Awaitable[None]]] = None
         self._tts_warm_task: Optional[asyncio.Task] = None
 
         resolved_llm = llm_client or OllamaClient()
@@ -130,6 +137,11 @@ class PipecatInterviewPolicy:
         # Shown to HR with the final status (e.g. why it's a no-show).
         self._status_note: Optional[str] = None
         self._candidate_name: Optional[tuple] = None
+        # "Let's move on…" waiting to be said before the next question.
+        self._pending_transition_text: Optional[str] = None
+        # When the candidate first heard the bot (greeting / resume): the
+        # booked interview time is counted from here.
+        self._interview_started_at: Optional[float] = None
         self._pending_persist_tasks: list[asyncio.Task] = []
         self._question_save_lock = asyncio.Lock()
         # True from VAD "started speaking" until VAD confirms "stopped
@@ -193,6 +205,7 @@ class PipecatInterviewPolicy:
             self.api_client = SessionApiClient(session_id=str(self.session.id))
 
         self.questions = coerce_questions_list(self.session.generated_questions)
+        self.greeting_text = await self._personal_greeting()
         self.is_active = True
 
         # Fire-and-forget: warms the TTS cache for known bot text (greeting,
@@ -276,19 +289,64 @@ class PipecatInterviewPolicy:
             "Resuming an interview that was already underway",
             extra={"session_id": self.session_id, "answered_questions": len(evaluations)},
         )
+        self._mark_interview_started()
         await self.speak(RESUME_TEXT)
         await self._ask_next_question()
         return True
 
+    def _mark_interview_started(self) -> None:
+        if self._interview_started_at is None:
+            self._interview_started_at = asyncio.get_running_loop().time()
+
+    def _interview_minutes(self) -> float:
+        metadata = getattr(self.session, "interview_metadata", None)
+        minutes = metadata.get("duration_minutes") if isinstance(metadata, dict) else None
+        if isinstance(minutes, (int, float)) and not isinstance(minutes, bool) and minutes > 0:
+            return float(minutes)
+        return float(DEFAULT_INTERVIEW_MINUTES)
+
+    def _out_of_time(self) -> bool:
+        """True in the last NO_NEW_QUESTION_IN_LAST_SECONDS of the booked time."""
+        if self._interview_started_at is None:
+            return False
+        elapsed = asyncio.get_running_loop().time() - self._interview_started_at
+        return elapsed >= self._interview_minutes() * 60 - NO_NEW_QUESTION_IN_LAST_SECONDS
+
+    async def _personal_greeting(self) -> str:
+        """Opening with the company and role details HR wrote; the standard
+        greeting when there are none or they can't be read."""
+        application_id = getattr(self.session, "application_id", None)
+        if not isinstance(application_id, str) or not application_id:
+            return GREETING_TEXT
+        intro = await interview_session_repo.get_interview_intro(application_id)
+        return build_greeting(**intro) if intro else GREETING_TEXT
+
     async def _greet(self) -> None:
+        greeting = getattr(self, "greeting_text", None) or GREETING_TEXT
+        # The company / role greeting is long; if its audio isn't cached yet,
+        # finish it before speaking so it plays in one go, not sentence by
+        # sentence with silences while the next one is synthesized.
+        if self.speech_preparer is not None:
+            try:
+                await self.speech_preparer(greeting)
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                logger.warning(
+                    "Could not prepare the greeting audio; speaking it as it is made",
+                    extra={"session_id": self.session_id, "error": str(err)},
+                )
+        # The booked time counts from when the candidate hears the bot, not
+        # from while the greeting audio was still being prepared.
+        self._mark_interview_started()
         self.transcript_log.append(
             {
                 "interaction_type": "greeting",
-                "bot_speech": GREETING_TEXT,
+                "bot_speech": greeting,
                 "candidate_answer": "",
             }
         )
-        await self.speak(GREETING_TEXT)
+        await self.speak(greeting)
         self._begin_listening()
 
     async def candidate_joined(self) -> None:
@@ -374,7 +432,7 @@ class PipecatInterviewPolicy:
         cached (see KokoroSynthesizer.warm). Never raises: a warm-up failure
         must fall back to normal on-demand synthesis, not break the session.
         """
-        texts = known_bot_texts(self.questions)
+        texts = known_bot_texts(self.questions, [getattr(self, "greeting_text", None)])
         try:
             await self.tts_cache_warmer(texts)
         except asyncio.CancelledError:
@@ -1095,7 +1153,10 @@ class PipecatInterviewPolicy:
             "Moving on to the next question",
             extra={"session_id": self.session_id, "reason": reason},
         )
-        await self.speak(MOVE_ON_TEXT)
+        # Said just before the next question, not here: if this answer ends
+        # the interview (early stop, time limit) the bot goes straight to
+        # the closing instead of promising a next question.
+        self._pending_transition_text = MOVE_ON_TEXT
         if primary_eval_data is not None:
             # The follow-up went unanswered; _complete_question leaves it out
             # of the Q&A save but it stays in the transcript.
@@ -1274,17 +1335,45 @@ class PipecatInterviewPolicy:
             from src.screening_pipeline.routing_engine import initialize_queues
             self.question_queues = initialize_queues(self.questions)
             
-        from src.screening_pipeline.routing_engine import get_next_question
-        
+        from src.screening_pipeline.routing_engine import CORE_SEQUENCE, get_next_question
+
+        # After the compulsory questions, no new question near the end of the
+        # booked time: close on time instead of running over.
+        if len(self.analysis_evaluations) >= len(CORE_SEQUENCE) and self._out_of_time():
+            logger.info(
+                "Booked interview time is up; closing",
+                extra={"session_id": self.session_id, "minutes": self._interview_minutes()},
+            )
+            self.termination_reason = "time_limit"
+            self._pending_transition_text = None
+            await self._close_interview()
+            return
+
         question_obj, termination_reason = get_next_question(self.question_queues, self.analysis_evaluations)
         
         if not question_obj:
             if termination_reason == "fatal_failure":
-                from src.core.logger import logger
                 logger.info("Candidate failed to recover. Terminating early.", extra={"session_id": self.session_id})
                 self.termination_reason = "fatal_failure"
+            elif termination_reason in ("not_eligible", "not_eligible_early"):
+                from src.screening_pipeline.routing_engine import core_phase_score
+
+                logger.info(
+                    "Compulsory questions scored below the bar; ending early",
+                    extra={
+                        "session_id": self.session_id,
+                        "core_score": core_phase_score(self.analysis_evaluations),
+                    },
+                )
+                self.termination_reason = termination_reason
+            self._pending_transition_text = None
             await self._close_interview()
             return
+
+        transition = self._pending_transition_text
+        self._pending_transition_text = None
+        if transition:
+            await self.speak(transition)
 
         self.current_question_obj = question_obj
         q_text = question_obj.get("question", "")

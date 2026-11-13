@@ -1415,7 +1415,9 @@ async def test_skip_request_moves_on_without_asking_the_llm():
     await policy._process_speech("Skip this question, please.")
 
     policy.evaluator.classify_and_evaluate.assert_not_awaited()
-    assert policy.speech_output.await_args_list[0].args[0] == MOVE_ON_TEXT
+    # "Let's move on" is said just before the next question (not before a
+    # closing), so here it is only queued.
+    assert policy._pending_transition_text == MOVE_ON_TEXT
     policy._handle_skip.assert_awaited_once()
 
 
@@ -1445,7 +1447,8 @@ async def test_bot_moves_on_after_two_non_answers_instead_of_re_asking():
 
     await policy._process_speech("Yes.")
 
-    assert [c.args[0] for c in policy.speech_output.await_args_list] == [MOVE_ON_TEXT]
+    assert policy.speech_output.await_args_list == []
+    assert policy._pending_transition_text == MOVE_ON_TEXT  # said before the next question
     policy._handle_skip.assert_awaited_once()
 
 
@@ -1579,8 +1582,7 @@ async def test_non_answers_get_one_re_ask_clarifications_two(prior_intent, new_i
 
     await policy._process_speech("Yes. Yes. Yes.")
 
-    spoken = [c.args[0] for c in policy.speech_output.await_args_list]
-    assert (spoken == [MOVE_ON_TEXT]) is moves_on
+    assert (policy._pending_transition_text == MOVE_ON_TEXT) is moves_on
     assert policy._handle_skip.await_count == (1 if moves_on else 0)
 
 

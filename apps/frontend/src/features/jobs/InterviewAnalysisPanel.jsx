@@ -463,25 +463,44 @@ function Scorecard({
       ) : null}
 
       {breakdown.length > 0 ? (
-        <div className="space-y-xs">
+        <div className="space-y-sm">
           <p className="font-label-md text-label-md text-on-surface-variant tracking-wide">
             Category totals
           </p>
-          {breakdown.map((item) => (
-            <div key={item.label} className="space-y-0.5">
-              <div className="flex items-baseline justify-between gap-sm text-body-sm">
-                <span className="text-on-surface-variant">{item.label}</span>
-                <span className="font-medium text-on-surface tabular-nums">
-                  {item.asked ? formatShare(item.percent) : 'Not asked'}
-                </span>
+          {breakdown.map((item) => {
+            const hasPoints = item.asked && item.weight > 0 && item.value != null
+            const tone = hasPoints ? interviewScoreTone(item.percent / 10) : 'neutral'
+            const scoreChip =
+              tone === 'success'
+                ? 'bg-success-container text-on-success-container'
+                : tone === 'warning'
+                  ? 'bg-warning-container text-on-warning-container'
+                  : tone === 'danger'
+                    ? 'bg-error-container text-on-error-container'
+                    : 'bg-surface-container-high text-on-surface-variant'
+            return (
+              <div key={item.label} className="flex items-start justify-between gap-sm">
+                <div className="min-w-0">
+                  <p className="text-body-sm text-on-surface">{item.label}</p>
+                  <p className="text-label-md tabular-nums text-on-surface-variant">
+                    {hasPoints
+                      ? `Weight ${item.weight} · ${item.value.toFixed(1)} pts`
+                      : 'Not asked'}
+                  </p>
+                </div>
+                {hasPoints ? (
+                  <span
+                    className={cn(
+                      'shrink-0 rounded-md px-xs py-xs text-label-md font-medium tabular-nums',
+                      scoreChip,
+                    )}
+                  >
+                    {formatShare(item.percent)}
+                  </span>
+                ) : null}
               </div>
-              {item.weight > 0 && item.value != null ? (
-                <p className="text-label-md text-on-surface-variant tabular-nums">
-                  Weight {item.weight} · {item.value.toFixed(1)} pts
-                </p>
-              ) : null}
-            </div>
-          ))}
+            )
+          })}
         </div>
       ) : null}
 

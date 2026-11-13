@@ -4,6 +4,7 @@ import { Alert } from '../../components/ui/Alert'
 import { Input, Select, TextArea } from '../../components/ui/Input'
 import {
   EMPTY_JOB_FORM,
+  ROLE_INTRO_MAX_LENGTH,
   JOB_STATUS_OPTIONS,
   JOB_TYPE_OPTIONS,
   WORK_TYPE_OPTIONS,
@@ -128,6 +129,24 @@ export function JobForm({
           placeholder="Product, team size, mission…"
           rows={3}
         />
+      </SectionBlock>
+
+      <SectionBlock
+        title="AI interviewer introduction"
+        hint="Optional. A few sentences about the role that the AI interviewer reads to the candidate, as written, when the screening starts (after the company details from Settings)."
+      >
+        <TextArea
+          id="role-intro"
+          label="Role intro"
+          value={values.role_intro ?? ''}
+          onChange={(e) => setField('role_intro', e.target.value)}
+          placeholder="e.g. You'd join our payments team, building the services that move money for our banking clients."
+          maxLength={ROLE_INTRO_MAX_LENGTH}
+          rows={3}
+        />
+        <p className="text-label-sm text-on-surface-variant">
+          {(values.role_intro ?? '').length} / {ROLE_INTRO_MAX_LENGTH}
+        </p>
       </SectionBlock>
 
       <SectionBlock title="Employment basics">

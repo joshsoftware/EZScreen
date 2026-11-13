@@ -22,6 +22,26 @@ CATEGORY_WEIGHTS = {
 }
 CATEGORIES_ORDER = list(CATEGORY_WEIGHTS)
 
+# Every screening opens with these compulsory questions, in this order:
+# 2 must-have, 1 domain, 2 must-have, 1 domain, 1 good-to-have, 1 skill gap.
+CORE_SEQUENCE = [
+    "must_have_matched",
+    "must_have_matched",
+    "experience_domain",
+    "must_have_matched",
+    "must_have_matched",
+    "experience_domain",
+    "good_to_have",
+    "lacking_skill",
+]
+# After them, the interview continues only if they score at least this
+# (out of 10, with the final-result weights); otherwise it ends early.
+CORE_CONTINUE_THRESHOLD = 5.0
+# Earlier check: a candidate clearly failing the first few compulsory
+# questions (mostly skipped / very weak) is stopped there.
+EARLY_CHECK_AFTER = 4
+EARLY_STOP_THRESHOLD = 3.0
+
 
 def calculate_rolling_average(evaluations: List[Dict[str, Any]]) -> float:
     """Calculate the rolling average of evaluated topics."""
@@ -113,7 +133,60 @@ def initialize_queues(questions: List[Dict[str, Any]]) -> Dict[str, List[Dict[st
     return queues
 
 
+def _pop_core_question(
+    question_queues: Dict[str, List[Dict]], category: str
+) -> Optional[Dict]:
+    """The next question of `category`; if that category has run out, the
+    next one in priority order, so the compulsory set still has 8 questions."""
+    if question_queues.get(category):
+        return question_queues[category].pop(0)
+    for cat in CATEGORIES_ORDER:
+        if question_queues.get(cat):
+            return question_queues[cat].pop(0)
+    return None
+
+
+def core_phase_score(evaluations: List[Dict]) -> float:
+    """Score (0-10) of the compulsory questions answered so far, with the
+    final-result weights."""
+    return calculate_final_weighted_score(evaluations[: len(CORE_SEQUENCE)])["overall_score"]
+
+
 def get_next_question(
+    question_queues: Dict[str, List[Dict]],
+    evaluations: List[Dict],
+) -> Tuple[Optional[Dict], Optional[str]]:
+    """Pick the next question.
+
+    1. The first len(CORE_SEQUENCE) questions are compulsory and follow
+       CORE_SEQUENCE (M, M, D, M, M, D, G, S).
+    2. After EARLY_CHECK_AFTER of them, a score below EARLY_STOP_THRESHOLD
+       ends the interview there ("not_eligible_early").
+    3. After all of them, the interview goes on only if they scored at least
+       CORE_CONTINUE_THRESHOLD; otherwise it ends early ("not_eligible").
+    4. The remaining questions use the adaptive routing
+       (get_adaptive_next_question); the policy stops them at the time limit.
+
+    Deterministic in (queues, evaluations), so an interview resumed after a
+    restart picks up the same question.
+    """
+    asked = len(evaluations)
+    if asked == EARLY_CHECK_AFTER and core_phase_score(evaluations) < EARLY_STOP_THRESHOLD:
+        return None, "not_eligible_early"
+    if asked < len(CORE_SEQUENCE):
+        question = _pop_core_question(question_queues, CORE_SEQUENCE[asked])
+        return (question, None) if question else (None, "questions_completed")
+
+    if asked == len(CORE_SEQUENCE):
+        if not any(question_queues.get(cat) for cat in CATEGORIES_ORDER):
+            return None, "questions_completed"
+        if core_phase_score(evaluations) < CORE_CONTINUE_THRESHOLD:
+            return None, "not_eligible"
+
+    return get_adaptive_next_question(question_queues, evaluations)
+
+
+def get_adaptive_next_question(
     question_queues: Dict[str, List[Dict]],
     evaluations: List[Dict],
 ) -> Tuple[Optional[Dict], Optional[str]]:
