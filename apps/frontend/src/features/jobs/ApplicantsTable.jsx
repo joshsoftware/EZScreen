@@ -8,6 +8,7 @@ import { Spinner } from '../../components/ui/Spinner'
 import { TableSkeleton } from '../../components/ui/Skeleton'
 import { Alert } from '../../components/ui/Alert'
 import { useOrgSettings } from '../org-admin/OrgSettingsContext'
+import { interviewScoreTone } from './InterviewAnalysisPanel'
 import {
   applicantScore,
   candidateName,
@@ -17,6 +18,7 @@ import {
   fitTone,
   formatApplicationStatus,
   matchesFitFilter,
+  numericScore,
   scoreTextClass,
 } from './applicationFields'
 import { formatDateTime } from './jobFields'
@@ -25,7 +27,24 @@ import { useJobQueryClient } from './useJobQueries'
 import { ApiError } from '../../lib/api/client'
 import { toast } from 'sonner'
 
-const TABLE_HEADERS = ['Candidate', 'Score', 'Fit', 'YOE', 'Status', 'Created', 'Actions']
+const TABLE_HEADERS = [
+  { key: 'candidate', label: 'Candidate' },
+  { key: 'fit-score', label: 'Job Fit Score', hint: 'Fit analysis' },
+  { key: 'fit', label: 'Fit', hint: 'Fit analysis' },
+  { key: 'interview', label: 'Interview', hint: 'Screening' },
+  { key: 'yoe', label: 'YOE' },
+  { key: 'status', label: 'Status' },
+  { key: 'created', label: 'Created' },
+  { key: 'actions', label: 'Actions' },
+]
+
+function interviewScoreTextClass(score) {
+  const tone = interviewScoreTone(score)
+  if (tone === 'success') return 'text-emerald-800'
+  if (tone === 'warning') return 'text-amber-800'
+  if (tone === 'danger') return 'text-red-700'
+  return 'text-on-surface-variant'
+}
 const REEVALUATION_POLL_INTERVAL_MS = 2000
 const REEVALUATION_TIMEOUT_MS = 120000
 
@@ -35,9 +54,14 @@ function ApplicantsTableShell({ children }) {
       <table className="w-full text-left">
         <thead>
           <tr className="bg-surface-container-low/60 border-b border-outline-variant/80">
-            {TABLE_HEADERS.map((label) => (
-              <th key={label} className="ez-table-head">
-                {label}
+            {TABLE_HEADERS.map((header) => (
+              <th key={header.key} className="ez-table-head">
+                <span className="block">{header.label}</span>
+                {header.hint ? (
+                  <span className="block font-normal normal-case tracking-normal">
+                    {header.hint}
+                  </span>
+                ) : null}
               </th>
             ))}
           </tr>
@@ -273,6 +297,7 @@ export function ApplicantsTable({
           ) : null}
           {filteredApplicants.map((applicant) => {
             const score = applicantScore(applicant)
+            const interviewScore = numericScore(applicant.interview_score)
             const name = candidateName(applicant)
             const href = `/org-admin/jobs/${jobId}/applicants/${applicant.id}`
             const initial = (name?.[0] || '?').toUpperCase()
@@ -312,6 +337,9 @@ export function ApplicantsTable({
                   <Badge tone={fitTone(score, fitLabels)}>
                     {fitLabel(score, fitLabels)}
                   </Badge>
+                </td>
+                <td className={`py-md px-md text-body-sm font-medium tabular-nums ${interviewScoreTextClass(interviewScore)}`}>
+                  {interviewScore == null ? '—' : interviewScore.toFixed(1)}
                 </td>
                 <td className="py-md px-md text-body-sm text-on-surface-variant">
                   {applicant.candidate_yoe == null ? '—' : applicant.candidate_yoe}
