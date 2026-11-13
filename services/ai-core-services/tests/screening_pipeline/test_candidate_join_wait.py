@@ -410,3 +410,41 @@ async def test_a_candidate_who_spoke_but_never_joined_by_name_gets_no_note():
         await policy.end_interview("candidate_silence")
 
     policy.api_client.update_status.assert_awaited_once_with("no_show")
+
+
+# --- .env switch: SCREENING_REQUIRE_REAL_CANDIDATE ---
+
+def test_the_real_candidate_check_is_on_by_default():
+    from src.core.config import Settings
+
+    assert Settings.model_fields["screening_require_real_candidate"].default is True
+
+
+@pytest.mark.asyncio
+async def test_switched_off_anyone_joining_starts_the_interview(monkeypatch):
+    """SCREENING_REQUIRE_REAL_CANDIDATE=false: back to the old behaviour."""
+    monkeypatch.setattr("src.core.config.settings.screening_require_real_candidate", False)
+    policy = _policy()
+    await _start(policy)
+
+    await _join(policy, {"participant_uuid": "hr", "participant_name": "Rahul Mehta", "participant_is_host": True})
+
+    assert _spoken(policy) == [GREETING_TEXT]
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_switched_off_any_speech_starts_the_interview(monkeypatch):
+    monkeypatch.setattr("src.core.config.settings.screening_require_real_candidate", False)
+    policy = _policy()
+    await _start(policy)
+    await _join(policy, {"participant_uuid": "a", "participant_name": "Rahul Mehta"})
+    await _join(policy, {"participant_uuid": "b", "participant_name": "Anita Desai"})
+    # (the first join already started it; a fresh policy checks speech alone)
+    policy2 = _policy("sess-join-2")
+    await _start(policy2)
+    from src.screening_pipeline.candidate_presence import speech_may_start_interview
+
+    assert speech_may_start_interview("sess-join-2")
+    await policy.end_interview("test")
+    await policy2.end_interview("test")

@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from src.core.config import settings
 from src.screening_pipeline.candidate_identity import looks_like_bot, name_matches_candidate
+
+
+def _require_real_candidate() -> bool:
+    return bool(getattr(settings, "screening_require_real_candidate", True))
 
 # Sessions where the candidate (recognised by name) is in the meeting.
 _present_sessions: set[str] = set()
@@ -72,11 +77,15 @@ def apply_participant_event(
     name = str(event.get("participant_name") or "")
     is_host = event.get("participant_is_host") is True
     is_bot = looks_like_bot(name)
-    is_candidate = (
-        not is_host
-        and not is_bot
-        and name_matches_candidate(name, candidate_first_name, candidate_last_name)
-    )
+    if _require_real_candidate():
+        is_candidate = (
+            not is_host
+            and not is_bot
+            and name_matches_candidate(name, candidate_first_name, candidate_last_name)
+        )
+    else:
+        # Feature switched off: anyone joining starts the interview.
+        is_candidate = True
     record_participant(
         session_id,
         str(participant_uuid or name),
@@ -96,6 +105,8 @@ def speech_may_start_interview(session_id: str) -> bool:
     and bots is there: likely the candidate with a different display name.
     Not when only the host or HR/observers are in the meeting.
     """
+    if not _require_real_candidate():
+        return True
     people = _participants.get(str(session_id))
     if not people:
         return True
