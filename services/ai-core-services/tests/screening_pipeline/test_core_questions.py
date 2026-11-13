@@ -174,13 +174,52 @@ def _policy_mid_interview(answered, minutes_ago, duration=30):
 
 
 @pytest.mark.asyncio
-async def test_no_new_question_in_the_last_two_minutes_of_the_booked_time():
+async def test_last_two_minutes_allow_one_final_good_to_have_question_then_close():
+    """Senior: in the last 2 minutes, ask a Good-to-have / Skill-gap question
+    if one is left; running 1-2 minutes over is fine. Only one."""
     policy = _policy_mid_interview(answered=9, minutes_ago=28.5)
+    await policy._ask_next_question()
+
+    assert policy.current_question_obj["category"] == "good_to_have"
+    assert policy._final_question_asked
+    policy._close_interview.assert_not_awaited()
+
+    # The candidate answers it; next time round the interview closes.
+    await policy._ask_next_question()
+    assert policy.termination_reason == "time_limit"
+    policy._close_interview.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_final_question_falls_back_to_skill_gap():
+    policy = _policy_mid_interview(answered=9, minutes_ago=28.5)
+    policy.question_queues["good_to_have"] = []
+    policy.question_queues["lacking_skill"] = [
+        {"id": 99, "category": "lacking_skill", "question": "Any Kubernetes experience?"}
+    ]
+    await policy._ask_next_question()
+    assert policy.current_question_obj["category"] == "lacking_skill"
+
+
+@pytest.mark.asyncio
+async def test_no_good_to_have_or_skill_gap_left_closes_at_the_last_two_minutes():
+    policy = _policy_mid_interview(answered=9, minutes_ago=28.5)
+    policy.question_queues["good_to_have"] = []
+    policy.question_queues["lacking_skill"] = []
     await policy._ask_next_question()
 
     assert policy.termination_reason == "time_limit"
     policy._close_interview.assert_awaited_once()
     policy.speech_output.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_no_final_question_once_the_booked_time_has_passed():
+    policy = _policy_mid_interview(answered=9, minutes_ago=31)
+    await policy._ask_next_question()
+
+    assert policy.termination_reason == "time_limit"
+    policy._close_interview.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -260,3 +299,27 @@ async def test_skipping_mid_interview_still_says_move_on_before_the_next_questio
     assert spoken[0] == MOVE_ON_TEXT
     assert len(spoken) == 2  # then the next question itself
     policy._close_interview.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_final_question_gets_no_follow_up():
+    """A weak answer normally gets a follow-up; not on the final question in
+    the last minutes, so the interview only runs 1-2 minutes over."""
+    policy = PipecatInterviewPolicy(
+        "sess-final", evaluator=MagicMock(), speech_output=AsyncMock(), api_client=MagicMock(),
+    )
+    policy.is_active = True
+    policy._final_question_asked = True
+    policy.transcript_log = [
+        {"interaction_type": "question", "candidate_answer": "", "follow_ups": [], "question_repeat_count": 0}
+    ]
+    policy._complete_question = AsyncMock()
+    question = {"question": "Have you used Redis?", "category": "good_to_have", "expected_keywords": []}
+
+    await policy._handle_answer(
+        question, question["question"], "Not much.",
+        {"decision": "ASK_FOLLOW_UP", "suggested_follow_up": "What did you use it for?", "score": 2},
+    )
+
+    policy._complete_question.assert_awaited_once()
+    assert policy.transcript_log[-1]["follow_ups"] == []
