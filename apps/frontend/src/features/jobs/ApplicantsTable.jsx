@@ -29,9 +29,9 @@ import { toast } from 'sonner'
 
 const TABLE_HEADERS = [
   { key: 'candidate', label: 'Candidate' },
-  { key: 'fit-score', label: 'Job Fit Score', hint: 'Fit analysis' },
-  { key: 'fit', label: 'Fit', hint: 'Fit analysis' },
-  { key: 'interview', label: 'Interview', hint: 'Screening' },
+  { key: 'fit-score', label: 'Job analysis', hint: 'score' },
+  { key: 'fit', label: 'Fit' },
+  { key: 'interview', label: 'Interview', hint: 'score' },
   { key: 'yoe', label: 'YOE' },
   { key: 'status', label: 'Status' },
   { key: 'created', label: 'Created' },
@@ -55,13 +55,9 @@ function ApplicantsTableShell({ children }) {
         <thead>
           <tr className="bg-surface-container-low/60 border-b border-outline-variant/80">
             {TABLE_HEADERS.map((header) => (
-              <th key={header.key} className="ez-table-head">
+              <th key={header.key} className="ez-table-head whitespace-nowrap">
                 <span className="block">{header.label}</span>
-                {header.hint ? (
-                  <span className="block font-normal normal-case tracking-normal">
-                    {header.hint}
-                  </span>
-                ) : null}
+                {header.hint ? <span className="block font-normal">{header.hint}</span> : null}
               </th>
             ))}
           </tr>
@@ -299,6 +295,7 @@ export function ApplicantsTable({
             const score = applicantScore(applicant)
             const interviewScore = numericScore(applicant.interview_score)
             const name = candidateName(applicant)
+            const contact = [applicant.email, applicant.phone].filter(Boolean).join(' · ')
             const href = `/org-admin/jobs/${jobId}/applicants/${applicant.id}`
             const initial = (name?.[0] || '?').toUpperCase()
 
@@ -322,8 +319,13 @@ export function ApplicantsTable({
                       {initial}
                     </span>
                     <div className="min-w-0">
-                      <span className="font-medium text-on-surface">{name}</span>
-                      <p className="text-on-surface-variant truncate">
+                      <span className="block max-w-[16rem] truncate font-medium text-on-surface" title={name}>
+                        {name}
+                      </span>
+                      <p
+                        className="max-w-[16rem] truncate text-on-surface-variant"
+                        title={contact || undefined}
+                      >
                         {applicant.email || 'No email'}
                         {applicant.phone ? ` · ${applicant.phone}` : ''}
                       </p>
