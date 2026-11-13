@@ -50,6 +50,7 @@ from src.screening_pipeline.prompts import (
     START_WITHOUT_REPLY_TEXT,
     candidate_did_not_join_note,
     DEFAULT_INTERVIEW_MINUTES,
+    FINAL_QUESTION_CATEGORIES,
     NO_NEW_QUESTION_IN_LAST_SECONDS,
     build_greeting,
     STT_RESULT_GRACE_SECONDS,
@@ -142,6 +143,9 @@ class PipecatInterviewPolicy:
         # When the candidate first heard the bot (greeting / resume): the
         # booked interview time is counted from here.
         self._interview_started_at: Optional[float] = None
+        # The one extra Good-to-have / Skill-gap question allowed in the last
+        # minutes of the booked time has been asked (no follow-up on it).
+        self._final_question_asked = False
         self._pending_persist_tasks: list[asyncio.Task] = []
         self._question_save_lock = asyncio.Lock()
         # True from VAD "started speaking" until VAD confirms "stopped
@@ -305,12 +309,31 @@ class PipecatInterviewPolicy:
             return float(minutes)
         return float(DEFAULT_INTERVIEW_MINUTES)
 
+    def _seconds_left(self) -> Optional[float]:
+        """Seconds until the end of the booked time (negative once past it)."""
+        if self._interview_started_at is None:
+            return None
+        elapsed = asyncio.get_running_loop().time() - self._interview_started_at
+        return self._interview_minutes() * 60 - elapsed
+
     def _out_of_time(self) -> bool:
         """True in the last NO_NEW_QUESTION_IN_LAST_SECONDS of the booked time."""
-        if self._interview_started_at is None:
-            return False
-        elapsed = asyncio.get_running_loop().time() - self._interview_started_at
-        return elapsed >= self._interview_minutes() * 60 - NO_NEW_QUESTION_IN_LAST_SECONDS
+        left = self._seconds_left()
+        return left is not None and left <= NO_NEW_QUESTION_IN_LAST_SECONDS
+
+    def _final_question(self) -> Optional[dict]:
+        """In the last minutes, one more question is allowed if a Good-to-have
+        (else Skill-gap) question is still unasked: running 1-2 minutes over
+        is fine. Only while there is booked time left, and only once."""
+        left = self._seconds_left()
+        if self._final_question_asked or left is None or left <= 0:
+            return None
+        for category in FINAL_QUESTION_CATEGORIES:
+            queue = getattr(self, "question_queues", {}).get(category)
+            if queue:
+                self._final_question_asked = True
+                return queue.pop(0)
+        return None
 
     async def _personal_greeting(self) -> str:
         """Opening with the company and role details HR wrote; the standard
@@ -1259,7 +1282,10 @@ class PipecatInterviewPolicy:
         current_follow_ups = (
             self.transcript_log[-1].get("follow_ups", []) if self.transcript_log else []
         )
-        if len(current_follow_ups) >= MAX_FOLLOW_UPS_PER_QUESTION and not is_complete:
+        # No follow-up on the final question asked in the last minutes.
+        if (
+            len(current_follow_ups) >= MAX_FOLLOW_UPS_PER_QUESTION or self._final_question_asked
+        ) and not is_complete:
             logger.info("Follow-up limit reached, forcing completion")
             is_complete = True
             follow_up_question = ""
@@ -1339,17 +1365,25 @@ class PipecatInterviewPolicy:
 
         # After the compulsory questions, no new question near the end of the
         # booked time: close on time instead of running over.
+        question_obj, termination_reason = None, None
         if len(self.analysis_evaluations) >= len(CORE_SEQUENCE) and self._out_of_time():
+            question_obj = self._final_question()
+            if question_obj is None:
+                logger.info(
+                    "Booked interview time is up; closing",
+                    extra={"session_id": self.session_id, "minutes": self._interview_minutes()},
+                )
+                self.termination_reason = "time_limit"
+                self._pending_transition_text = None
+                await self._close_interview()
+                return
             logger.info(
-                "Booked interview time is up; closing",
-                extra={"session_id": self.session_id, "minutes": self._interview_minutes()},
+                "Last minutes of the booked time; asking one final question",
+                extra={"session_id": self.session_id, "category": question_obj.get("category")},
             )
-            self.termination_reason = "time_limit"
-            self._pending_transition_text = None
-            await self._close_interview()
-            return
 
-        question_obj, termination_reason = get_next_question(self.question_queues, self.analysis_evaluations)
+        if question_obj is None:
+            question_obj, termination_reason = get_next_question(self.question_queues, self.analysis_evaluations)
         
         if not question_obj:
             if termination_reason == "fatal_failure":
