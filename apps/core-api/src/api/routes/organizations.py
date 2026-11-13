@@ -15,6 +15,7 @@ from src.schemas.organization import (
     OrganizationDeactivateResponse,
     OrganizationResponse,
     OrganizationUpdate,
+    company_details_from_settings,
     fit_labels_from_settings,
 )
 from src.schemas.user import OrgUserResponse, ProvisionOrgUserRequest
@@ -48,6 +49,7 @@ def _to_org_response(
         logo_url=org.logo_url,
         is_active=org.is_active,
         fit_labels=fit_labels_from_settings(getattr(org, "settings", None)),
+        company_details=company_details_from_settings(getattr(org, "settings", None)),
         created_at=org.created_at,
         user_count=stats.get("user_count", 0),
         job_count=stats.get("job_count", 0),
@@ -159,18 +161,20 @@ def update_organization(
             detail="Only super_admin can suspend organizations",
         )
 
-    # HR may only change fit rating labels; org/profile fields stay admin-only.
+    # HR may only change fit rating labels and the company details the AI
+    # interviewer reads; org/profile fields stay admin-only.
     if current_user.role == UserRole.hr:
         allowed = body.model_dump(exclude_unset=True)
-        if set(allowed.keys()) - {"fit_labels"}:
+        hr_fields = {"fit_labels", "company_details"}
+        if set(allowed.keys()) - hr_fields:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="HR can only update fit rating labels",
+                detail="HR can only update fit rating labels and company details",
             )
-        if "fit_labels" not in allowed:
+        if not set(allowed.keys()) & hr_fields:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="fit_labels is required",
+                detail="fit_labels or company_details is required",
             )
 
     org = organization_service.get_organization(db, organization_id)

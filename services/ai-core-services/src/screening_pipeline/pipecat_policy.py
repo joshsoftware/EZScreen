@@ -43,6 +43,7 @@ from src.screening_pipeline.prompts import (
     START_WITHOUT_REPLY_TEXT,
     DEFAULT_INTERVIEW_MINUTES,
     NO_NEW_QUESTION_IN_LAST_SECONDS,
+    build_greeting,
     STT_RESULT_GRACE_SECONDS,
     UNFINISHED_ANSWER_EXTRA_SECONDS,
 )
@@ -92,9 +93,13 @@ class PipecatInterviewPolicy:
         self.session_id = session_id
         self.session: Any = None
         self.questions: list = []
+        # Opening line with the company / role details HR wrote (set on start).
+        self.greeting_text: str = GREETING_TEXT
         self.current_question_idx = 0
         self.is_active = False
         self.tts_cache_warmer = tts_cache_warmer
+        # Fully synthesizes a line before it is spoken (set by the runtime).
+        self.speech_preparer: Optional[Callable[[str], Awaitable[None]]] = None
         self._tts_warm_task: Optional[asyncio.Task] = None
 
         resolved_llm = llm_client or OllamaClient()
@@ -189,6 +194,7 @@ class PipecatInterviewPolicy:
             self.api_client = SessionApiClient(session_id=str(self.session.id))
 
         self.questions = coerce_questions_list(self.session.generated_questions)
+        self.greeting_text = await self._personal_greeting()
         self.is_active = True
 
         # Fire-and-forget: warms the TTS cache for known bot text (greeting,
@@ -291,16 +297,41 @@ class PipecatInterviewPolicy:
         elapsed = asyncio.get_running_loop().time() - self._interview_started_at
         return elapsed >= self._interview_minutes() * 60 - NO_NEW_QUESTION_IN_LAST_SECONDS
 
+    async def _personal_greeting(self) -> str:
+        """Opening with the company and role details HR wrote; the standard
+        greeting when there are none or they can't be read."""
+        application_id = getattr(self.session, "application_id", None)
+        if not isinstance(application_id, str) or not application_id:
+            return GREETING_TEXT
+        intro = await interview_session_repo.get_interview_intro(application_id)
+        return build_greeting(**intro) if intro else GREETING_TEXT
+
     async def _greet(self) -> None:
+        greeting = getattr(self, "greeting_text", None) or GREETING_TEXT
+        # The company / role greeting is long; if its audio isn't cached yet,
+        # finish it before speaking so it plays in one go, not sentence by
+        # sentence with silences while the next one is synthesized.
+        if self.speech_preparer is not None:
+            try:
+                await self.speech_preparer(greeting)
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                logger.warning(
+                    "Could not prepare the greeting audio; speaking it as it is made",
+                    extra={"session_id": self.session_id, "error": str(err)},
+                )
+        # The booked time counts from when the candidate hears the bot, not
+        # from while the greeting audio was still being prepared.
         self._mark_interview_started()
         self.transcript_log.append(
             {
                 "interaction_type": "greeting",
-                "bot_speech": GREETING_TEXT,
+                "bot_speech": greeting,
                 "candidate_answer": "",
             }
         )
-        await self.speak(GREETING_TEXT)
+        await self.speak(greeting)
         self._begin_listening()
 
     async def candidate_joined(self) -> None:
@@ -332,7 +363,7 @@ class PipecatInterviewPolicy:
         cached (see KokoroSynthesizer.warm). Never raises: a warm-up failure
         must fall back to normal on-demand synthesis, not break the session.
         """
-        texts = known_bot_texts(self.questions)
+        texts = known_bot_texts(self.questions, [getattr(self, "greeting_text", None)])
         try:
             await self.tts_cache_warmer(texts)
         except asyncio.CancelledError:

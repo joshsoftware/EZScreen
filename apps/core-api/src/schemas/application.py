@@ -96,6 +96,7 @@ class ApplicantListItem(BaseModel):
     source: str
     candidate_yoe: float | None = None
     resume_score: Decimal | None = None
+    interview_score: float | None = None
     first_name: str | None = None
     last_name: str | None = None
     email: str | None = None

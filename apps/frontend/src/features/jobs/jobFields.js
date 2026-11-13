@@ -95,10 +95,14 @@ export const EMPTY_JOB_FORM = {
   job_type: '',
   work_type: '',
   location: '',
+  role_intro: '',
   experience_min: '',
   experience_max: '',
   status: 'draft',
 }
+
+// The AI interviewer reads the role intro aloud, so it stays a few sentences.
+export const ROLE_INTRO_MAX_LENGTH = 500
 
 const FORM_PREFILL_KEYS = [
   'title',
@@ -316,6 +320,7 @@ export function jobToFormValues(job) {
     job_type: job.job_type ?? '',
     work_type: job.work_type ?? '',
     location: job.location ?? '',
+    role_intro: job.role_intro ?? '',
     experience_min: job.experience_min == null ? '' : String(job.experience_min),
     experience_max: job.experience_max == null ? '' : String(job.experience_max),
     status: job.status ?? 'draft',
@@ -428,6 +433,7 @@ const SECTION_FIELD_LABELS = {
 export function formValuesToPayload(values) {
   assertMeaningfulText('Job title', values.title, { required: true })
   assertMeaningfulText('Location', values.location)
+  assertMeaningfulText('Role intro for the AI interviewer', values.role_intro)
 
   for (const [key, label] of Object.entries(SECTION_FIELD_LABELS)) {
     assertMeaningfulText(label, values[key])
@@ -460,6 +466,7 @@ export function formValuesToPayload(values) {
     job_type: emptyToNull(values.job_type),
     work_type: emptyToNull(values.work_type),
     location: emptyToNull(values.location),
+    role_intro: emptyToNull(values.role_intro),
     experience_min: experienceMin,
     experience_max: experienceMax,
     status: values.status || 'draft',
