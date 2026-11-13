@@ -319,6 +319,14 @@ class KokoroTTSService(TTSService):
         """Pre-synthesize known bot text for this session. See KokoroSynthesizer.warm."""
         await self.synthesizer.warm(texts)
 
+    async def prepare_speech(self, text: str) -> None:
+        """Synthesize `text` fully, ahead of background warming, so speaking
+        it next plays from the cache in one go instead of phrase by phrase
+        (synthesis here is slower than playback, so a long line made on the
+        fly comes out with pauses between its sentences)."""
+        async for _ in self.synthesizer.synthesize(text):
+            pass
+
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         async for audio in self.synthesizer.synthesize(text):
             yield TTSAudioRawFrame(

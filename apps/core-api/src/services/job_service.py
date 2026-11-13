@@ -411,6 +411,7 @@ def clone_job(
         job_type=source.job_type,
         work_type=source.work_type,
         location=source.location,
+        role_intro=source.role_intro,
         experience_min=source.experience_min,
         experience_max=source.experience_max,
         skills=copy.deepcopy(source.skills) if source.skills is not None else None,

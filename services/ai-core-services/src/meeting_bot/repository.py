@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import select, text
 from src.core.logger import logger
 from src.db.connection import AsyncSessionLocal
 from src.db.models import DBInterviewAnalysis, DBInterviewSession
@@ -61,6 +61,43 @@ class InterviewSessionRepository:
         if not isinstance(evaluations, list):
             return []
         return [item for item in evaluations if isinstance(item, dict)]
+
+    async def get_interview_intro(self, application_id: str) -> dict | None:
+        """What the bot says about the company and role when it starts:
+        candidate first name, company name and details, job title and the
+        job's role intro. None when it can't be read (standard greeting)."""
+        query = text(
+            "SELECT u.first_name, o.name, o.settings->>'company_details', j.title, j.role_intro "
+            "FROM applications a "
+            "JOIN users u ON u.id = a.candidate_id "
+            "JOIN job_descriptions j ON j.id = a.job_description_id "
+            "JOIN organizations o ON o.id = j.organization_id "
+            "WHERE a.id = :application_id"
+        )
+        params = {"application_id": str(application_id)}
+        try:
+            session = AsyncSessionLocal()
+            if hasattr(session, "__aenter__"):
+                async with session:
+                    row = (await session.execute(query, params)).first()
+            else:
+                with session:
+                    row = session.execute(query, params).first()
+        except Exception as err:
+            logger.warning(
+                "Repository failed to fetch the interview intro details",
+                extra={"application_id": str(application_id), "error": str(err)},
+            )
+            return None
+        if not row:
+            return None
+        return {
+            "candidate_first_name": row[0],
+            "company_name": row[1],
+            "company_details": row[2],
+            "job_title": row[3],
+            "role_intro": row[4],
+        }
 
     async def get_by_bot_id(self, bot_id: str) -> Optional[InterviewSessionDetailResponse]:
         """Fetch session by bot_id inside interview_metadata."""

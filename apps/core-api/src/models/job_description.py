@@ -42,6 +42,9 @@ class JobDescription(Base):
         nullable=True,
     )
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # A few sentences about the role that the AI interviewer reads to the
+    # candidate when the screening starts.
+    role_intro: Mapped[str | None] = mapped_column(Text, nullable=True)
     experience_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     experience_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     skills: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

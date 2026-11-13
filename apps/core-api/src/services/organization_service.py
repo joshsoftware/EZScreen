@@ -122,12 +122,20 @@ def update_organization(
     if "domain" in payload and _domain_taken(db, payload["domain"], exclude_id=org.id):
         raise ValueError("Domain already in use")
     fit_labels = payload.pop("fit_labels", None)
+    has_company_details = "company_details" in payload
+    company_details = payload.pop("company_details", None)
     for key, value in payload.items():
         setattr(org, key, value)
-    if fit_labels is not None:
+    if fit_labels is not None or has_company_details:
         merged = dict(org.settings or DEFAULT_ORG_SETTINGS)
-        merged["fit_labels"] = fit_labels
-        merged.pop("fit_thresholds", None)
+        if fit_labels is not None:
+            merged["fit_labels"] = fit_labels
+            merged.pop("fit_thresholds", None)
+        if has_company_details:
+            if company_details:
+                merged["company_details"] = company_details
+            else:
+                merged.pop("company_details", None)
         # Reassign so SQLAlchemy detects JSONB mutation.
         org.settings = merged
     db.add(org)

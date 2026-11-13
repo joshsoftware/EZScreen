@@ -67,9 +67,15 @@ def coerce_questions_list(raw: Any) -> list[dict]:
     return [item for item in items if isinstance(item, dict) and item.get("question")]
 
 
-def known_bot_texts(questions: list[dict]) -> list[str]:
-    """Every deterministic string PipecatInterviewPolicy will speak for this session."""
-    texts = [
+def known_bot_texts(questions: list[dict], extra_texts: list[str] | tuple = ()) -> list[str]:
+    """Every deterministic string PipecatInterviewPolicy will speak for this
+    session; `extra_texts` adds its own (e.g. its personalised greeting).
+
+    The personalised greeting comes first: it is said first, and it is long
+    (company and role details), so it must be ready before anything else.
+    """
+    texts = [text for text in extra_texts if text]
+    texts += [
         GREETING_TEXT,
         CLOSING_TEXT,
         SILENCE_PROMPT_TEXT,
@@ -82,7 +88,7 @@ def known_bot_texts(questions: list[dict]) -> list[str]:
     ]
     texts.extend(FILLER_TEXTS)
     texts.extend(q.get("question", "") for q in questions if q.get("question"))
-    return texts
+    return list(dict.fromkeys(texts))
 
 
 class _PrewarmEntry:
@@ -136,6 +142,7 @@ class TtsPrewarmRegistry:
         questions: list[dict],
         *,
         join_at: datetime | None,
+        extra_texts: list[str] | tuple = (),
     ) -> None:
         """Fire a background pre-warm job timed to finish shortly before join_at.
 
@@ -143,7 +150,7 @@ class TtsPrewarmRegistry:
         never raises: any failure is logged and simply leaves nothing in the
         registry, so the session-start warm-up covers it instead.
         """
-        texts = known_bot_texts(questions)
+        texts = known_bot_texts(questions, extra_texts)
         if not texts:
             return
         delay = self._compute_delay(join_at, self._lead_seconds)

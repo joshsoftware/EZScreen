@@ -4,6 +4,7 @@ from src.core.config import settings
 from src.meeting_bot.repository import interview_session_repo
 from src.meeting_bot.attendee import attendee_client
 from src.meeting_bot.connection_watchdog import bot_connection_watchdog
+from src.screening_pipeline.prompts import build_greeting
 from src.screening_pipeline.tts_prewarm import coerce_questions_list, tts_prewarm_registry
 from src.meeting_bot.schemas import (
     AttendeeAudioSettings,
@@ -84,8 +85,17 @@ class AttendeeBotClient:
             questions = coerce_questions_list(
                 getattr(session_detail, "generated_questions", None)
             )
+            application_id = getattr(session_detail, "application_id", None)
+            intro = (
+                await interview_session_repo.get_interview_intro(application_id)
+                if application_id
+                else None
+            )
             tts_prewarm_registry.schedule(
-                request.interview_session_id, questions, join_at=scheduled_at_dt
+                request.interview_session_id,
+                questions,
+                join_at=scheduled_at_dt,
+                extra_texts=[build_greeting(**intro)] if intro else (),
             )
 
         return DispatchBotResponse(
