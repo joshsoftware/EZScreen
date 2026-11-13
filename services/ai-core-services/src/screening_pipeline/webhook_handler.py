@@ -76,21 +76,43 @@ async def process_state_change(payload: Dict[str, Any]):
         await update_session_status(session.id, "failed")
 
 
-async def _handle_participant_join(bot_id: str) -> None:
-    """Someone (the candidate) joined: the waiting bot starts the interview.
+async def _handle_participant_join(bot_id: str, data: Dict[str, Any]) -> None:
+    """Start the waiting interview only when the candidate joins.
 
-    Attendee never reports the bot itself, and people already in the call
-    are reported as soon as the bot joins, possibly before the runtime
-    exists, so presence is remembered for the runtime's start.
+    Attendee gives a joiner's display name and whether they host the meeting
+    (no email), so the candidate is recognised by name; the host, HR or
+    observers and note-taker bots never start the interview. Attendee never
+    reports the bot itself, and people already in the call are reported as
+    soon as the bot joins, possibly before the runtime exists, so presence is
+    remembered for the runtime's start.
     """
     session = await interview_session_repo.get_by_bot_id(bot_id)
     if not session:
         return
     from src.screening_pipeline.audio_websocket import active_sessions
-    from src.screening_pipeline.candidate_presence import mark_candidate_joined
+    from src.screening_pipeline.candidate_presence import apply_participant_event
 
-    mark_candidate_joined(str(session.id))
-    runtime = active_sessions.get(str(session.id))
+    session_id = str(session.id)
+    name = str(data.get("participant_name") or "")
+    is_host = data.get("participant_is_host") is True
+    first_name, last_name = await interview_session_repo.get_candidate_name(session.application_id)
+    is_candidate = apply_participant_event(session_id, data, first_name, last_name)
+    if not is_candidate:
+        logger.info(
+            "Participant joined who is not the candidate; still waiting",
+            extra={
+                "session_id": session_id,
+                "participant_name": name,
+                "is_host": is_host,
+            },
+        )
+        return
+
+    logger.info(
+        "Candidate joined the meeting",
+        extra={"session_id": session_id, "participant_name": name},
+    )
+    runtime = active_sessions.get(session_id)
     if runtime:
         await runtime.policy.candidate_joined()
 
@@ -107,7 +129,7 @@ async def process_participant_event(payload: Dict[str, Any]):
         logger.debug("Barge-in detected via webhook", extra={"bot_id": bot_id})
 
     if event in {"join", "participant_join", "participant_joined", "joined"} and bot_id:
-        await _handle_participant_join(bot_id)
+        await _handle_participant_join(bot_id, {**data, "event_type": "join"})
         return
 
     # Provider event spelling varies by meeting platform, so accept the
@@ -119,6 +141,10 @@ async def process_participant_event(payload: Dict[str, Any]):
     if not session:
         logger.warning("Participant event for unknown bot", extra={"bot_id": bot_id, "event": event})
         return
+
+    from src.screening_pipeline.candidate_presence import remove_participant
+
+    remove_participant(str(session.id), data.get("participant_uuid"))
 
     # A meeting can include recruiters or observers.  Never terminate an
     # interview merely because an arbitrary participant left; the dispatch
