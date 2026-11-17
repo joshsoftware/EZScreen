@@ -1,3 +1,4 @@
+from typing import Any
 from datetime import datetime, timezone
 from src.core.logger import logger
 from src.core.config import settings
@@ -15,6 +16,47 @@ from src.meeting_bot.schemas import (
     BotStatusResponse,
     LeaveBotResponse,
 )
+
+
+# Attendee keeps a bot in the meeting until it is alone, and by default has no
+# time limit. On 14 Nov two forgotten bots stayed ~4 hours because an AI
+# note-taker ("Nikhil's Assistant") sat in the meeting. So every bot gets:
+# * a maximum running time: the booked interview plus this many minutes
+#   (Attendee starts the bot ~5 min early; then the wait for the candidate,
+#   the interview, and the 1-2 minute overrun for the final question);
+BOT_EXTRA_MINUTES = 25
+DEFAULT_INTERVIEW_MINUTES = 30
+# * note-taker / recorder names counted as bots, so our bot also leaves when
+#   only bots are left. Attendee matches whole words in the display name.
+NOTE_TAKER_KEYWORDS = [
+    "assistant",
+    "notetaker",
+    "notetakers",
+    "bot",
+    "recorder",
+    "otter.ai",
+    "otter",
+    "fireflies.ai",
+    "fireflies",
+    "fathom",
+    "read.ai",
+    "tldv",
+    "tl;dv",
+    "meetgeek",
+    "transcriber",
+]
+
+
+def automatic_leave_settings(duration_minutes: Any) -> dict:
+    minutes = (
+        duration_minutes
+        if isinstance(duration_minutes, (int, float)) and not isinstance(duration_minutes, bool) and duration_minutes > 0
+        else DEFAULT_INTERVIEW_MINUTES
+    )
+    return {
+        "max_uptime_seconds": int((minutes + BOT_EXTRA_MINUTES) * 60),
+        "bot_keywords": NOTE_TAKER_KEYWORDS,
+    }
 
 
 class AttendeeBotClient:
@@ -56,8 +98,13 @@ class AttendeeBotClient:
         if not meeting_url:
             meeting_url = "https://meet.google.com/ezs-screener-demo"
 
+        session_meta = getattr(session_detail, "interview_metadata", None) if session_detail else None
+        duration_minutes = (
+            session_meta.get("duration_minutes") if isinstance(session_meta, dict) else None
+        )
         attendee_req = AttendeeScheduleBotRequest(
             meeting_url=meeting_url,
+            automatic_leave_settings=automatic_leave_settings(duration_minutes),
             bot_name="ezscreener",
             join_at=scheduled_at,
             transcription_settings={

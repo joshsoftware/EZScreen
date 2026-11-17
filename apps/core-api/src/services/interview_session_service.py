@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -50,6 +51,8 @@ from src.services.recording_import_service import (
 )
 from src.services.storage_service import create_presigned_recording_url
 from src.services.session_question_service import generate_candidate_screening_questions
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "schedule_interview_session",
@@ -661,17 +664,24 @@ def reschedule_interview_session(
     )
     previous_status = application.status
 
+    old_meta = session.interview_metadata if isinstance(session.interview_metadata, dict) else {}
+    old_bot_id = old_meta.get("bot_id") if isinstance(old_meta.get("bot_id"), str) else None
     if session.status == InterviewStatus.in_progress:
         # The bot is in the meeting: stop that attempt (nothing is saved) and
         # take the bot out before this row is reused for the new booking.
-        live_meta = session.interview_metadata if isinstance(session.interview_metadata, dict) else {}
-        bot_id = live_meta.get("bot_id")
-        error = abort_screening_session(
-            interview_session_id=session.id,
-            bot_id=bot_id if isinstance(bot_id, str) else None,
-        )
+        error = abort_screening_session(interview_session_id=session.id, bot_id=old_bot_id)
         if error:
             raise ValueError(error)
+    elif old_bot_id and session.status in {InterviewStatus.scheduled, InterviewStatus.rescheduled}:
+        # The old booking's bot hasn't joined yet: cancel it, or it still
+        # joins the old meeting at the old time and runs up Attendee credits.
+        error = abort_screening_session(interview_session_id=session.id, bot_id=old_bot_id)
+        if error:
+            # Don't block HR; the new booking still goes ahead.
+            logger.warning(
+                "Could not cancel the old screening bot on reschedule",
+                extra={"session_id": str(session.id), "bot_id": old_bot_id, "error": error},
+            )
 
     job = application.job_description
     job_title = job.title if job is not None else "Role"

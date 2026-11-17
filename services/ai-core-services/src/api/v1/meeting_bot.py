@@ -34,17 +34,29 @@ async def dispatch_bot(request: DispatchBotRequest):
 
 @router.post("/abort", response_model=AbortSessionResponse, status_code=status.HTTP_200_OK)
 async def abort_session(request: AbortSessionRequest):
-    """Stop a live interview without saving it and take its bot out of the
-    meeting. core-api calls this when HR reschedules a session whose bot is
-    already in the meeting but nothing has been answered yet."""
+    """Called by core-api when HR reschedules: take the old booking's bot
+    away so it can't join the old meeting later.
+
+    * A bot that hasn't joined yet is cancelled with Attendee. Without this
+      it still joined at the old time and sat in the old meeting using
+      credits (two such bots ran ~4 hours on 14 Nov).
+    * A live interview is stopped without saving and its bot leaves.
+    """
     from src.screening_pipeline.audio_websocket import active_sessions
 
     runtime = active_sessions.get(request.interview_session_id)
     if runtime is not None:
         await runtime.policy.abort_for_reschedule()
     if request.bot_id:
-        # Best effort: the aborted runtime can no longer write to the session,
-        # and a bot that already left (stale "in progress") can't leave again.
+        if runtime is None and await bot_client.delete_bot(request.bot_id):
+            logger.info(
+                "Cancelled the old booking's bot before it joined",
+                extra={"session_id": request.interview_session_id, "bot_id": request.bot_id},
+            )
+            return AbortSessionResponse(interview_session_id=request.interview_session_id)
+        # Already joining or in the meeting (Attendee only cancels scheduled
+        # bots): make it leave. Best effort: a bot that already left can't
+        # leave again.
         left = await bot_client.leave_bot(request.bot_id)
         if left.status == "error":
             logger.warning(
