@@ -5,6 +5,7 @@ import { Skeleton } from '../../components/ui/Skeleton'
 import { cn } from '../../lib/cn'
 import { buildTimelineSteps } from './applicationTimeline'
 import { formatDateTime } from './jobFields'
+import { MIN_LEAD_MINUTES } from './screeningSchedule'
 
 function StepMarker({ state, icon }) {
   const styles = {
@@ -156,6 +157,9 @@ export function ApplicationTimelinePanel({
                     >
                       Schedule screening
                     </Button>
+                    <p className="mt-xs text-label-sm text-on-surface-variant">
+                      Book at least {MIN_LEAD_MINUTES} minutes ahead.
+                    </p>
                   </div>
                 ) : null}
                 {showRescheduleCta ? (
@@ -170,6 +174,9 @@ export function ApplicationTimelinePanel({
                     >
                       Reschedule
                     </Button>
+                    <p className="mt-xs text-label-sm text-on-surface-variant">
+                      Book at least {MIN_LEAD_MINUTES} minutes ahead.
+                    </p>
                   </div>
                 ) : null}
               </div>
