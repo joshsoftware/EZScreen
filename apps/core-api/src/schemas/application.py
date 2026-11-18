@@ -97,6 +97,9 @@ class ApplicantListItem(BaseModel):
     candidate_yoe: float | None = None
     resume_score: Decimal | None = None
     interview_score: float | None = None
+    # Latest screening's status (scheduled, in_progress, completed, no_show,
+    # failed, ...), so the list can show "Interview not attended" (Bug-47).
+    screening_status: str | None = None
     first_name: str | None = None
     last_name: str | None = None
     email: str | None = None

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from src.models.application import Application
+from src.models.enums import InterviewStatus
 from src.models.interview_analysis import InterviewAnalysis
+from src.models.interview_session import InterviewSession
 from src.schemas.application import (
     ApplicationDetailResponse,
     ApplicationResumeResponse,
@@ -45,7 +47,13 @@ def list_applicants(
         .limit(min(limit, 50))
     )
     applications = list(db.scalars(stmt).all())
-    interview_scores = _latest_interview_scores(db, [application.id for application in applications])
+    application_ids = [application.id for application in applications]
+    screening_statuses = _latest_screening_statuses(db, application_ids)
+    interview_scores = _latest_interview_scores(db, application_ids)
+    # A missed interview has no score: "—", not a red 0.0 (Bug-47).
+    for application_id, screening_status in screening_statuses.items():
+        if screening_status == InterviewStatus.no_show.value:
+            interview_scores[application_id] = None
     return [
         ApplicantListItem(
             id=application.id,
@@ -56,6 +64,7 @@ def list_applicants(
             candidate_yoe=application.candidate_yoe,
             resume_score=application.resume_score,
             interview_score=interview_scores.get(application.id),
+            screening_status=screening_statuses.get(application.id),
             first_name=application.candidate.first_name if application.candidate else None,
             last_name=application.candidate.last_name if application.candidate else None,
             email=application.candidate.email if application.candidate else None,
@@ -66,20 +75,46 @@ def list_applicants(
     ]
 
 
+def _latest_screening_statuses(db: Session, application_ids: list[UUID]) -> dict[UUID, str]:
+    """Each application's newest screening status, after marking screenings
+    whose time passed with nobody attending as no-show."""
+    if not application_ids:
+        return {}
+    from src.services.interview_session_service import mark_missed_screenings
+
+    sessions = list(
+        db.scalars(
+            select(InterviewSession)
+            .where(InterviewSession.application_id.in_(application_ids))
+            .order_by(InterviewSession.created_at.desc())
+        ).all()
+    )
+    mark_missed_screenings(db, sessions)
+    statuses: dict[UUID, str] = {}
+    for session in sessions:
+        statuses.setdefault(session.application_id, session.status.value)
+    return statuses
+
+
 def _latest_interview_scores(db: Session, application_ids: list[UUID]) -> dict[UUID, float | None]:
     """Overall screening score from each application's newest interview analysis."""
     if not application_ids:
         return {}
     score_text = InterviewAnalysis.analysis_result["final_summary"]["overall_score"].astext
+    # No scored answers (no-show, silent candidate, a new booking after one)
+    # means no interview score: "—", not 0.0 (Bug-47).
+    answered = func.jsonb_array_length(
+        func.coalesce(InterviewAnalysis.analysis_result["evaluations"], text("'[]'::jsonb"))
+    )
     stmt = (
-        select(InterviewAnalysis.application_id, score_text)
+        select(InterviewAnalysis.application_id, score_text, answered)
         .where(InterviewAnalysis.application_id.in_(application_ids))
         .distinct(InterviewAnalysis.application_id)
         .order_by(InterviewAnalysis.application_id, InterviewAnalysis.created_at.desc())
     )
     scores: dict[UUID, float | None] = {}
-    for application_id, raw_score in db.execute(stmt):
-        if raw_score is None or raw_score == "":
+    for application_id, raw_score, answered_count in db.execute(stmt):
+        if not answered_count or raw_score is None or raw_score == "":
             scores[application_id] = None
             continue
         try:
