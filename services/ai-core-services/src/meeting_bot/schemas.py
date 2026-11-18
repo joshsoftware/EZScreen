@@ -31,6 +31,8 @@ class AttendeeScheduleBotRequest(BaseModel):
     recording_settings: Optional[Dict[str, Any]] = Field(
         default_factory=lambda: {"format": "mp4"}
     )
+    # When Attendee makes the bot leave on its own (time limit, note-takers).
+    automatic_leave_settings: Optional[Dict[str, Any]] = None
 
 
 class LeaveBotResponse(BaseModel):
