@@ -43,6 +43,7 @@ from src.screening_pipeline.prompts import (
     SILENCE_PROMPT_TEXT,
     START_WITHOUT_REPLY_TEXT,
     RESUME_TEXT,
+    RESUME_REANSWER_TEXT,
 )
 
 
@@ -727,6 +728,7 @@ async def test_start_warms_tts_cache_with_greeting_closing_and_all_questions():
             MOVE_ON_TEXT,
             START_WITHOUT_REPLY_TEXT,
             RESUME_TEXT,
+            RESUME_REANSWER_TEXT,
             *FILLER_TEXTS,
             "What is a closure?",
             "Explain event loops.",

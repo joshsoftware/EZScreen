@@ -13,7 +13,7 @@ import pytest
 
 from src.screening_pipeline.finished_interviews import _finished_bots
 from src.screening_pipeline.pipecat_policy import PipecatInterviewPolicy
-from src.screening_pipeline.prompts import GREETING_TEXT, RESUME_TEXT
+from src.screening_pipeline.prompts import GREETING_TEXT, RESUME_REANSWER_TEXT, RESUME_TEXT
 
 QUESTIONS = [
     {"id": 1, "question": "Explain sagas.", "category": "must_have_matched"},
@@ -112,6 +112,7 @@ async def test_reconnect_mid_interview_continues_instead_of_greeting_again():
     policy = _policy()
     await _start(policy, _session(_saved_transcript()), [Q1_EVALUATION])
 
+    # Disconnected after Q1 was finished (Q2 not asked yet): just continue.
     assert _spoken(policy) == [RESUME_TEXT, "Explain circuit breakers."]
     assert GREETING_TEXT not in _spoken(policy)
     assert policy.analysis_evaluations == [Q1_EVALUATION]
@@ -229,7 +230,8 @@ async def test_answered_but_unscored_question_is_scored_not_asked_again():
     )
     await _start(policy, _session(_transcript_with_unscored_q2()), [Q1_EVALUATION])
 
-    assert _spoken_texts(policy) == [RESUME_TEXT, "Explain Kafka ordering."]  # Q3, not Q2 again
+    # Disconnected after the answer: "we got disconnected", then Q3, not Q2 again.
+    assert _spoken_texts(policy) == [RESUME_TEXT, "Explain Kafka ordering."]
     policy.evaluator.classify_and_evaluate.assert_awaited_once()
     assert policy.evaluator.classify_and_evaluate.await_args.kwargs["transcript"].startswith("Circuit breakers")
     assert [e["question_id"] for e in policy.analysis_evaluations] == [1, 2]
@@ -244,7 +246,7 @@ async def test_if_the_saved_answer_cannot_be_scored_the_question_is_asked_again(
     policy.evaluator.classify_and_evaluate = AsyncMock(side_effect=RuntimeError("llm down"))
     await _start(policy, _session(_transcript_with_unscored_q2()), [Q1_EVALUATION])
 
-    assert _spoken_texts(policy) == [RESUME_TEXT, "Explain circuit breakers."]
+    assert _spoken_texts(policy) == [RESUME_REANSWER_TEXT, "Explain circuit breakers."]
     await policy.end_interview("test")
 
 
@@ -255,5 +257,14 @@ async def test_a_question_with_no_saved_answer_is_still_asked_again():
     await _start(policy, _session(_transcript_with_unscored_q2(answer="")), [Q1_EVALUATION])
 
     policy.evaluator.classify_and_evaluate.assert_not_awaited()
-    assert _spoken_texts(policy) == [RESUME_TEXT, "Explain circuit breakers."]
+    # Cut off mid-answer: the candidate is asked to answer it again.
+    assert _spoken_texts(policy) == [RESUME_REANSWER_TEXT, "Explain circuit breakers."]
     await policy.end_interview("test")
+
+
+def test_the_two_reconnect_messages():
+    assert RESUME_TEXT == "Sorry about that, we got disconnected."
+    assert RESUME_REANSWER_TEXT == (
+        "Sorry about that, we got disconnected, and your last answer wasn't recorded properly. "
+        "Could you please answer this question again?"
+    )

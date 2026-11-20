@@ -165,7 +165,13 @@ START_WITHOUT_REPLY_TEXT = "Let's get started with the first question."
 # Spoken instead of the greeting when the bot reconnects to an interview that
 # was already underway (the service restarted mid-interview), followed by the
 # next unanswered question.
-RESUME_TEXT = "Sorry about that, we got disconnected for a moment. Let's continue where we left off."
+RESUME_TEXT = "Sorry about that, we got disconnected."
+# Said instead when the disconnect cut the candidate off mid-answer: that
+# question is asked again.
+RESUME_REANSWER_TEXT = (
+    "Sorry about that, we got disconnected, and your last answer wasn't recorded properly. "
+    "Could you please answer this question again?"
+)
 # Prompt twice at 30-second intervals, then close after the final 30-second
 # unanswered interval (90 seconds total).
 MAX_SILENCE_PROMPTS = 2

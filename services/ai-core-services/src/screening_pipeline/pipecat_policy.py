@@ -37,6 +37,7 @@ from src.screening_pipeline.prompts import (
     MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
     REPEAT_QUESTION_PREFIX_TEXT,
+    RESUME_REANSWER_TEXT,
     RESUME_TEXT,
     SILENCE_PROMPT_SECONDS,
     SILENCE_PROMPT_TEXT,
@@ -285,15 +286,20 @@ class PipecatInterviewPolicy:
         for qa_entry, evaluation in self._resume_scores_to_save:
             self._persist_question(qa_entry, evaluation)
         self._resume_scores_to_save = []
+        # A question that was asked but has no score (and no saved answer to
+        # score) was cut off mid-answer: say so before asking it again.
+        # Otherwise the disconnect came after an answer: just continue.
+        cut_off_mid_answer = bool(asked_ids - answered_ids)
+        resume_text = RESUME_REANSWER_TEXT if cut_off_mid_answer else RESUME_TEXT
         self.transcript_log.append(
-            {"interaction_type": "resume", "bot_speech": RESUME_TEXT, "candidate_answer": ""}
+            {"interaction_type": "resume", "bot_speech": resume_text, "candidate_answer": ""}
         )
         logger.info(
             "Resuming an interview that was already underway",
             extra={"session_id": self.session_id, "answered_questions": len(evaluations)},
         )
         self._mark_interview_started()
-        await self.speak(RESUME_TEXT)
+        await self.speak(resume_text)
         await self._ask_next_question()
         return True
 
