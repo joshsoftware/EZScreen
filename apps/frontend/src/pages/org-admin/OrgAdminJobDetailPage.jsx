@@ -542,7 +542,7 @@ export function OrgAdminJobDetailPage() {
           onClick={() => setFitFilter('all')}
         />
         <StatCard
-          label="Scored"
+          label="Resume scored"
           value={String(screenedCount)}
           selected={fitFilter === 'screened'}
           onClick={() => setFitFilter('screened')}

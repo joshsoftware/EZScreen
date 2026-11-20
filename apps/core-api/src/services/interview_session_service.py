@@ -55,6 +55,7 @@ from src.services.session_question_service import generate_candidate_screening_q
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "mark_missed_screenings",
     "schedule_interview_session",
     "reschedule_interview_session",
     "get_interview_session",
@@ -780,6 +781,57 @@ def reschedule_interview_session(
         meeting_url=metadata.get("gmeet_link") if isinstance(metadata.get("gmeet_link"), str) else None,
     )
     return session
+
+
+# A booked screening nobody attended (the bot never ran, or nothing reported
+# back) is marked "not attended" once its booked end plus this grace period
+# has passed, instead of showing "Screening scheduled" forever (Bug-47).
+MISSED_SCREENING_GRACE_MINUTES = 30
+_DEFAULT_SCREENING_MINUTES = 30
+
+
+def _booked_minutes(session: InterviewSession) -> int:
+    meta = session.interview_metadata if isinstance(session.interview_metadata, dict) else {}
+    minutes = meta.get("duration_minutes")
+    if isinstance(minutes, (int, float)) and not isinstance(minutes, bool) and minutes > 0:
+        return int(minutes)
+    return _DEFAULT_SCREENING_MINUTES
+
+
+def mark_missed_screenings(db: Session, sessions: list[InterviewSession]) -> None:
+    """Close screenings left open long after their booked time.
+
+    * Still "scheduled": nobody attended (the bot never ran) -> no-show.
+    * Still "in progress": the bot joined but its end was never reported
+      (ai-core restarted or was down) -> completed when answers were scored,
+      otherwise no-show, the same rule the bot itself uses.
+    """
+    now = datetime.now(timezone.utc)
+    for session in sessions:
+        open_statuses = (
+            InterviewStatus.scheduled,
+            InterviewStatus.rescheduled,
+            InterviewStatus.in_progress,
+        )
+        if session.status not in open_statuses or session.scheduled_at is None:
+            continue
+        overdue_after = session.scheduled_at + timedelta(
+            minutes=_booked_minutes(session) + MISSED_SCREENING_GRACE_MINUTES
+        )
+        if overdue_after.astimezone(timezone.utc) >= now:
+            continue
+        new_status = InterviewStatus.no_show
+        if session.status == InterviewStatus.in_progress and _scored_answer_count(session) > 0:
+            new_status = InterviewStatus.completed
+        logger.info(
+            "Closing a screening left open after its booked time",
+            extra={
+                "session_id": str(session.id),
+                "from": session.status.value,
+                "to": new_status.value,
+            },
+        )
+        update_interview_session_status(db, session=session, new_status=new_status)
 
 
 def update_interview_session_status(

@@ -188,17 +188,26 @@ function timelineEventTypes(timeline) {
   return new Set((Array.isArray(timeline) ? timeline : []).map((event) => event.event_type))
 }
 
-export function formatApplicationStatus(status, source, timeline) {
+// The latest screening's own outcome, for lists that have no timeline (Bug-47).
+const SCREENING_STATUS_LABELS = {
+  no_show: 'Interview not attended',
+  failed: 'Screening failed',
+  cancelled: 'Screening cancelled',
+  in_progress: 'Interview in progress',
+}
+
+export function formatApplicationStatus(status, source, timeline, screeningStatus) {
   if (!status) return '—'
   if (status === 'rejected') return 'Rejected'
   if (status === 'shortlist_for_l1') return 'Shortlisted for L1'
   if (status === 'interview_completed') return 'Interview completed'
+  if (SCREENING_STATUS_LABELS[screeningStatus]) return SCREENING_STATUS_LABELS[screeningStatus]
 
   const types = timelineEventTypes(timeline)
   // Outcome of the latest booking first: "Invite sent" stayed after the
   // interview had run (no-show, failed, in progress).
   const attempt = screeningAttemptEventTypes(timeline)
-  if (attempt.has('screening_no_show')) return 'No-show'
+  if (attempt.has('screening_no_show')) return 'Interview not attended'
   if (attempt.has('screening_failed')) return 'Screening failed'
   if (attempt.has('screening_cancelled')) return 'Screening cancelled'
   if (attempt.has('screening_in_progress')) return 'Interview in progress'
