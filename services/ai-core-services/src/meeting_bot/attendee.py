@@ -118,6 +118,24 @@ class AttendeeApiClient:
 
         return fallback_response
 
+    async def list_participant_events(self, bot_id: str) -> list[dict]:
+        """Every join/leave/speech event Attendee has recorded for the bot's
+        meeting, oldest first. Raises on API errors so the caller can retry."""
+        if not self.api_key:
+            return []
+        events: list[dict] = []
+        url: str | None = f"{self.api_url}/api/v1/bots/{bot_id}/participant_events"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            for _ in range(20):  # cursor pages; a screening has a handful of events
+                if not url:
+                    break
+                resp = await client.get(url, headers=self._get_headers())
+                resp.raise_for_status()
+                body = resp.json()
+                events.extend(item for item in body.get("results") or [] if isinstance(item, dict))
+                url = body.get("next")
+        return sorted(events, key=lambda item: item.get("timestamp_ms") or 0)
+
     async def get_recording_url(self, bot_id: str) -> str | None:
         """Short-lived download URL of the bot's meeting recording.
 

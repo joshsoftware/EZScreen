@@ -210,6 +210,7 @@ export function buildTimelineSteps(events, source) {
       id: event.id,
       title: BRANCH_LABELS[event.event_type],
       at: event.created_at,
+      note: typeof event.metadata?.note === 'string' ? event.metadata.note : null,
     }))
 
   return { steps, branches }

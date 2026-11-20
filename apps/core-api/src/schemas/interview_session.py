@@ -131,6 +131,8 @@ class RescheduleInterviewSessionRequest(BaseModel):
 
 class UpdateInterviewSessionStatusRequest(BaseModel):
     status: InterviewStatus
+    # Why, shown to HR on the timeline (e.g. "Candidate didn't join ...").
+    note: str | None = Field(default=None, max_length=500)
 
 
 class PreviousInterviewAttempt(BaseModel):

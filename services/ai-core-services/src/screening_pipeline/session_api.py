@@ -109,12 +109,16 @@ class SessionApiClient:
         if settings.internal_service_token:
             self.headers["X-Internal-Service-Token"] = settings.internal_service_token
 
-    async def update_status(self, status: str) -> bool:
-        """Mark the session terminal/in-progress through the existing Core API contract."""
+    async def update_status(self, status: str, note: str | None = None) -> bool:
+        """Mark the session terminal/in-progress through the existing Core API
+        contract; `note` is shown to HR on the application timeline."""
+        payload: Dict[str, Any] = {"status": status}
+        if note:
+            payload["note"] = note
         try:
             url = f"{self.base_url}/api/v1/interview-sessions/{self.session_id}/status"
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.patch(url, json={"status": status}, headers=self.headers)
+                response = await client.patch(url, json=payload, headers=self.headers)
                 if response.status_code in (200, 204):
                     return True
                 logger.error("Failed to update interview status", extra={
