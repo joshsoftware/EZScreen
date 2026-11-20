@@ -25,6 +25,10 @@ class InterviewAnalysisResponse(BaseModel):
     application_id: UUID
     interview_type: str | None = None
     recording_url: str | None = None
+    # Why there is or isn't a recording, so the page can say so instead of
+    # hiding the section (Bug-49): available | processing | failed | missing | none
+    recording_status: str | None = None
+    recording_note: str | None = None
     analysis_result: dict[str, Any] | None = None
     question_answer: list[Any] | dict[str, Any] | None = None
     conversation_transcript: list[Any] = Field(default_factory=list)

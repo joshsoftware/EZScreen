@@ -118,6 +118,25 @@ docker compose exec core-api python -m scripts.backfill_recording_imports --appl
 
 It queues every `completed` session that has a `bot_id` and no `recording_import`; ai-core's poller copies them within minutes.
 
+Copies that **failed** (for example `XMinioStorageFull` when the server disk was full) can be retried once the cause is fixed, with a fresh set of attempts. Only worth it while Attendee still has the file (a few days):
+
+```bash
+docker compose exec core-api python -m scripts.backfill_recording_imports --retry-failed          # dry run
+docker compose exec core-api python -m scripts.backfill_recording_imports --retry-failed --apply  # retry
+```
+
+## 8a. When there is no recording
+
+The analysis page no longer hides the "Session recording" section when there is no video (Bug-49). `GET .../analysis` returns `recording_status` and `recording_note`, and the page shows the note:
+
+| `recording_status` | Note shown to HR |
+|---|---|
+| `available` | (the video player) |
+| `processing` | "The recording is still being saved. Refresh the page in a few minutes." / "…available after the interview ends." |
+| `failed` | "The recording couldn't be saved because the server's storage was full." / "…the meeting service no longer had the file." / "…copying it from the meeting service failed." |
+| `none` | "There is no recording because the interview did not take place." (no-show, failed, cancelled) |
+| `missing` | "No recording was saved for this interview." (the copy was never scheduled, e.g. the `ended` webhook was missed) |
+
 ## 9. Capacity (MinIO on this host)
 
 Files stay until deleted or the disk fills. No retention policy is enforced yet.
@@ -132,12 +151,14 @@ Files stay until deleted or the disk fills. No retention policy is enforced yet.
 
 Resumes are negligible. Video dominates: plan backups and a retention policy (or a move to S3) before volume grows.
 
+**Staging, Nov 2026:** the server disk is only 29 GB, and old Docker images and build cache from deployments filled it, so recording copies failed (`XMinioStorageFull`). Deploy with `./scripts/deploy.sh`, which keeps only the previous version's images (for `./scripts/rollback.sh`) and deletes older images and build cache. Moving recordings to S3 is planned.
+
 ## 10. Out of scope
 
 - Calling Attendee `delete_data` after a successful copy
 - MinIO lifecycle / 2-year auto-delete
 - 720p or MP3 options
-- A live "importing recording…" indicator (the player appears once the copy is done; HR refreshes)
+- A live "importing recording…" indicator (the page shows a "still being saved" note; HR refreshes)
 
 ## 11. How to verify
 

@@ -36,6 +36,7 @@ from src.services.storage_service import build_recording_s3_key, recording_key_p
 
 __all__ = [
     "schedule_import",
+    "requeue_failed_imports",
     "claim_due_imports",
     "report_result",
     "recording_import_state",
@@ -161,6 +162,24 @@ def schedule_import(
     db.add(session)
     db.commit()
     return state
+
+
+def requeue_failed_imports(db: Session, session: InterviewSession, *, now: datetime) -> int:
+    """Put this session's failed recording copies back in the queue with a
+    fresh set of attempts (e.g. after the disk that refused them was freed).
+    Returns how many were re-queued. A copy whose file Attendee has since
+    deleted will simply fail again."""
+    requeued = 0
+    for slot, state in _slots(session):
+        bot_id = state.get("bot_id")
+        if state.get("status") != "failed" or not isinstance(bot_id, str) or not bot_id:
+            continue
+        _set_state(session, new_import_state(bot_id=bot_id, import_after=now), slot)
+        requeued += 1
+    if requeued:
+        db.add(session)
+        db.commit()
+    return requeued
 
 
 def _is_due(state: dict[str, Any], now: datetime) -> bool:
