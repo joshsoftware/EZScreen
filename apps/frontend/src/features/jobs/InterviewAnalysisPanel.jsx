@@ -420,6 +420,7 @@ function Scorecard({
   sessionStatus,
   summary,
   recordingUrl,
+  recordingNote,
 }) {
   const toneBox =
     tone === 'success'
@@ -525,6 +526,19 @@ function Scorecard({
           >
             Open recording in a new tab
           </a>
+        </div>
+      ) : recordingNote ? (
+        // Say why there's no recording instead of hiding the section (Bug-49).
+        <div className="flex flex-col gap-xs pt-xs border-t border-outline-variant/50">
+          <p className="font-label-md text-label-md text-on-surface-variant tracking-wide">
+            Session recording
+          </p>
+          <p className="flex items-start gap-xs text-body-sm text-on-surface-variant">
+            <span className="material-symbols-outlined text-[18px]" aria-hidden>
+              videocam_off
+            </span>
+            {recordingNote}
+          </p>
         </div>
       ) : null}
     </aside>
@@ -695,6 +709,7 @@ export function InterviewAnalysisPanel({
               sessionStatus={analysis.session_status}
               summary={summary}
               recordingUrl={analysis.recording_url}
+              recordingNote={analysis.recording_note}
             />
           </div>
 
