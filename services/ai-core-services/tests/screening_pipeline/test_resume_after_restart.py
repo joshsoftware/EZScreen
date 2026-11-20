@@ -201,3 +201,59 @@ async def test_each_finished_question_saves_the_transcript_after_its_score():
     snapshot = api.save_interview_metadata.await_args.args[0]
     assert snapshot[0]["question_id"] == 1
     assert snapshot[0]["candidate_answer"] == "Saga pattern..."
+
+
+# --- Bug-50: an answer saved just before the restart is scored, not asked again ---
+
+def _transcript_with_unscored_q2(answer="Circuit breakers stop calls to a failing service."):
+    return [
+        {"interaction_type": "greeting", "bot_speech": GREETING_TEXT, "candidate_answer": "Ready."},
+        {"interaction_type": "question", "question_id": 1, "bot_speech": "Explain sagas.",
+         "candidate_answer": "Sagas are...", "follow_ups": []},
+        {"interaction_type": "question", "question_id": 2, "bot_speech": "Explain circuit breakers.",
+         "candidate_answer": answer, "follow_ups": []},
+    ]
+
+
+def _spoken_texts(policy):
+    return [call.args[0] for call in policy.speech_output.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_answered_but_unscored_question_is_scored_not_asked_again():
+    """Anjali's screening: after "Sorry about that, we got disconnected" the
+    bot asked question 12 again although she had already answered it."""
+    policy = _policy()
+    policy.evaluator.classify_and_evaluate = AsyncMock(
+        return_value={"intent": "ANSWERING", "score": 6, "decision": "NEXT_QUESTION", "feedback": "ok"}
+    )
+    await _start(policy, _session(_transcript_with_unscored_q2()), [Q1_EVALUATION])
+
+    assert _spoken_texts(policy) == [RESUME_TEXT, "Explain Kafka ordering."]  # Q3, not Q2 again
+    policy.evaluator.classify_and_evaluate.assert_awaited_once()
+    assert policy.evaluator.classify_and_evaluate.await_args.kwargs["transcript"].startswith("Circuit breakers")
+    assert [e["question_id"] for e in policy.analysis_evaluations] == [1, 2]
+    await policy._flush_pending_persist()
+    policy.api_client.save_evaluation.assert_awaited()  # the new score is saved
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_if_the_saved_answer_cannot_be_scored_the_question_is_asked_again():
+    policy = _policy()
+    policy.evaluator.classify_and_evaluate = AsyncMock(side_effect=RuntimeError("llm down"))
+    await _start(policy, _session(_transcript_with_unscored_q2()), [Q1_EVALUATION])
+
+    assert _spoken_texts(policy) == [RESUME_TEXT, "Explain circuit breakers."]
+    await policy.end_interview("test")
+
+
+@pytest.mark.asyncio
+async def test_a_question_with_no_saved_answer_is_still_asked_again():
+    policy = _policy()
+    policy.evaluator.classify_and_evaluate = AsyncMock()
+    await _start(policy, _session(_transcript_with_unscored_q2(answer="")), [Q1_EVALUATION])
+
+    policy.evaluator.classify_and_evaluate.assert_not_awaited()
+    assert _spoken_texts(policy) == [RESUME_TEXT, "Explain circuit breakers."]
+    await policy.end_interview("test")

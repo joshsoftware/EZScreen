@@ -127,6 +127,8 @@ class PipecatInterviewPolicy:
         self._end_lock = asyncio.Lock()
         self._ending = False
         self.termination_reason: Optional[str] = None
+        # Saved-but-unscored answers scored while resuming, saved after.
+        self._resume_scores_to_save: list = []
         # "Let's move on…" waiting to be said before the next question.
         self._pending_transition_text: Optional[str] = None
         # When the candidate first heard the bot (greeting / resume): the
@@ -258,6 +260,15 @@ class PipecatInterviewPolicy:
             for evaluation in await interview_session_repo.get_saved_evaluations(self.session_id)
             if evaluation.get("question_id") in asked_ids
         ]
+        # A question answered just before the restart may have its answer in
+        # the saved transcript but no score yet (the old runtime saved its
+        # transcript while closing, mid-evaluation). Score that answer instead
+        # of asking the question again (Bug-50: the candidate was asked the
+        # same question twice after "Sorry about that, we got disconnected").
+        scored_from_transcript = await self._score_unscored_answers(
+            saved_transcript, {evaluation.get("question_id") for evaluation in evaluations}, len(evaluations)
+        )
+        evaluations = evaluations + scored_from_transcript
         if not evaluations:
             return False
 
@@ -271,6 +282,9 @@ class PipecatInterviewPolicy:
             for category, queue in initialize_queues(self.questions).items()
         }
         self.transcript_log = [dict(entry) for entry in saved_transcript if isinstance(entry, dict)]
+        for qa_entry, evaluation in self._resume_scores_to_save:
+            self._persist_question(qa_entry, evaluation)
+        self._resume_scores_to_save = []
         self.transcript_log.append(
             {"interaction_type": "resume", "bot_speech": RESUME_TEXT, "candidate_answer": ""}
         )
@@ -282,6 +296,60 @@ class PipecatInterviewPolicy:
         await self.speak(RESUME_TEXT)
         await self._ask_next_question()
         return True
+
+    async def _score_unscored_answers(
+        self, saved_transcript: list, scored_ids: set, already_scored: int
+    ) -> list:
+        """Score questions whose answer was saved but whose score was not.
+
+        Returns their evaluations (in interview order); the Q&A and evaluation
+        are saved once the transcript is restored. If scoring fails, the
+        question is left unscored and is asked again, as before.
+        """
+        self._resume_scores_to_save = []
+        questions_by_id = {q.get("id"): q for q in self.questions if isinstance(q, dict)}
+        evaluations = []
+        for entry in saved_transcript:
+            if not isinstance(entry, dict) or entry.get("interaction_type") != "question":
+                continue
+            question_id = entry.get("question_id")
+            answer = str(entry.get("candidate_answer") or "").strip()
+            question_obj = questions_by_id.get(question_id)
+            if question_id in scored_ids or not answer or question_obj is None:
+                continue
+            current_q = entry.get("bot_speech") or question_obj.get("question", "")
+            try:
+                result = await self.evaluator.classify_and_evaluate(
+                    current_question=current_q,
+                    transcript=answer,
+                    expected_keywords=", ".join(question_obj.get("expected_keywords", [])),
+                    answer_depth=question_obj.get("answer_depth", "partial_depth"),
+                )
+            except Exception as err:
+                logger.warning(
+                    "Could not score a saved answer on resume; asking it again",
+                    extra={"session_id": self.session_id, "question_id": question_id, "error": str(err)},
+                )
+                continue
+            if not isinstance(result, dict) or result.get("score") is None:
+                continue
+            qa_entry, evaluation = build_completed_question_payload(
+                question_obj=question_obj,
+                current_q=current_q,
+                transcript=answer,
+                primary_eval=None,
+                current_eval={**result, "decision": "NEXT_QUESTION"},
+                question_number=already_scored + len(evaluations) + 1,
+                follow_ups=_answered_follow_ups(entry.get("follow_ups")),
+            )
+            evaluations.append(evaluation)
+            self._resume_scores_to_save.append((qa_entry, evaluation))
+            scored_ids = scored_ids | {question_id}
+            logger.info(
+                "Scored an answer saved before the restart instead of asking again",
+                extra={"session_id": self.session_id, "question_id": question_id},
+            )
+        return evaluations
 
     def _mark_interview_started(self) -> None:
         if self._interview_started_at is None:
