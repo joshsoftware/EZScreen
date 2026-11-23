@@ -404,4 +404,5 @@ def get_interview_session(
     current_user: JobActor,
 ) -> InterviewSessionResponse:
     session = _get_session_for_org(db, session_id, current_user)
+    interview_session_service.mark_missed_screenings(db, [session])
     return interview_session_service.interview_session_to_response(session)

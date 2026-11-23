@@ -6,7 +6,7 @@ import { TranscriptTurn } from './InterviewAnalysisPanel'
 import { formatDateTime } from './jobFields'
 
 const ATTEMPT_OUTCOMES = {
-  no_show: { label: 'No-show', tone: 'warning' },
+  no_show: { label: 'Interview not attended', tone: 'warning' },
   completed: { label: 'No answers scored', tone: 'warning' },
   failed: { label: 'Screening failed', tone: 'danger' },
   // Rescheduled while the bot was still waiting in the meeting.

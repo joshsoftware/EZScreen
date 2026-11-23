@@ -92,11 +92,20 @@ export function ApplicantsTable({
   invalidateApplicationRef.current = invalidateApplication
   onRefreshRef.current = onRefresh
   const filterOptions = fitFilterOptions(fitLabels)
+  const [statusFilter, setStatusFilter] = useState('all')
+  const statusLabel = (applicant) =>
+    formatApplicationStatus(applicant.status, applicant.source, undefined, applicant.screening_status)
+  const statusOptions = useMemo(
+    () => [...new Set(applicants.map(statusLabel))].sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [applicants],
+  )
 
   const filteredApplicants = useMemo(() => {
     const needle = query.trim().toLowerCase()
     const matching = applicants.filter((applicant) => {
       if (!matchesFitFilter(applicant, fitFilter, fitLabels)) return false
+      if (statusFilter !== 'all' && statusLabel(applicant) !== statusFilter) return false
       if (!needle) return true
       const haystack = [candidateName(applicant), applicant.email, applicant.phone]
         .filter(Boolean)
@@ -111,7 +120,8 @@ export function ApplicantsTable({
       ...matching.filter((applicant) => applicantScore(applicant) == null),
       ...matching.filter((applicant) => applicantScore(applicant) != null),
     ]
-  }, [applicants, fitFilter, fitLabels, query])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applicants, fitFilter, fitLabels, query, statusFilter])
 
   useEffect(() => {
     if (!reevaluatingId || !reevaluationStartedAt) return undefined
@@ -255,6 +265,22 @@ export function ApplicantsTable({
               ))}
             </Select>
           </div>
+          <div className="w-[200px]">
+            <Select
+              id="applicant-status-filter"
+              label="Status"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              className="h-10"
+            >
+              <option value="all">All statuses</option>
+              {statusOptions.map((label) => (
+                <option key={label} value={label}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </div>
           <Button
             variant="secondary"
             icon="refresh"
@@ -347,7 +373,7 @@ export function ApplicantsTable({
                   {applicant.candidate_yoe == null ? '—' : applicant.candidate_yoe}
                 </td>
                 <td className="py-md px-md text-body-sm text-on-surface-variant">
-                  {formatApplicationStatus(applicant.status, applicant.source)}
+                  {statusLabel(applicant)}
                 </td>
                 <td className="py-md px-md text-body-sm text-on-surface-variant">
                   {formatDateTime(applicant.created_at)}

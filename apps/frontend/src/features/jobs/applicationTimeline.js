@@ -79,7 +79,7 @@ export const TIMELINE_LADDER = Object.freeze([
 
 const BRANCH_LABELS = {
   screening_rescheduled: 'Rescheduled',
-  screening_no_show: 'No-show',
+  screening_no_show: 'Interview not attended',
   screening_cancelled: 'Cancelled',
   screening_failed: 'Screening failed',
 }
