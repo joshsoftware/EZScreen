@@ -174,6 +174,36 @@ def _recording_playback_url(stored: str | None) -> str | None:
     return create_presigned_recording_url(stored)
 
 
+_NO_RECORDING_SESSION_STATUSES = {"no_show", "failed", "cancelled"}
+
+
+def recording_status(session: InterviewSession, has_recording: bool) -> tuple[str, str | None]:
+    """(status, note shown to HR) for the session's meeting recording."""
+    if has_recording:
+        return "available", None
+    from src.services.recording_import_service import recording_import_state
+
+    state = recording_import_state(session) or {}
+    import_status = state.get("status")
+    if import_status in {"pending", "in_progress"}:
+        return "processing", "The recording is still being saved. Refresh the page in a few minutes."
+    if import_status == "failed":
+        error = str(state.get("last_error") or "")
+        if "StorageFull" in error or "free drive" in error:
+            reason = "the server's storage was full"
+        elif any(mark in error for mark in ("not available", "404", "403", "NoSuchKey", "short-term")):
+            reason = "the meeting service no longer had the file"
+        else:
+            reason = "copying it from the meeting service failed"
+        return "failed", f"The recording couldn't be saved because {reason}."
+    session_status = session.status.value
+    if session_status == "in_progress":
+        return "processing", "The recording will be available after the interview ends."
+    if session_status in _NO_RECORDING_SESSION_STATUSES:
+        return "none", "There is no recording because the interview did not take place."
+    return "missing", "No recording was saved for this interview."
+
+
 def analysis_to_response(
     session: InterviewSession,
     analysis: InterviewAnalysis,
@@ -187,12 +217,15 @@ def analysis_to_response(
             else None
         )
     )
+    status_and_note = recording_status(session, bool(analysis.recording_url))
     return InterviewAnalysisResponse(
         id=analysis.id,
         interview_session_id=analysis.interview_session_id,
         application_id=analysis.application_id,
         interview_type=interview_type,
         recording_url=_recording_playback_url(analysis.recording_url),
+        recording_status=status_and_note[0],
+        recording_note=status_and_note[1],
         analysis_result=analysis.analysis_result,
         question_answer=analysis.question_answer,
         conversation_transcript=_conversation_transcript(session),
