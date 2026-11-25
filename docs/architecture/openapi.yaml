@@ -746,7 +746,7 @@ paths:
               properties:
                 status:
                   type: string
-                  enum: [applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected]
+                  enum: [applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected_low_score, rejected_screening]
                   example: interview_scheduled
       responses:
         '200':
@@ -1215,7 +1215,7 @@ components:
           example: 777e4567-e89b-12d3-a456-426614174000
         status:
           type: string
-          enum: [applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected]
+          enum: [applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected_low_score, rejected_screening]
           example: applied
         candidate_yoe:
           type: number

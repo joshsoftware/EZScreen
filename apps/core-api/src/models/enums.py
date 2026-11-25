@@ -37,7 +37,15 @@ class ApplicationStatus(str, enum.Enum):
     interview_scheduled = "interview_scheduled"
     interview_completed = "interview_completed"
     shortlist_for_l1 = "shortlist_for_l1"
-    rejected = "rejected"
+    # Rejected before any screening (on the job analysis score).
+    rejected_low_score = "rejected_low_score"
+    # Rejected after the screening interview (attended or not).
+    rejected_screening = "rejected_screening"
+
+
+REJECTED_APPLICATION_STATUSES = frozenset(
+    {ApplicationStatus.rejected_low_score, ApplicationStatus.rejected_screening}
+)
 
 
 class ApplicationSource(str, enum.Enum):

@@ -116,7 +116,11 @@ function lastMatching(matching) {
 function stepTitle(step, source, matchingEvents) {
   const last = lastMatching(matchingEvents)
   if (step.id === 'intake') return step.titleForSource(source)
-  if (step.id === 'decision' && last?.event_type === 'rejected') return 'Rejected'
+  if (step.id === 'decision' && last?.event_type === 'rejected') {
+    if (last.to_status === 'rejected_screening') return 'Rejected Screening'
+    if (last.to_status === 'rejected_low_score') return 'Rejected Low Score'
+    return 'Rejected'
+  }
   if (step.id === 'decision' && last?.event_type === 'shortlisted_for_l1') {
     return 'Shortlisted for L1'
   }

@@ -238,7 +238,7 @@ user_role: super_admin | organization_admin | hr | candidate
 job_status: draft | published | closed
 work_type: onsite | hybrid | remote
 job_type: part_time | full_time | contract
-application_status: applied | interview_scheduled | interview_completed | shortlist_for_l1 | rejected
+application_status: applied | interview_scheduled | interview_completed | shortlist_for_l1 | rejected_low_score | rejected_screening
 interview_type: screening_ai
 interview_status: scheduled | rescheduled | completed | no_show | cancelled | failed
 ```

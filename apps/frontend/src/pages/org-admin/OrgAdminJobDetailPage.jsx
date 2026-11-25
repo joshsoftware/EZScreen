@@ -85,6 +85,7 @@ export function OrgAdminJobDetailPage() {
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const [showEditJob, setShowEditJob] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
+  const [showDescription, setShowDescription] = useState(false)
   const [editSkills, setEditSkills] = useState({ must_have: [], good_to_have: [] })
   const [skillsSubmitting, setSkillsSubmitting] = useState(false)
   const [fitFilter, setFitFilter] = useState('all')
@@ -499,6 +500,13 @@ export function OrgAdminJobDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-sm">
             <Badge tone={jobStatusTone(job.status)}>{formatJobStatus(job.status)}</Badge>
+            <Button
+              variant="secondary"
+              icon="description"
+              onClick={() => setShowDescription(true)}
+            >
+              Job description
+            </Button>
             <Button variant="secondary" icon="content_copy" onClick={onCloneJob}>
               Clone
             </Button>
@@ -580,7 +588,14 @@ export function OrgAdminJobDetailPage() {
         </div>
       </Panel>
 
-      <JobParsedDetailPanel job={job} loading={false} error={null} />
+      <Modal
+        open={showDescription}
+        onClose={() => setShowDescription(false)}
+        title="Job description"
+        className="max-w-5xl w-[min(96vw,56rem)]"
+      >
+        <JobParsedDetailPanel job={job} loading={false} error={null} />
+      </Modal>
 
       <Modal
         open={showUploadModal}

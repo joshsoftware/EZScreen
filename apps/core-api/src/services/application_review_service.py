@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.application import Application
 from src.models.enums import (
     ApplicationStatus,
+    InterviewStatus,
     TimelineActorType,
     TimelineEventType,
 )
+from src.models.interview_session import InterviewSession
 from src.services.application_timeline_service import (
     append_timeline_event,
     assert_job_fit_ready,
@@ -63,6 +66,47 @@ def move_to_hr_review(
     return application
 
 
+# The screening is over (attended or not), so HR can decide on the candidate.
+_FINISHED_SCREENING_STATUSES = frozenset(
+    {
+        InterviewStatus.completed,
+        InterviewStatus.no_show,
+        InterviewStatus.failed,
+        InterviewStatus.cancelled,
+    }
+)
+
+
+def _latest_screening_status(db: Session, application_id: UUID) -> InterviewStatus | None:
+    stmt = (
+        select(InterviewSession.status)
+        .where(InterviewSession.application_id == application_id)
+        .order_by(InterviewSession.created_at.desc())
+        .limit(1)
+    )
+    return db.scalars(stmt).first()
+
+
+def _rejection_status(db: Session, application: Application) -> ApplicationStatus:
+    """Which rejection applies, from where the application is in screening.
+
+    Before any screening the decision rests on the job analysis score; after
+    the screening has finished it rests on the interview.
+    """
+    if application.status in _PRE_SCREENING_STATUSES:
+        return ApplicationStatus.rejected_low_score
+    if application.status == ApplicationStatus.interview_completed:
+        return ApplicationStatus.rejected_screening
+    if (
+        application.status == ApplicationStatus.interview_scheduled
+        and _latest_screening_status(db, application.id) in _FINISHED_SCREENING_STATUSES
+    ):
+        return ApplicationStatus.rejected_screening
+    raise ValueError(
+        "Application cannot be rejected while its screening is still scheduled or under way"
+    )
+
+
 def reject_application(
     db: Session,
     *,
@@ -73,18 +117,16 @@ def reject_application(
     types = timeline_event_types(db, application.id)
     assert_not_terminal(application, types)
 
-    # This slice: reject after fit / during HR review (pre-screening).
-    if application.status not in _PRE_SCREENING_STATUSES:
-        raise ValueError("Application cannot be rejected in its current status")
-
-    assert_job_fit_ready(
-        application,
-        types,
-        message="Job fit must complete before rejecting",
-    )
+    rejection_status = _rejection_status(db, application)
+    if rejection_status == ApplicationStatus.rejected_low_score:
+        assert_job_fit_ready(
+            application,
+            types,
+            message="Job fit must complete before rejecting",
+        )
 
     from_status = application.status
-    application.status = ApplicationStatus.rejected
+    application.status = rejection_status
     metadata = {"reason": reason.strip()} if reason and reason.strip() else None
     append_timeline_event(
         db,
@@ -93,7 +135,7 @@ def reject_application(
         actor_id=actor_id,
         actor_type=TimelineActorType.user,
         from_status=from_status,
-        to_status=ApplicationStatus.rejected,
+        to_status=rejection_status,
         metadata=metadata,
     )
     db.add(application)

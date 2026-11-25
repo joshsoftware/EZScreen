@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 
 from src.models.application import Application
 from src.models.application_timeline_event import ApplicationTimelineEvent
-from src.models.enums import ApplicationStatus, TimelineActorType, TimelineEventType
+from src.models.enums import (
+    REJECTED_APPLICATION_STATUSES,
+    ApplicationStatus,
+    TimelineActorType,
+    TimelineEventType,
+)
 
 __all__ = [
     "append_timeline_event",
@@ -70,7 +75,7 @@ def timeline_event_types(db: Session, application_id: UUID) -> set[str]:
 
 
 def assert_not_terminal(application: Application, types: set[str]) -> None:
-    if application.status == ApplicationStatus.rejected or "rejected" in types:
+    if application.status in REJECTED_APPLICATION_STATUSES or "rejected" in types:
         raise ValueError("Application is already rejected")
     if (
         application.status == ApplicationStatus.shortlist_for_l1

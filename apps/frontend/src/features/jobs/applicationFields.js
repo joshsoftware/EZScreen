@@ -181,7 +181,32 @@ const STATUS_LABELS = {
   interview_scheduled: 'Interview scheduled',
   interview_completed: 'Interview completed',
   shortlist_for_l1: 'Shortlisted for L1',
-  rejected: 'Rejected',
+  rejected_low_score: 'Rejected Low Score',
+  rejected_screening: 'Rejected Screening',
+}
+
+/** Rejected before screening (low score) or after it (screening). */
+export const REJECTED_STATUSES = Object.freeze(['rejected_low_score', 'rejected_screening'])
+
+export function isRejectedStatus(status) {
+  return REJECTED_STATUSES.includes(status)
+}
+
+/** Applicant list tabs, in display order. */
+export const APPLICANT_TABS = Object.freeze([
+  { id: 'interviews', label: 'Interviews' },
+  { id: 'scored', label: 'Scored' },
+  { id: 'rejected', label: 'Rejected' },
+])
+
+/**
+ * Which applicant list tab an application belongs in: not yet booked for a
+ * screening (including still awaiting a score), booked / interviewed, or rejected.
+ */
+export function applicantTab(applicant) {
+  if (isRejectedStatus(applicant?.status)) return 'rejected'
+  if (applicant?.status === 'applied') return 'scored'
+  return 'interviews'
 }
 
 function timelineEventTypes(timeline) {
@@ -198,7 +223,7 @@ const SCREENING_STATUS_LABELS = {
 
 export function formatApplicationStatus(status, source, timeline, screeningStatus) {
   if (!status) return '—'
-  if (status === 'rejected') return 'Rejected'
+  if (isRejectedStatus(status)) return STATUS_LABELS[status]
   if (status === 'shortlist_for_l1') return 'Shortlisted for L1'
   if (status === 'interview_completed') return 'Interview completed'
   if (SCREENING_STATUS_LABELS[screeningStatus]) return SCREENING_STATUS_LABELS[screeningStatus]
@@ -360,13 +385,42 @@ export function canShowInterviewAnalysis(timeline, sessionStatus = null) {
   )
 }
 
-export function canRejectApplication(detail, timeline) {
-  if (!detail) return false
-  if (detail.status === 'rejected' || detail.status === 'shortlist_for_l1') return false
+/** The latest screening ended (attended or not), so HR can decide on it. */
+function isScreeningFinished(timeline) {
+  const attempt = screeningAttemptEventTypes(timeline)
+  return (
+    attempt.has('screening_completed') ||
+    attempt.has('screening_no_show') ||
+    attempt.has('screening_failed') ||
+    attempt.has('screening_cancelled')
+  )
+}
+
+/**
+ * Mirrors core-api's reject rule: which rejection applies now, or null when
+ * the applicant cannot be rejected (already decided, scoring not done, or a
+ * screening still booked / under way).
+ * @returns {'rejected_low_score'|'rejected_screening'|null}
+ */
+export function rejectionStatusFor(detail, timeline) {
+  if (!detail) return null
+  if (isRejectedStatus(detail.status) || detail.status === 'shortlist_for_l1') return null
   const types = timelineEventTypes(timeline)
-  if (types.has('rejected') || types.has('shortlisted_for_l1')) return false
-  if (detail.status !== 'applied') return false
-  return types.has('job_fit') || Boolean(detail.job_fit_analysis)
+  if (types.has('rejected') || types.has('shortlisted_for_l1')) return null
+  if (detail.status === 'applied') {
+    return types.has('job_fit') || Boolean(detail.job_fit_analysis) ? 'rejected_low_score' : null
+  }
+  if (detail.status === 'interview_completed') return 'rejected_screening'
+  if (detail.status === 'interview_scheduled' && isScreeningFinished(timeline)) {
+    return 'rejected_screening'
+  }
+  return null
+}
+
+/** Job fit can be recalculated only until a screening is scheduled. */
+export function canRerunJobFit(detail, timeline) {
+  if (!detail || detail.status !== 'applied') return false
+  return !timelineEventTypes(timeline).has('screening_scheduled')
 }
 
 export function resolveMatchScore(detail) {
