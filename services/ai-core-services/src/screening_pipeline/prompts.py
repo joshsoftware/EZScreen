@@ -66,8 +66,16 @@ UNIFIED_SCREENING_SYSTEM = (
     "}"
 )
 
-# Greeting and closing messages
-GREETING_TEXT = "Hi! I am your interviewer for today's interview. We’ll begin with a few technical questions. Let me know when you’re ready."
+# Greeting and closing messages. The intro request ends the opening; the ready
+# line is spoken only after 15 seconds of silence (GREETING_REPLY_TIMEOUT_SECONDS).
+GREETING_INTRO_REQUEST_TEXT = (
+    "So, let's get started! Could you please introduce yourself and briefly "
+    "walk me through your technical experience?"
+)
+GREETING_READY_TEXT = "We’ll begin with a few technical questions. Let me know when you’re ready."
+GREETING_TEXT = (
+    "Hi! I am your interviewer for today's interview. " + GREETING_INTRO_REQUEST_TEXT
+)
 CLOSING_TEXT = "Thank you for your time today. Our HR team will be in touch shortly."
 # Interview length when the booking doesn't say (minutes), and how close to
 # the end the bot stops starting new questions, so it closes on time.
@@ -77,7 +85,7 @@ NO_NEW_QUESTION_IN_LAST_SECONDS = 120
 # categories (first that has one left), without a follow-up; running 1-2
 # minutes over the booked time for it is fine.
 FINAL_QUESTION_CATEGORIES = ("good_to_have", "lacking_skill")
-GREETING_CLOSING_TEXT = "We’ll begin with a few technical questions. Let me know when you’re ready."
+GREETING_CLOSING_TEXT = GREETING_INTRO_REQUEST_TEXT
 # HR's company / role text is read aloud as written; capped so the opening
 # stays short even if more was saved.
 INTRO_TEXT_MAX_CHARS = 500
@@ -154,7 +162,9 @@ REPEAT_QUESTION_LIMIT_TEXT = (
 SILENCE_PROMPT_SECONDS = 30
 # Bug-029: a candidate who never replies to the greeting got "Are you there?"
 # twice and the bot left without asking a single question. After this much
-# silence following the greeting, start the questions instead.
+# silence following the intro request, or after the candidate finishes their
+# introduction, ask if they're ready (GREETING_READY_TEXT). The same silence
+# again starts the questions.
 GREETING_REPLY_TIMEOUT_SECONDS = 15
 # The bot joins at the booked time but waits for the candidate before
 # greeting. A candidate who joined a few minutes late used to find the bot

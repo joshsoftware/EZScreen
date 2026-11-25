@@ -28,6 +28,7 @@ from src.screening_pipeline.prompts import (
     CLOSING_TEXT,
     FILLER_SCHEDULE_SECONDS,
     FILLER_TEXTS,
+    GREETING_READY_TEXT,
     GREETING_REPLY_TIMEOUT_SECONDS,
     GREETING_TEXT,
     MAX_CONVERSATIONAL_TURNS_PER_QUESTION,
@@ -97,6 +98,9 @@ class PipecatInterviewPolicy:
         self.questions: list = []
         # Opening line with the company / role details HR wrote (set on start).
         self.greeting_text: str = GREETING_TEXT
+        # Set once the 15s intro silence has already produced GREETING_READY_TEXT,
+        # so a second silence starts the questions instead of repeating it.
+        self._greeting_ready_prompted = False
         self.current_question_idx = 0
         self.is_active = False
         self.tts_cache_warmer = tts_cache_warmer
@@ -899,14 +903,35 @@ class PipecatInterviewPolicy:
         self._closing_reply_timeout_task = None
 
     def _awaiting_greeting_reply(self) -> bool:
-        """The greeting was said and the candidate hasn't replied at all yet."""
-        return (
-            self.current_interaction_state == "listening"
-            and bool(self.transcript_log)
-            and self.transcript_log[-1].get("interaction_type") == "greeting"
-            and not self.transcript_log[-1].get("candidate_answer")
-            and not self._answer_buffer
-        )
+        """Still on the opening, waiting for the intro or the ready reply."""
+        if (
+            self.current_interaction_state != "listening"
+            or not self.transcript_log
+            or self.transcript_log[-1].get("interaction_type") != "greeting"
+            or self._answer_buffer
+        ):
+            return False
+        entry = self.transcript_log[-1]
+        if not self._greeting_ready_prompted:
+            return not entry.get("candidate_answer")
+        return not self._greeting_ready_reply(entry)
+
+    def _greeting_ready_reply(self, entry: dict) -> str:
+        """What the candidate said after GREETING_READY_TEXT, if anything."""
+        for prompt in reversed(entry.get("silence_prompts") or []):
+            if prompt.get("bot_speech") == GREETING_READY_TEXT:
+                return str(prompt.get("candidate_reply") or "")
+        return ""
+
+    async def _say_greeting_ready(self) -> None:
+        """Ask the candidate to say when they're ready. Said once, after the
+        introduction or after 15 seconds of silence with no introduction."""
+        self._greeting_ready_prompted = True
+        if self.transcript_log:
+            prompts = self.transcript_log[-1].setdefault("silence_prompts", [])
+            if not any(prompt.get("bot_speech") == GREETING_READY_TEXT for prompt in prompts):
+                prompts.append({"bot_speech": GREETING_READY_TEXT, "candidate_reply": ""})
+        await self.speak(GREETING_READY_TEXT)
 
     async def _end_after_inactivity(self):
         """Prompt twice, then end after a third unanswered 30-second window."""
@@ -935,9 +960,24 @@ class PipecatInterviewPolicy:
                     # deadline once VAD confirms they actually finished.
                     await asyncio.sleep(CANDIDATE_SPEAKING_POLL_SECONDS)
                     continue
+                if awaiting_greeting_reply and not self._greeting_ready_prompted:
+                    # The opening asked for an introduction. Silence here is
+                    # not "start the questions": ask if they're ready, then
+                    # give them another full reply window.
+                    logger.info(
+                        "No reply to the introduction; asking if the candidate is ready",
+                        extra={"session_id": self.session_id},
+                    )
+                    await self._say_greeting_ready()
+                    if not self.is_active:
+                        return
+                    if self.current_interaction_state == "speaking":
+                        self.current_interaction_state = "listening"
+                    self._inactivity_cycle_started_at = asyncio.get_running_loop().time()
+                    continue
                 if awaiting_greeting_reply:
-                    # Bug-029: start the interview rather than waiting on a
-                    # candidate who hasn't said they're ready.
+                    # Bug-029: still no reply after the ready prompt, so start
+                    # the interview rather than leaving without a question.
                     logger.info(
                         "No reply to the greeting; starting the questions",
                         extra={"session_id": self.session_id},
@@ -1051,11 +1091,27 @@ class PipecatInterviewPolicy:
             return
 
         if self.transcript_log and self.transcript_log[-1].get("interaction_type") == "greeting":
-            # Same reasoning: _ask_next_question speaks the first real
-            # question directly, with no classify_and_evaluate call to wait
-            # on, so a filler must not still be armed when it does.
+            # No classify_and_evaluate on the opening, so a filler must not
+            # still be armed when the bot speaks next.
             self._cancel_filler_schedule()
-            self.transcript_log[-1]["candidate_answer"] = transcript
+            entry = self.transcript_log[-1]
+            if not self._greeting_ready_prompted:
+                # This reply is the introduction. Keep it, then ask if they're
+                # ready before the first question.
+                entry["candidate_answer"] = transcript
+                await self._say_greeting_ready()
+                if self.is_active:
+                    self._begin_listening()
+                return
+            # Reply to "let me know when you're ready". The introduction stays
+            # in candidate_answer; this acknowledgement is the ready prompt's reply.
+            for prompt in reversed(entry.get("silence_prompts") or []):
+                if (
+                    prompt.get("bot_speech") == GREETING_READY_TEXT
+                    and not prompt.get("candidate_reply")
+                ):
+                    prompt["candidate_reply"] = transcript
+                    break
             await self._ask_next_question()
             return
 

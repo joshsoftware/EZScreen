@@ -32,6 +32,7 @@ from src.screening_pipeline.prompts import (
     ANSWER_ACKNOWLEDGEMENT_TEXT,
     CLOSING_TEXT,
     FILLER_TEXTS,
+    GREETING_READY_TEXT,
     GREETING_TEXT,
     MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
@@ -78,6 +79,7 @@ def known_bot_texts(questions: list[dict], extra_texts: list[str] | tuple = ()) 
     texts = [text for text in extra_texts if text]
     texts += [
         GREETING_TEXT,
+        GREETING_READY_TEXT,
         CLOSING_TEXT,
         SILENCE_PROMPT_TEXT,
         ANSWER_ACKNOWLEDGEMENT_TEXT,

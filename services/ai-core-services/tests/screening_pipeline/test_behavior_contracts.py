@@ -33,6 +33,7 @@ from src.screening_pipeline.prompts import (
     CLOSING_REPLY_TIMEOUT_SECONDS,
     CLOSING_TEXT,
     FILLER_TEXTS,
+    GREETING_READY_TEXT,
     GREETING_TEXT,
     MAX_FOLLOW_UPS_PER_QUESTION,
     MAX_SILENCE_PROMPTS,
@@ -48,11 +49,15 @@ from src.screening_pipeline.prompts import (
 
 
 def test_interview_timing_and_prompt_contract_is_explicit():
-    # The greeting invites a reply ("Let me know when you're ready") and the
-    # first question follows it (START_WITHOUT_REPLY_TEXT if none comes).
+    # The greeting asks for an introduction. 15s of silence speaks
+    # GREETING_READY_TEXT; silence after that starts the first question.
     assert GREETING_TEXT == (
-        "Hi! I am your interviewer for today's interview. We’ll begin with a few "
-        "technical questions. Let me know when you’re ready."
+        "Hi! I am your interviewer for today's interview. "
+        "So, let's get started! Could you please introduce yourself and briefly "
+        "walk me through your technical experience?"
+    )
+    assert GREETING_READY_TEXT == (
+        "We’ll begin with a few technical questions. Let me know when you’re ready."
     )
     assert CLOSING_TEXT == (
         "Thank you for your time today. Our HR team will be in touch shortly."
@@ -720,6 +725,7 @@ async def test_start_warms_tts_cache_with_greeting_closing_and_all_questions():
     warmer.assert_awaited_once_with(
         [
             GREETING_TEXT,
+            GREETING_READY_TEXT,
             CLOSING_TEXT,
             SILENCE_PROMPT_TEXT,
             ANSWER_ACKNOWLEDGEMENT_TEXT,
@@ -1023,10 +1029,8 @@ async def test_filler_schedule_is_cancelled_the_instant_classify_and_evaluate_re
 
 @pytest.mark.asyncio
 async def test_greeting_reply_cancels_the_filler_schedule_immediately(monkeypatch):
-    """The greeting-reply shortcut in _process_speech never calls
-    classify_and_evaluate, so it must disarm any armed filler schedule right
-    away — otherwise a filler could still fire while _ask_next_question is
-    speaking the real first question."""
+    """The introduction is not scored. The filler schedule must be disarmed
+    before the ready line, or a filler can talk over it."""
     monkeypatch.setattr(
         "src.screening_pipeline.pipecat_policy.FILLER_SCHEDULE_SECONDS", [0.02]
     )
@@ -1040,12 +1044,39 @@ async def test_greeting_reply_cancels_the_filler_schedule_immediately(monkeypatc
     policy._ask_next_question = AsyncMock()
     policy._start_filler_schedule()
 
-    await policy._process_speech("hello")
+    await policy._process_speech("I have five years of Java experience.")
 
     assert policy._filler_task is None
     await asyncio.sleep(0.05)  # past the schedule's only offset
-    speech_output.assert_not_awaited()
+    speech_output.assert_awaited_once_with(GREETING_READY_TEXT)
+    policy._ask_next_question.assert_not_awaited()
+    assert policy.transcript_log[-1]["candidate_answer"] == "I have five years of Java experience."
+
+
+@pytest.mark.asyncio
+async def test_ready_reply_after_the_introduction_starts_the_first_question():
+    """Once the introduction is done and the ready line has been said, the
+    next reply starts the questions and does not replace the introduction."""
+    policy = PipecatInterviewPolicy(
+        "session-id", evaluator=MagicMock(), speech_output=AsyncMock()
+    )
+    policy.is_active = True
+    policy._greeting_ready_prompted = True
+    policy.transcript_log = [
+        {
+            "interaction_type": "greeting",
+            "bot_speech": "hi",
+            "candidate_answer": "I have five years of Java experience.",
+            "silence_prompts": [{"bot_speech": GREETING_READY_TEXT, "candidate_reply": ""}],
+        }
+    ]
+    policy._ask_next_question = AsyncMock()
+
+    await policy._process_speech("Yes, I'm ready.")
+
     policy._ask_next_question.assert_awaited_once()
+    assert policy.transcript_log[-1]["candidate_answer"] == "I have five years of Java experience."
+    assert policy.transcript_log[-1]["silence_prompts"][-1]["candidate_reply"] == "Yes, I'm ready."
 
 
 @pytest.mark.asyncio
@@ -1601,15 +1632,39 @@ def _greeted_policy(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_silence_after_the_intro_asks_when_they_are_ready(monkeypatch):
+    """15s of silence after the intro request speaks the ready line and
+    keeps waiting. It does not start the questions yet."""
+    policy = _greeted_policy(monkeypatch)
+
+    async def stop_after_ready_line(text):
+        if text == GREETING_READY_TEXT:
+            policy.is_active = False
+
+    policy.speech_output.side_effect = stop_after_ready_line
+    policy._begin_listening()
+
+    await asyncio.sleep(0.3)
+
+    policy.speech_output.assert_awaited_once_with(GREETING_READY_TEXT)
+    policy._ask_next_question.assert_not_awaited()
+    policy._cancel_inactivity_deadline()
+
+
+@pytest.mark.asyncio
 async def test_silent_candidate_still_gets_the_first_question(monkeypatch):
     """Bug-029: silence after the greeting ended the interview without a
-    single question; now the bot starts the questions itself."""
+    single question. The ready line comes first; silence after that still
+    starts the questions."""
     policy = _greeted_policy(monkeypatch)
     policy._begin_listening()
 
     await asyncio.sleep(0.3)
 
-    assert [c.args[0] for c in policy.speech_output.await_args_list] == [START_WITHOUT_REPLY_TEXT]
+    assert [c.args[0] for c in policy.speech_output.await_args_list] == [
+        GREETING_READY_TEXT,
+        START_WITHOUT_REPLY_TEXT,
+    ]
     policy._ask_next_question.assert_awaited_once()
     policy._cancel_inactivity_deadline()
 

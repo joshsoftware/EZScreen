@@ -9,6 +9,7 @@ from src.screening_pipeline.prompts import (
     ANSWER_ACKNOWLEDGEMENT_TEXT,
     CLOSING_TEXT,
     FILLER_TEXTS,
+    GREETING_READY_TEXT,
     GREETING_TEXT,
     MOVE_ON_TEXT,
     REPEAT_QUESTION_LIMIT_TEXT,
@@ -41,6 +42,7 @@ def test_known_bot_texts_includes_constants_and_question_text():
 
     assert texts == [
         GREETING_TEXT,
+        GREETING_READY_TEXT,
         CLOSING_TEXT,
         SILENCE_PROMPT_TEXT,
         ANSWER_ACKNOWLEDGEMENT_TEXT,
@@ -95,6 +97,7 @@ async def test_schedule_warms_and_claim_returns_the_finished_synthesizer():
     assert warm_calls == [
         [
             GREETING_TEXT,
+            GREETING_READY_TEXT,
             CLOSING_TEXT,
             SILENCE_PROMPT_TEXT,
             ANSWER_ACKNOWLEDGEMENT_TEXT,
