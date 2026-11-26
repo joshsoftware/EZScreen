@@ -100,11 +100,15 @@ class ApplicantListItem(BaseModel):
     # Latest screening's status (scheduled, in_progress, completed, no_show,
     # failed, ...), so the list can show "Interview not attended" (Bug-47).
     screening_status: str | None = None
+    # When the latest screening is booked for (the Interviews tab's date).
+    interview_scheduled_at: datetime | None = None
     first_name: str | None = None
     last_name: str | None = None
     email: str | None = None
     phone: str | None = None
     created_at: datetime | None = None
+    # Last change to the application, e.g. when it was rejected.
+    updated_at: datetime | None = None
 
 
 class JobFitRunResponse(BaseModel):

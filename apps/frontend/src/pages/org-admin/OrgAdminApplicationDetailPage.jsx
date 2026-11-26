@@ -20,7 +20,7 @@ import { PreviousInterviewsPanel } from '../../features/jobs/PreviousInterviewsP
 import { ResumePreviewButton } from '../../features/jobs/ResumeActions'
 import { useOrgSettings } from '../../features/org-admin/OrgSettingsContext'
 import {
-  canRejectApplication,
+  canRerunJobFit,
   canRescheduleScreening,
   canScheduleScreening,
   canShowInterviewAnalysis,
@@ -30,7 +30,9 @@ import {
   fitTone,
   formatApplicationStatus,
   interviewSessionIdFromTimeline,
+  isRejectedStatus,
   isScreeningLive,
+  rejectionStatusFor,
   resolveMatchScore,
   screeningSlotFromTimeline,
 } from '../../features/jobs/applicationFields'
@@ -118,15 +120,16 @@ export function OrgAdminApplicationDetailPage() {
   const applicantsHref = `/org-admin/jobs/${jobId}#applicants`
   const score = resolveMatchScore(detail)
   const busy = rerunning || rejecting
-  const canRerun =
-    Boolean(detail?.parsed_resume) &&
-    !busy &&
-    !mismatch &&
-    detail?.status !== 'rejected'
+  // Rerun fit is offered only until a screening is scheduled (not after it,
+  // nor once rejected).
+  const showRerun =
+    Boolean(detail?.parsed_resume) && !mismatch && canRerunJobFit(detail, timeline)
+  const canRerun = showRerun && !busy
   const showScheduleBtn =
     Boolean(detail) && !mismatch && canScheduleScreening(detail, timeline)
   const screeningSlot = screeningSlotFromTimeline(timeline, detail?.email)
-  const showReject = Boolean(detail) && !mismatch && canRejectApplication(detail, timeline)
+  const rejectionStatus = mismatch ? null : rejectionStatusFor(detail, timeline)
+  const showReject = rejectionStatus != null
   const sessionId =
     screeningSlot?.sessionId ?? interviewSessionIdFromTimeline(timeline, detail?.email)
 
@@ -294,7 +297,7 @@ export function OrgAdminApplicationDetailPage() {
           onSelect: () => setShowReschedule(true),
         }
       : null,
-    canRerun || Boolean(detail?.parsed_resume)
+    showRerun
       ? {
           id: 'rerun',
           label: 'Rerun fit',
@@ -368,7 +371,7 @@ export function OrgAdminApplicationDetailPage() {
             <Badge tone={fitTone(score, fitLabels)}>
               {fitLabel(score, fitLabels)}
             </Badge>
-            <Badge tone={detail.status === 'rejected' ? 'danger' : 'info'}>
+            <Badge tone={isRejectedStatus(detail.status) ? 'danger' : 'info'}>
               Status · {formatApplicationStatus(detail.status, detail.source, timeline)}
             </Badge>
             <ResumePreviewButton
@@ -470,8 +473,10 @@ export function OrgAdminApplicationDetailPage() {
         title="Reject this applicant?"
       >
         <p className="text-body-sm text-on-surface-variant mb-md">
-          This marks the application as rejected and updates the screening timeline. You can add an
-          optional reason for your records.
+          {rejectionStatus === 'rejected_screening'
+            ? 'This marks the application as Rejected Screening, based on the screening interview,'
+            : 'This marks the application as Rejected Low Score, based on the job analysis score,'}{' '}
+          and updates the screening timeline. You can add an optional reason for your records.
         </p>
         <Input
           id="reject-reason"

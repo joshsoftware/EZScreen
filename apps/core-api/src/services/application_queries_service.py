@@ -48,35 +48,40 @@ def list_applicants(
     )
     applications = list(db.scalars(stmt).all())
     application_ids = [application.id for application in applications]
-    screening_statuses = _latest_screening_statuses(db, application_ids)
+    latest_screenings = _latest_screenings(db, application_ids)
     interview_scores = _latest_interview_scores(db, application_ids)
     # A missed interview has no score: "—", not a red 0.0 (Bug-47).
-    for application_id, screening_status in screening_statuses.items():
-        if screening_status == InterviewStatus.no_show.value:
+    for application_id, screening in latest_screenings.items():
+        if screening.status == InterviewStatus.no_show:
             interview_scores[application_id] = None
-    return [
-        ApplicantListItem(
-            id=application.id,
-            job_description_id=application.job_description_id,
-            candidate_id=application.candidate_id,
-            status=application.status.value,
-            source=application.source.value,
-            candidate_yoe=application.candidate_yoe,
-            resume_score=application.resume_score,
-            interview_score=interview_scores.get(application.id),
-            screening_status=screening_statuses.get(application.id),
-            first_name=application.candidate.first_name if application.candidate else None,
-            last_name=application.candidate.last_name if application.candidate else None,
-            email=application.candidate.email if application.candidate else None,
-            phone=application.candidate.phone if application.candidate else None,
-            created_at=application.created_at,
+    items = []
+    for application in applications:
+        screening = latest_screenings.get(application.id)
+        items.append(
+            ApplicantListItem(
+                id=application.id,
+                job_description_id=application.job_description_id,
+                candidate_id=application.candidate_id,
+                status=application.status.value,
+                source=application.source.value,
+                candidate_yoe=application.candidate_yoe,
+                resume_score=application.resume_score,
+                interview_score=interview_scores.get(application.id),
+                screening_status=screening.status.value if screening else None,
+                interview_scheduled_at=screening.scheduled_at if screening else None,
+                first_name=application.candidate.first_name if application.candidate else None,
+                last_name=application.candidate.last_name if application.candidate else None,
+                email=application.candidate.email if application.candidate else None,
+                phone=application.candidate.phone if application.candidate else None,
+                created_at=application.created_at,
+                updated_at=application.updated_at,
+            )
         )
-        for application in applications
-    ]
+    return items
 
 
-def _latest_screening_statuses(db: Session, application_ids: list[UUID]) -> dict[UUID, str]:
-    """Each application's newest screening status, after marking screenings
+def _latest_screenings(db: Session, application_ids: list[UUID]) -> dict[UUID, InterviewSession]:
+    """Each application's newest screening session, after marking screenings
     whose time passed with nobody attending as no-show."""
     if not application_ids:
         return {}
@@ -90,10 +95,10 @@ def _latest_screening_statuses(db: Session, application_ids: list[UUID]) -> dict
         ).all()
     )
     mark_missed_screenings(db, sessions)
-    statuses: dict[UUID, str] = {}
+    latest: dict[UUID, InterviewSession] = {}
     for session in sessions:
-        statuses.setdefault(session.application_id, session.status.value)
-    return statuses
+        latest.setdefault(session.application_id, session)
+    return latest
 
 
 def _latest_interview_scores(db: Session, application_ids: list[UUID]) -> dict[UUID, float | None]:

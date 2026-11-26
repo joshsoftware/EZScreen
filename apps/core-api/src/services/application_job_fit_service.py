@@ -8,7 +8,12 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from src.models.application import Application
-from src.models.enums import ApplicationStatus, TimelineActorType, TimelineEventType
+from src.models.enums import (
+    REJECTED_APPLICATION_STATUSES,
+    ApplicationStatus,
+    TimelineActorType,
+    TimelineEventType,
+)
 from src.models.job_description import JobDescription
 from src.schemas.application import JobFitRunResponse
 from src.services.application_ai_service import call_match_resume_jd
@@ -190,6 +195,17 @@ def rerun_job_fit(
         raise LookupError("Job not found")
     if not isinstance(application.parsed_resume, dict):
         raise ValueError("Application has no parsed_resume to match")
+    # Once a screening is booked, its questions and the HR decision were made
+    # on this score; recalculating it would change the record under them.
+    if application.status in REJECTED_APPLICATION_STATUSES:
+        raise ValueError("Job fit cannot be recalculated for a rejected application")
+    if (
+        application.status != ApplicationStatus.applied
+        or "screening_scheduled" in timeline_event_types(db, application.id)
+    ):
+        raise ValueError(
+            "Job fit can only be recalculated before a screening is scheduled"
+        )
 
     apply_job_fit(
         db,

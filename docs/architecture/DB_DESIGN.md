@@ -24,7 +24,7 @@
 
 1. **JSONB for AI-Extracted Data**: `parsed_jd` (job_descriptions), `parsed_resume` (applications), `job_fit_analysis` (applications), `analysis_result` & `question_answer` (interview_analysis) use PostgreSQL JSONB — allows schema evolution without migrations and efficient querying.
 
-2. **Status-Driven Workflows**: State machines for JD lifecycle (`draft → published → closed`) and application lifecycle (`applied → interview_scheduled → shortlist_for_l1 / rejected`). All status transitions are validated at the application layer.
+2. **Status-Driven Workflows**: State machines for JD lifecycle (`draft → published → closed`) and application lifecycle (`applied → rejected_low_score`, or `applied → interview_scheduled → interview_completed → shortlist_for_l1 / rejected_screening`). All status transitions are validated at the application layer.
 
 3. **Role-Based Access**: User roles (`super_admin`, `organization_admin`, `hr`, `candidate`) are stored directly on the `users` table. Organization scoping is enforced via `organization_id` (null for `super_admin` and `candidate`).
 
@@ -228,7 +228,7 @@ erDiagram
         float candidate_yoe "nullable - denormalised"
         decimal resume_score "nullable - AI match score 0-100"
         jsonb matching_result "score_breakdown, match_score, matched_skills, missing_skills, must_have_experience, reasoning"
-        varchar status "enum: applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected"
+        varchar status "enum: applied, interview_scheduled, interview_completed, shortlist_for_l1, rejected_low_score, rejected_screening"
         timestamp applied_at "nullable"
         timestamp created_at
         timestamp updated_at
